@@ -1,3 +1,4 @@
 # Combined dev dependencies for backend + worker services.
 -r backend/requirements.txt
 -r worker/requirements.txt
+pytest==8.3.3

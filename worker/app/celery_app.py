@@ -1,18 +1,16 @@
-import os
 from celery import Celery
-from dotenv import load_dotenv
+from celery.schedules import crontab
 
-# Load root .env when running locally (repo root assumed)
-load_dotenv()
+from backend.app.core.config import settings
 
-broker = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
-backend = os.getenv("CELERY_RESULT_BACKEND", broker)
+broker = settings.CELERY_BROKER_URL
+backend = settings.CELERY_RESULT_BACKEND
 
 celery_app = Celery(
     "worker",
     broker=broker,
     backend=backend,
-    include=["app.tasks"],
+    include=["worker.app.tasks"],
 )
 
 celery_app.conf.update(
@@ -22,3 +20,14 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
 )
+
+celery_app.conf.beat_schedule = {
+    "dispatch-due-actions": {
+        "task": "actions.dispatch_due",
+        "schedule": crontab(),  # every minute
+    },
+    "schedule-automation-rules": {
+        "task": "actions.schedule_automation_rules",
+        "schedule": crontab(minute="*/15"),
+    }
+}
