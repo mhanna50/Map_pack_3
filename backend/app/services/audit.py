@@ -15,24 +15,55 @@ class AuditService:
     def log(
         self,
         *,
-        event_type: str,
+        action: str,
         organization_id: uuid.UUID | None = None,
+        actor_user_id: uuid.UUID | None = None,
+        entity_type: str | None = None,
+        entity_id: str | None = None,
         location_id: uuid.UUID | None = None,
-        user_id: uuid.UUID | None = None,
-        action_id: uuid.UUID | None = None,
-        description: str | None = None,
+        before: dict[str, Any] | None = None,
+        after: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> AuditLog:
         entry = AuditLog(
-            event_type=event_type,
+            action=action,
             organization_id=organization_id,
             location_id=location_id,
-            user_id=user_id,
-            action_id=action_id,
-            description=description,
+            actor_user_id=actor_user_id,
+            entity_type=entity_type or "system",
+            entity_id=entity_id,
+            before_json=before or {},
+            after_json=after or {},
             metadata_json=metadata or {},
         )
         self.db.add(entry)
         self.db.commit()
         self.db.refresh(entry)
         return entry
+
+
+def log_audit(
+    db: Session,
+    *,
+    action: str,
+    actor: uuid.UUID | None = None,
+    org_id: uuid.UUID | None = None,
+    entity: str | None = None,
+    entity_id: str | None = None,
+    location_id: uuid.UUID | None = None,
+    before: dict[str, Any] | None = None,
+    after: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> AuditLog:
+    service = AuditService(db)
+    return service.log(
+        action=action,
+        organization_id=org_id,
+        actor_user_id=actor,
+        entity_type=entity,
+        entity_id=entity_id,
+        location_id=location_id,
+        before=before,
+        after=after,
+        metadata=metadata,
+    )

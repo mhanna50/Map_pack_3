@@ -19,6 +19,13 @@ from .rank_tracking import RankTrackingService
 from .media_management import MediaManagementService
 from .competitor_monitoring import CompetitorMonitoringService
 from .automation_rules import AutomationRuleService
+from .gbp_publishing import GbpPublishingService
+from .gbp_sync import GbpSyncService
+from .daily_signals import DailySignalService
+from .post_candidates import PostCandidateService
+from .post_composition import PostCompositionService
+from .post_scheduler import PostSchedulerService
+from .post_metrics import PostMetricsService
 from ..models.media_upload_request import MediaUploadRequest
 
 
@@ -60,10 +67,11 @@ class ActionService:
         self.db.commit()
         self.db.refresh(action)
         self.audit.log(
-            event_type="action.scheduled",
+            action="action.scheduled",
             organization_id=organization_id,
             location_id=location_id,
-            action_id=action.id,
+            entity_type="action",
+            entity_id=str(action.id),
             metadata={"action_type": action_type.value},
         )
         return action
@@ -102,10 +110,11 @@ class ActionService:
         self.db.add(action)
         self.db.commit()
         self.audit.log(
-            event_type="action.succeeded",
+            action="action.succeeded",
             organization_id=action.organization_id,
             location_id=action.location_id,
-            action_id=action.id,
+            entity_type="action",
+            entity_id=str(action.id),
             metadata={"action_type": action.action_type.value, "result": result or {}},
         )
 
@@ -117,11 +126,12 @@ class ActionService:
             action.next_run_at = None
             action.locked_at = None
             self.audit.log(
-                event_type="action.dead_lettered",
+                action="action.dead_lettered",
                 organization_id=action.organization_id,
                 location_id=action.location_id,
-                action_id=action.id,
-                description=error,
+                entity_type="action",
+                entity_id=str(action.id),
+                metadata={"error": error},
             )
         else:
             delay = self._compute_backoff(action.attempts)
@@ -131,12 +141,12 @@ class ActionService:
             action.next_run_at = next_run
             action.locked_at = None
             self.audit.log(
-                event_type="action.retry_scheduled",
+                action="action.retry_scheduled",
                 organization_id=action.organization_id,
                 location_id=action.location_id,
-                action_id=action.id,
-                metadata={"retry_in_seconds": delay},
-                description=error,
+                entity_type="action",
+                entity_id=str(action.id),
+                metadata={"retry_in_seconds": delay, "error": error},
             )
         self.db.add(action)
         self.db.commit()
@@ -147,11 +157,12 @@ class ActionService:
         self.db.add(action)
         self.db.commit()
         self.audit.log(
-            event_type="action.cancelled",
+            action="action.cancelled",
             organization_id=action.organization_id,
             location_id=action.location_id,
-            action_id=action.id,
-            description=reason,
+            entity_type="action",
+            entity_id=str(action.id),
+            metadata={"reason": reason} if reason else None,
         )
 
     @staticmethod
@@ -172,6 +183,13 @@ class ActionExecutor:
         self.media_service = MediaManagementService(db, self.action_service)
         self.competitor_service = CompetitorMonitoringService(db, self.action_service)
         self.automation_service = AutomationRuleService(db, self.action_service)
+        self.gbp_publisher = GbpPublishingService(db)
+        self.gbp_sync = GbpSyncService(db)
+        self.daily_signals = DailySignalService(db)
+        self.post_candidates = PostCandidateService(db)
+        self.post_composer = PostCompositionService(db)
+        self.post_scheduler_service = PostSchedulerService(db)
+        self.post_metrics = PostMetricsService(db)
         self.handlers: dict[ActionType, Callable[[Action], dict[str, Any]]] = {
             ActionType.PUBLISH_GBP_POST: self._handle_publish_post,
             ActionType.PUBLISH_QA: self._handle_publish_qna,
@@ -181,6 +199,12 @@ class ActionExecutor:
             ActionType.RUN_AUTOMATION_RULES: self._handle_run_automation_rules,
             ActionType.REFRESH_GOOGLE_TOKEN: self._handle_refresh_token,
             ActionType.SYNC_GOOGLE_LOCATIONS: self._handle_sync_locations,
+            ActionType.SYNC_GBP_REVIEWS: self._handle_sync_reviews,
+            ActionType.SYNC_GBP_POSTS: self._handle_sync_posts,
+            ActionType.COMPUTE_DAILY_SIGNALS: self._handle_compute_daily_signals,
+            ActionType.GENERATE_POST_CANDIDATES: self._handle_generate_post_candidates,
+            ActionType.COMPOSE_POST_CANDIDATE: self._handle_compose_post_candidate,
+            ActionType.SCHEDULE_POST: self._handle_schedule_post,
             ActionType.CUSTOM: self._handle_noop,
         }
 
@@ -193,17 +217,28 @@ class ActionExecutor:
         post: Post | None = self.db.get(Post, uuid.UUID(post_id)) if post_id else None
         if not post:
             return {"status": "missing_post"}
+        try:
+            self.post_service.safety.ensure_not_paused(
+                organization_id=post.organization_id,
+                location_id=post.location_id,
+            )
+        except ValueError as exc:
+            self.post_service.update_post_status(post, PostStatus.CANCELLED)
+            self.audit.log(
+                action="post.publish_paused",
+                organization_id=post.organization_id,
+                location_id=post.location_id,
+                entity_type="post",
+                entity_id=str(post.id),
+                metadata={"reason": str(exc)},
+            )
+            return {"status": "paused", "reason": str(exc)}
         self.post_service.update_post_status(post, PostStatus.QUEUED)
-        self.audit.log(
-            event_type="gbp.post.publish_requested",
-            organization_id=action.organization_id,
-            location_id=action.location_id,
-            action_id=action.id,
-            metadata={"payload": action.payload},
-        )
-        post.publish_result = {"provider_status": "stubbed"}
+        result = self.gbp_publisher.publish_post(post)
         self.post_service.update_post_status(post, PostStatus.PUBLISHED)
-        return {"status": "queued_for_google", "payload": action.payload}
+        metrics = result.get("metrics") if isinstance(result, dict) else None
+        self.post_metrics.record_publish_outcome(post, metrics)
+        return {"status": "published", "payload": action.payload, "result": result}
 
     def _handle_publish_qna(self, action: Action) -> dict[str, Any]:
         qna_id = action.payload.get("qna_id") if action.payload else None
@@ -213,10 +248,11 @@ class ActionExecutor:
         qna.status = QnaStatus.PUBLISHED
         self.qna_service.mark_posted(qna)
         self.audit.log(
-            event_type="qna.publish_requested",
+            action="qna.publish_requested",
             organization_id=action.organization_id,
             location_id=action.location_id,
-            action_id=action.id,
+            entity_type="qna",
+            entity_id=qna_id,
             metadata={"qna_id": qna_id},
         )
         return {"status": "qna_published"}
@@ -251,10 +287,11 @@ class ActionExecutor:
             return {"status": "missing_request"}
         self.media_service.mark_request_notified(request)
         self.audit.log(
-            event_type="media.upload_request.dispatched",
+            action="media.upload_request.dispatched",
             organization_id=action.organization_id,
             location_id=action.location_id,
-            action_id=action.id,
+            entity_type="media_upload_request",
+            entity_id=request_id,
             metadata={"request_id": request_id},
         )
         return {"status": "request_notified"}
@@ -271,10 +308,11 @@ class ActionExecutor:
             location_id=uuid.UUID(location_id),
         )
         self.audit.log(
-            event_type="competitors.monitored",
+            action="competitors.monitored",
             organization_id=action.organization_id,
             location_id=uuid.UUID(location_id),
-            action_id=action.id,
+            entity_type="location",
+            entity_id=location_id,
             metadata=result,
         )
         return result
@@ -290,30 +328,84 @@ class ActionExecutor:
             location_id=location_uuid,
         )
         self.audit.log(
-            event_type="automation.run",
+            action="automation.run",
             organization_id=organization_id,
             location_id=location_uuid,
-            action_id=action.id,
+            entity_type="action",
+            entity_id=str(action.id),
             metadata={"triggered": len(results)},
         )
         return {"status": "automation_run", "triggered": len(results)}
 
     def _handle_refresh_token(self, action: Action) -> dict[str, Any]:
         self.audit.log(
-            event_type="gbp.token.refresh_requested",
+            action="gbp.token.refresh_requested",
             organization_id=action.organization_id,
-            action_id=action.id,
+            entity_type="action",
+            entity_id=str(action.id),
         )
         # Token refresh is a no-op for now; the actual logic will call Google OAuth.
         return {"status": "token_refresh_stubbed"}
 
     def _handle_sync_locations(self, action: Action) -> dict[str, Any]:
         self.audit.log(
-            event_type="gbp.locations.sync_requested",
+            action="gbp.locations.sync_requested",
             organization_id=action.organization_id,
-            action_id=action.id,
+            entity_type="action",
+            entity_id=str(action.id),
         )
         return {"status": "sync_stubbed"}
+
+    def _handle_sync_reviews(self, action: Action) -> dict[str, Any]:
+        location_id = action.payload.get("location_id") if action.payload else None
+        if not location_id:
+            return {"status": "missing_location"}
+        count = self.gbp_sync.sync_reviews(action.organization_id, uuid.UUID(location_id))
+        return {"status": "reviews_synced", "count": count}
+
+    def _handle_sync_posts(self, action: Action) -> dict[str, Any]:
+        location_id = action.payload.get("location_id") if action.payload else None
+        if not location_id:
+            return {"status": "missing_location"}
+        count = self.gbp_sync.sync_posts(action.organization_id, uuid.UUID(location_id))
+        return {"status": "posts_synced", "count": count}
+
+    def _handle_compute_daily_signals(self, action: Action) -> dict[str, Any]:
+        location_id = action.payload.get("location_id") if action.payload else None
+        if not location_id:
+            return {"status": "missing_location"}
+        target = action.payload.get("date")
+        snapshot = self.daily_signals.compute(
+            organization_id=action.organization_id,
+            location_id=uuid.UUID(location_id),
+        )
+        return {"status": "signals_computed", "signal_date": snapshot.signal_date.isoformat()}
+
+    def _handle_generate_post_candidates(self, action: Action) -> dict[str, Any]:
+        location_id = action.payload.get("location_id") if action.payload else None
+        if not location_id:
+            return {"status": "missing_location"}
+        candidate = self.post_candidates.generate(
+            organization_id=action.organization_id,
+            location_id=uuid.UUID(location_id),
+        )
+        if not candidate:
+            return {"status": "no_candidate"}
+        return {"status": "candidate_created", "candidate_id": str(candidate.id)}
+
+    def _handle_compose_post_candidate(self, action: Action) -> dict[str, Any]:
+        candidate_id = action.payload.get("candidate_id")
+        if not candidate_id:
+            return {"status": "missing_candidate"}
+        candidate = self.post_composer.compose(uuid.UUID(candidate_id))
+        return {"status": "candidate_composed", "candidate_id": str(candidate.id)}
+
+    def _handle_schedule_post(self, action: Action) -> dict[str, Any]:
+        candidate_id = action.payload.get("candidate_id")
+        if not candidate_id:
+            return {"status": "missing_candidate"}
+        candidate = self.post_scheduler_service.schedule(uuid.UUID(candidate_id))
+        return {"status": "post_scheduled", "candidate_id": str(candidate.id)}
 
     def _handle_noop(self, action: Action) -> dict[str, Any]:
         return {"status": "no-op"}

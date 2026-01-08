@@ -6,7 +6,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.enums import ActionType, PostStatus, PostType
+from backend.app.models.enums import ActionType, PostStatus, PostType, ApprovalCategory
 from backend.app.models.post import Post
 from backend.app.models.post_media_attachment import PostMediaAttachment
 from backend.app.models.post_variant import PostVariant
@@ -14,6 +14,9 @@ from backend.app.models.media_asset import MediaAsset
 from backend.app.services.captions import CaptionGenerator
 from backend.app.services.media_selection import MediaSelector
 from backend.app.services.rotation import RotationEngine
+from backend.app.services.scheduling import AutoScheduler
+from backend.app.services.posting_safety import PostingSafetyService
+from backend.app.services.approvals import ApprovalService
 
 if TYPE_CHECKING:
     from backend.app.services.actions import ActionService
@@ -23,6 +26,9 @@ class PostService:
     def __init__(self, db: Session, action_service: "ActionService | None" = None) -> None:
         self.db = db
         self.action_service = action_service
+        self.scheduler = AutoScheduler(db)
+        self.safety = PostingSafetyService(db)
+        self.approvals = ApprovalService(db)
 
     def create_post(
         self,
@@ -39,19 +45,42 @@ class PostService:
         keywords: list[str] | None = None,
         locations: list[str] | None = None,
         variants: int = 3,
+        bucket: str | None = None,
+        topic_tags: list[str] | None = None,
+        media_asset_id: uuid.UUID | None = None,
+        window_id: str | None = None,
     ) -> Post:
-        post = Post(
+        scheduled_time = scheduled_at or self.scheduler.next_post_time(
+            organization_id=organization_id, location_id=location_id
+        )
+        self.safety.validate(
             organization_id=organization_id,
             location_id=location_id,
-            connected_account_id=connected_account_id,
-            post_type=post_type,
-            body=base_prompt,
-            ai_prompt_context=context,
-            scheduled_at=scheduled_at,
-            status=PostStatus.SCHEDULED if scheduled_at else PostStatus.DRAFT,
+            scheduled_at=scheduled_time,
+            bucket=bucket,
         )
+        post = Post(
+            organization_id=organization_id,
+                location_id=location_id,
+                connected_account_id=connected_account_id,
+                post_type=post_type,
+                body=base_prompt,
+                ai_prompt_context=context,
+                scheduled_at=scheduled_time,
+                status=PostStatus.SCHEDULED,
+                bucket=bucket,
+                topic_tags=topic_tags or [],
+                media_asset_id=media_asset_id,
+                window_id=window_id,
+            )
         self.db.add(post)
         self.db.flush()
+
+        if media_asset_id:
+            asset = self.db.get(MediaAsset, media_asset_id)
+            if asset:
+                asset.last_used_at = datetime.now(timezone.utc)
+                self.db.add(asset)
 
         generator = CaptionGenerator(brand_voice)
         for variant_payload in generator.generate_variants(
@@ -69,7 +98,20 @@ class PostService:
             )
             self.db.add(variant)
 
-        if scheduled_at:
+        if self._requires_pricing_approval(base_prompt):
+            post.status = PostStatus.DRAFT
+            self.db.add(post)
+            self.approvals.create_request(
+                organization_id=organization_id,
+                location_id=location_id,
+                category=ApprovalCategory.GBP_EDIT,
+                reason="Pricing or discount language detected",
+                payload={"post_id": str(post.id)},
+                source={"caption": base_prompt},
+                proposal={"caption": base_prompt},
+                severity="warning",
+            )
+        elif scheduled_time:
             self._schedule_publish_action(post)
 
         self.db.commit()
@@ -143,3 +185,8 @@ class PostService:
             connected_account_id=post.connected_account_id,
             dedupe_key=f"post:{post.id}",
         )
+
+    def _requires_pricing_approval(self, text: str) -> bool:
+        lowered = text.lower()
+        triggers = ["%", "discount", "sale", "save ", "$"]
+        return any(token in lowered for token in triggers)

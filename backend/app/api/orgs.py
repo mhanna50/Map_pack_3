@@ -3,7 +3,9 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, ConfigDict
+from datetime import datetime
+
+from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from sqlalchemy.orm import Session
 
 from ..db.session import get_db
@@ -11,6 +13,7 @@ from ..models.enums import LocationStatus, OrganizationType
 from ..models.location import Location
 from ..models.location_settings import LocationSettings
 from ..models.organization import Organization
+from ..services.onboarding_tokens import OnboardingTokenSigner
 
 router = APIRouter(prefix="/orgs", tags=["organizations"])
 
@@ -22,6 +25,8 @@ class OrganizationResponse(BaseModel):
     name: str
     org_type: OrganizationType
     slug: str | None = None
+    plan_tier: str | None = None
+    created_at: datetime | None = None
 
 
 class OrganizationCreateRequest(BaseModel):
@@ -55,6 +60,10 @@ class LocationResponse(BaseModel):
     timezone: str
     status: LocationStatus
     google_location_id: str | None = None
+    external_ids: dict | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    last_sync_at: datetime | None = None
 
 
 class LocationSettingsPayload(BaseModel):
@@ -70,6 +79,7 @@ class LocationCreateRequest(BaseModel):
     name: str
     timezone: str = "UTC"
     google_location_id: str | None = None
+    external_ids: dict | None = None
     settings: LocationSettingsPayload | None = None
 
 
@@ -92,6 +102,7 @@ def create_location(
         name=payload.name,
         timezone=payload.timezone,
         google_location_id=payload.google_location_id,
+        external_ids=payload.external_ids,
     )
     db.add(location)
     db.flush()
@@ -146,3 +157,56 @@ def update_location_settings(
     db.commit()
     db.refresh(location)
     return location
+
+
+class OrganizationUpdateRequest(BaseModel):
+    name: str | None = None
+    plan_tier: str | None = None
+    usage_limits: dict | None = None
+
+
+@router.put("/{organization_id}", response_model=OrganizationResponse)
+def update_organization(
+    organization_id: uuid.UUID,
+    payload: OrganizationUpdateRequest,
+    db: Session = Depends(get_db),
+) -> Organization:
+    organization = db.get(Organization, organization_id)
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    data = payload.model_dump(exclude_unset=True)
+    if "name" in data and data["name"]:
+        organization.name = data["name"]
+    if "plan_tier" in data:
+        organization.plan_tier = data["plan_tier"]
+    if "usage_limits" in data:
+        organization.usage_limits_json = data["usage_limits"]
+    db.add(organization)
+    db.commit()
+    db.refresh(organization)
+    return organization
+
+
+class OnboardingTokenRequest(BaseModel):
+    token: str
+
+
+class OnboardingTokenResponse(BaseModel):
+    organization_id: uuid.UUID
+    email: EmailStr
+    organization_name: str | None = None
+
+
+@router.post("/onboarding/token", response_model=OnboardingTokenResponse)
+def decode_onboarding_token(payload: OnboardingTokenRequest, db: Session = Depends(get_db)) -> OnboardingTokenResponse:
+    signer = OnboardingTokenSigner()
+    decoded = signer.decode(payload.token)
+    org_id = uuid.UUID(decoded["org_id"])
+    org = db.get(Organization, org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found for token")
+    return OnboardingTokenResponse(
+        organization_id=org_id,
+        email=decoded.get("email"),
+        organization_name=decoded.get("org_name") or org.name,
+    )

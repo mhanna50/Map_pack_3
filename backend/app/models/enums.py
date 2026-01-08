@@ -41,6 +41,12 @@ class ActionType(str, Enum):
     RUN_AUTOMATION_RULES = "run_automation_rules"
     REFRESH_GOOGLE_TOKEN = "refresh_google_token"
     SYNC_GOOGLE_LOCATIONS = "sync_google_locations"
+    SYNC_GBP_REVIEWS = "sync_gbp_reviews"
+    SYNC_GBP_POSTS = "sync_gbp_posts"
+    COMPUTE_DAILY_SIGNALS = "compute_daily_signals"
+    GENERATE_POST_CANDIDATES = "generate_post_candidates"
+    COMPOSE_POST_CANDIDATE = "compose_post_candidate"
+    SCHEDULE_POST = "schedule_post"
     CUSTOM = "custom"
 
 
@@ -124,8 +130,6 @@ class CompetitorSource(str, Enum):
     AUTO = "auto"
 
 
-
-
 class ApprovalCategory(str, Enum):
     REVIEW_REPLY = "review_reply"
     GBP_EDIT = "gbp_edit"
@@ -157,3 +161,21 @@ class AutomationActionType(str, Enum):
     REQUEST_PHOTOS = "request_photos"
     REQUEST_REVIEW = "request_review"
     ACCEPT_REVIEW_REPLY = "accept_review_reply"
+
+
+class AlertSeverity(str, Enum):
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+
+class AlertStatus(str, Enum):
+    OPEN = "open"
+    ACKNOWLEDGED = "acknowledged"
+    RESOLVED = "resolved"
+
+
+class GbpConnectionStatus(str, Enum):
+    CONNECTED = "connected"
+    EXPIRED = "expired"
+    DISCONNECTED = "disconnected"

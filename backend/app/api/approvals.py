@@ -24,11 +24,17 @@ class ApprovalResponse(BaseModel):
     category: ApprovalCategory
     status: ApprovalStatus
     reason: str
+    severity: str
     payload: dict | None = None
     before_state: dict | None = None
+    source_json: dict | None = None
+    proposal_json: dict | None = None
+    approved_content: str | None = None
     resolved_by: uuid.UUID | None = None
     resolved_at: datetime | None = None
     resolution_notes: str | None = None
+    published_external_id: str | None = None
+    published_at: datetime | None = None
 
 
 class ApprovalCreateRequest(BaseModel):
@@ -36,8 +42,11 @@ class ApprovalCreateRequest(BaseModel):
     location_id: uuid.UUID | None = None
     category: ApprovalCategory
     reason: str
+    severity: str | None = None
     payload: dict | None = None
     before_state: dict | None = None
+    source_json: dict | None = None
+    proposal_json: dict | None = None
     requested_by: uuid.UUID | None = None
 
 
@@ -51,6 +60,9 @@ def create_approval(payload: ApprovalCreateRequest, db: Session = Depends(get_db
         reason=payload.reason,
         payload=payload.payload,
         before_state=payload.before_state,
+        severity=payload.severity,
+        source=payload.source_json,
+        proposal=payload.proposal_json,
         requested_by=payload.requested_by,
     )
 
@@ -73,6 +85,7 @@ def list_approvals(
 class ApprovalActionRequest(BaseModel):
     user_id: uuid.UUID | None = None
     notes: str | None = None
+    content: str | None = None
 
 
 def _get_request(db: Session, approval_id: uuid.UUID) -> ApprovalRequest:
@@ -90,7 +103,12 @@ def approve_request(
 ) -> ApprovalRequest:
     service = ApprovalService(db)
     request = _get_request(db, approval_id)
-    return service.approve(request, approved_by=payload.user_id, notes=payload.notes)
+    return service.approve(
+        request,
+        approved_by=payload.user_id,
+        notes=payload.notes,
+        content=payload.content,
+    )
 
 
 @router.post("/{approval_id}/reject", response_model=ApprovalResponse)

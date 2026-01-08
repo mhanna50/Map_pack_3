@@ -41,9 +41,9 @@ export default function Home() {
             <a href="#contact" className="hover:text-primary">
               Contact
             </a>
-            <Link href="/onboarding" className="rounded-full bg-primary px-4 py-2 text-white">
-              Start free trial
-            </Link>
+            <a href="#contact" className="rounded-full bg-primary px-4 py-2 text-white">
+              Schedule a call
+            </a>
           </nav>
         </div>
       </div>
@@ -57,18 +57,12 @@ export default function Home() {
             Map Pack 3 keeps posts, reviews, Q&A, rankings, and photos fresh so you never fall behind local competitors.
           </p>
           <div className="flex flex-wrap gap-3">
-            <Link
-              href="/onboarding"
+            <a
+              href="#contact"
               className="rounded-full bg-primary px-6 py-3 text-white transition hover:bg-primary/90"
             >
-              Connect Your GBP
-            </Link>
-            <Link
-              href="#pricing"
-              className="rounded-full border border-slate-200 px-6 py-3 text-slate-700 transition hover:bg-slate-50"
-            >
-              View Pricing
-            </Link>
+              Schedule a call
+            </a>
           </div>
           <div className="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
             <p className="font-medium text-slate-700">Case study coming soon</p>
@@ -96,9 +90,9 @@ export default function Home() {
             <h3 className="text-2xl font-semibold">How it works</h3>
             <p className="text-slate-600">Four simple steps to put growth on autopilot.</p>
           </div>
-          <Link href="/onboarding" className="text-sm font-medium text-primary underline underline-offset-4">
-            Start now
-          </Link>
+          <a href="#contact" className="text-sm font-medium text-primary underline underline-offset-4">
+            Book a call
+          </a>
         </div>
         <div className="grid gap-6 md:grid-cols-4">
           {steps.map((step, index) => (
@@ -147,12 +141,12 @@ export default function Home() {
                   </li>
                 ))}
               </ul>
-              <Link
-                href="/onboarding"
+              <a
+                href="#contact"
                 className="mt-auto rounded-full bg-primary px-4 py-2 text-center text-sm font-semibold text-white"
               >
-                Choose plan
-              </Link>
+                Talk to sales
+              </a>
             </div>
           ))}
         </div>

@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 const steps = [
   "Create org",
@@ -18,15 +19,23 @@ const locationOptions = [
   { id: "loc-3", name: "Westside Warehouse", address: "42 Industrial Rd" },
 ];
 const toneOptions = ["Friendly", "Professional", "Bold", "Concise"];
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 export default function OnboardingPage() {
+  const searchParams = useSearchParams();
   const [currentStep, setCurrentStep] = useState(0);
   const [googleConnected, setGoogleConnected] = useState(false);
+  const [organizationId, setOrganizationId] = useState<string | null>(null);
   const [orgInfo, setOrgInfo] = useState({
     name: "",
     industry: industries[0],
     primaryLocation: "",
   });
+  const [creatingOrg, setCreatingOrg] = useState(false);
+  const [createOrgError, setCreateOrgError] = useState<string | null>(null);
+  const [connectingGoogle, setConnectingGoogle] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
+  const [tokenError, setTokenError] = useState<string | null>(null);
   const [locationState, setLocationState] = useState(
     () =>
       locationOptions.reduce<Record<string, { selected: boolean; automation: boolean }>>((acc, loc, index) => {
@@ -35,10 +44,10 @@ export default function OnboardingPage() {
       }, {}),
   );
   const [automationConfig, setAutomationConfig] = useState({
-    postingFrequency: "3 posts / week",
     reviewAutoThreshold: 4,
     reviewApprovalThreshold: 3,
     qnaCadence: "1 Q&A / week",
+    maxPostsPerWeek: 5,
   });
   const [brandVoice, setBrandVoice] = useState({
     tone: toneOptions[0],
@@ -46,6 +55,68 @@ export default function OnboardingPage() {
     cities: "Downtown, Uptown",
     websiteText: "",
   });
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const storedOrgId = sessionStorage.getItem("onboarding.orgId");
+    if (storedOrgId) {
+      setOrganizationId(storedOrgId);
+    }
+    const storedConnected = sessionStorage.getItem("onboarding.googleConnected");
+    if (storedConnected === "true") {
+      setGoogleConnected(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (organizationId) {
+      sessionStorage.setItem("onboarding.orgId", organizationId);
+    }
+  }, [organizationId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    sessionStorage.setItem("onboarding.googleConnected", googleConnected ? "true" : "false");
+  }, [googleConnected]);
+
+  useEffect(() => {
+    const token = searchParams?.get("token");
+    if (!token || organizationId) {
+      return;
+    }
+    const exchangeToken = async () => {
+      try {
+        setTokenError(null);
+        const response = await fetch(`${API_BASE_URL}/orgs/onboarding/token`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ token }),
+        });
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.detail || "Invalid or expired onboarding link");
+        }
+        const data = await response.json();
+        setOrganizationId(data.organization_id);
+        setOrgInfo((prev) => ({
+          ...prev,
+          name: data.organization_name || prev.name,
+        }));
+      } catch (error) {
+        setTokenError(error instanceof Error ? error.message : "Unable to redeem onboarding link");
+      }
+    };
+    void exchangeToken();
+  }, [organizationId, searchParams]);
 
   const completed = currentStep === steps.length - 1;
   const nextDisabled =
@@ -60,6 +131,76 @@ export default function OnboardingPage() {
     return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   }, []);
 
+  const createOrganization = async () => {
+    if (creatingOrg || organizationId) {
+      return;
+    }
+    setCreatingOrg(true);
+    setCreateOrgError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/orgs/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: orgInfo.name.trim(),
+          org_type: "agency",
+          slug: undefined,
+        }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || "Unable to create organization");
+      }
+      const org = await response.json();
+      setOrganizationId(org.id);
+    } catch (error) {
+      setCreateOrgError(error instanceof Error ? error.message : "Failed to create organization");
+      throw error;
+    } finally {
+      setCreatingOrg(false);
+    }
+  };
+
+  const handleConnectGoogle = async () => {
+    if (!organizationId || connectingGoogle) {
+      if (!organizationId) {
+        setConnectError("Create the organization first.");
+      }
+      return;
+    }
+    setConnectError(null);
+    setConnectingGoogle(true);
+    try {
+      const redirectUri = typeof window !== "undefined" ? `${window.location.origin}/onboarding/google/callback` : undefined;
+      const response = await fetch(`${API_BASE_URL}/google/oauth/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          organization_id: organizationId,
+          redirect_uri: redirectUri,
+          scopes: ["https://www.googleapis.com/auth/business.manage"],
+        }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || "Unable to start Google OAuth");
+      }
+      const data = await response.json();
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("onboarding.pendingOAuthOrgId", organizationId);
+        window.location.href = data.authorization_url;
+      }
+    } catch (error) {
+      setConnectError(error instanceof Error ? error.message : "Failed to connect Google");
+    } finally {
+      setConnectingGoogle(false);
+    }
+  };
+
   const handleLocationSelection = (id: string, field: "selected" | "automation") => {
     setLocationState((prev) => ({
       ...prev,
@@ -67,7 +208,14 @@ export default function OnboardingPage() {
     }));
   };
 
-  const goNext = () => {
+  const goNext = async () => {
+    if (currentStep === 0 && !organizationId) {
+      try {
+        await createOrganization();
+      } catch {
+        return;
+      }
+    }
     if (currentStep < steps.length - 1) {
       setCurrentStep((step) => step + 1);
     }
@@ -136,6 +284,12 @@ export default function OnboardingPage() {
                   />
                 </label>
               </div>
+              {createOrgError && <p className="text-sm text-rose-600">{createOrgError}</p>}
+              {organizationId && (
+                <p className="text-xs text-emerald-600">
+                  Organization created. ID <span className="font-mono">{organizationId}</span>
+                </p>
+              )}
             </div>
           )}
 
@@ -146,16 +300,21 @@ export default function OnboardingPage() {
                 <p className="text-sm text-slate-600">Authorize Map Pack 3 so we can read listings and post on your behalf.</p>
               </div>
               <button
-                className="flex items-center justify-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-semibold text-white"
-                onClick={() => setGoogleConnected(true)}
+                className="flex items-center justify-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                onClick={handleConnectGoogle}
+                disabled={googleConnected || connectingGoogle || !organizationId}
               >
-                {googleConnected ? "Google Connected ✓" : "Connect Google"}
+                {googleConnected ? "Google Connected ✓" : connectingGoogle ? "Redirecting…" : "Connect Google"}
               </button>
+              {!organizationId && (
+                <p className="text-xs text-amber-600">Create the organization first to unlock the Google connect button.</p>
+              )}
               {googleConnected && (
                 <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-600">
                   Success! We can now fetch your GBP locations.
                 </div>
               )}
+              {connectError && <p className="text-sm text-rose-600">{connectError}</p>}
             </div>
           )}
 
@@ -201,20 +360,31 @@ export default function OnboardingPage() {
           {currentStep === 3 && (
             <div className="space-y-4">
               <h2 className="text-xl font-semibold">Configure automations</h2>
-              <p className="text-sm text-slate-600">Tell us how often to publish and when to require approvals.</p>
+              <p className="text-sm text-slate-600">
+                Our scheduler decides the posting cadence automatically; set guardrails for reviews and Q&A here.
+              </p>
               <div className="space-y-3 text-sm">
-                <label className="block">
-                  <span className="text-slate-600">Posting frequency</span>
-                  <select
-                    className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
-                    value={automationConfig.postingFrequency}
-                    onChange={(event) => setAutomationConfig((prev) => ({ ...prev, postingFrequency: event.target.value }))}
-                  >
-                    {["2 posts / week", "3 posts / week", "4 posts / week"].map((value) => (
-                      <option key={value}>{value}</option>
-                    ))}
-                  </select>
-                </label>
+                <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-primary">Posting cadence</p>
+                  <p className="mt-2 text-sm text-slate-600">
+                    Map Pack 3 balances freshness, performance, and inventory to choose the next publish time. We’ll stay within
+                    your guardrails below.
+                  </p>
+                  <label className="mt-3 block text-xs">
+                    <span className="text-slate-600">Max posts per week (optional)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={14}
+                      className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
+                      value={automationConfig.maxPostsPerWeek}
+                      onChange={(event) =>
+                        setAutomationConfig((prev) => ({ ...prev, maxPostsPerWeek: Number(event.target.value) }))
+                      }
+                    />
+                  </label>
+                  <p className="mt-1 text-xs text-slate-500">Leave as-is to let the algorithm run fully autonomously.</p>
+                </div>
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="block">
                     <span className="text-slate-600">Auto-reply reviews rated</span>
@@ -341,10 +511,12 @@ export default function OnboardingPage() {
           {!completed && (
             <button
               className="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
-              onClick={goNext}
-              disabled={nextDisabled}
+              onClick={() => {
+                void goNext();
+              }}
+              disabled={nextDisabled || creatingOrg}
             >
-              Continue
+              {creatingOrg && currentStep === 0 ? "Creating…" : "Continue"}
             </button>
           )}
         </div>

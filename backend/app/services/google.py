@@ -129,6 +129,12 @@ class GoogleBusinessClient:
             self._raise_if_error(resp)
             return resp.json()
 
+    def _post(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
+        with httpx.Client(timeout=30) as client:
+            resp = client.post(endpoint, headers=self._headers(), json=payload)
+            self._raise_if_error(resp)
+            return resp.json()
+
     def list_accounts(self) -> list[dict[str, Any]]:
         data = self._get(f"{self.base_url}/accounts")
         return data.get("accounts", [])
@@ -147,6 +153,12 @@ class GoogleBusinessClient:
     def list_local_posts(self, location_name: str) -> list[dict[str, Any]]:
         data = self._get(f"{self.base_url}/{location_name}/localPosts")
         return data.get("localPosts", [])
+
+    def create_local_post(self, location_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._post(f"{self.base_url}/{location_name}/localPosts", payload)
+
+    def reply_to_review(self, review_name: str, comment: str) -> dict[str, Any]:
+        return self._post(f"{self.base_url}/{review_name}:reply", {"comment": comment})
 
     def list_media(self, location_name: str) -> list[dict[str, Any]]:
         data = self._get(f"{self.base_url}/{location_name}/media")

@@ -19,17 +19,16 @@ class AuditLog(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     location_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("locations.id")
     )
-    user_id: Mapped[uuid.UUID | None] = mapped_column(
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id")
     )
-    action_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("actions.id")
-    )
-    event_type: Mapped[str] = mapped_column(String(128), nullable=False)
-    description: Mapped[str | None] = mapped_column(String)
+    action: Mapped[str] = mapped_column(String(128), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    entity_id: Mapped[str | None] = mapped_column(String(128))
+    before_json: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    after_json: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     metadata_json: Mapped[dict | None] = mapped_column(JSONB, default=dict)
 
     organization = relationship("Organization", back_populates="audit_logs")
     location = relationship("Location", back_populates="audit_logs")
-    user = relationship("User", back_populates="audit_logs")
-    action = relationship("Action", back_populates="audit_logs")
+    actor = relationship("User", back_populates="audit_logs")

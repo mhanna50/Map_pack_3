@@ -50,4 +50,3 @@ class Action(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     organization = relationship("Organization", back_populates="actions")
     location = relationship("Location", back_populates="actions")
     connected_account = relationship("ConnectedAccount", back_populates="actions")
-    audit_logs = relationship("AuditLog", back_populates="action")

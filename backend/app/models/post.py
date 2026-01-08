@@ -44,6 +44,13 @@ class Post(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     publish_result: Mapped[dict | None] = mapped_column(JSONB)
     cta: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     rotation_context: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    external_post_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    bucket: Mapped[str | None] = mapped_column(String(64))
+    topic_tags: Mapped[list[str] | None] = mapped_column(JSONB, default=list)
+    media_asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("media_assets.id")
+    )
+    window_id: Mapped[str | None] = mapped_column(String(32))
 
     organization = relationship("Organization")
     location = relationship("Location")
@@ -52,3 +59,4 @@ class Post(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     attachments = relationship(
         "PostMediaAttachment", back_populates="post", cascade="all,delete"
     )
+    media_asset = relationship("MediaAsset")

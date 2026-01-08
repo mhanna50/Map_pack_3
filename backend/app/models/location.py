@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Enum, ForeignKey, Index, String
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,11 +28,18 @@ class Location(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     timezone: Mapped[str] = mapped_column(String(64), default="UTC", nullable=False)
     google_location_id: Mapped[str | None] = mapped_column(String(255), unique=True)
     address: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    external_ids: Mapped[dict | None] = mapped_column("external_ids_json", JSONB, default=dict)
+    latitude: Mapped[float | None] = mapped_column(Float)
+    longitude: Mapped[float | None] = mapped_column(Float)
     status: Mapped[LocationStatus] = mapped_column(
         Enum(LocationStatus, name="location_status"),
         default=LocationStatus.DRAFT,
         nullable=False,
     )
+    posting_paused: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    posting_cap_per_week: Mapped[int | None] = mapped_column(Integer)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviews_last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     organization = relationship("Organization", back_populates="locations")
     connected_account = relationship("ConnectedAccount", back_populates="locations")
@@ -40,3 +48,4 @@ class Location(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     actions = relationship("Action", back_populates="location")
     audit_logs = relationship("AuditLog", back_populates="location")
+    alerts = relationship("Alert", back_populates="location")

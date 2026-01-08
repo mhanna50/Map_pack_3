@@ -9,12 +9,10 @@ export const metadata: Metadata = {
 
 const navLinks = [
   { href: "/app", label: "Overview" },
-  { href: "/app/posts", label: "Posts" },
+  { href: "/app/rankings", label: "Rank Tracking" },
   { href: "/app/reviews", label: "Reviews" },
-  { href: "/app/qna", label: "Q&A" },
-  { href: "/app/rankings", label: "Rankings" },
-  { href: "/app/media", label: "Media" },
-  { href: "/app/approvals", label: "Approvals" },
+  { href: "/app/posts", label: "Posts & Media" },
+  { href: "/app/competitors", label: "Competitors" },
   { href: "/app/settings", label: "Settings" },
 ];
 

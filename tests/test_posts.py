@@ -52,6 +52,27 @@ def test_create_post_via_service_schedules_action(db_session):
     assert action is not None
 
 
+def test_auto_schedule_runs_when_time_not_provided(db_session):
+    org, location = _create_org_and_location(db_session)
+    service = PostService(db_session)
+    post = service.create_post(
+        organization_id=org.id,
+        location_id=location.id,
+        connected_account_id=None,
+        post_type=PostType.UPDATE,
+        base_prompt="Auto schedule me",
+        scheduled_at=None,
+        context={"theme": "auto"},
+        brand_voice=None,
+        services=[],
+        keywords=[],
+        locations=[],
+        variants=1,
+    )
+    assert post.scheduled_at is not None
+    assert post.status == PostStatus.SCHEDULED
+
+
 def test_post_api_create_and_attachment(api_client, db_session):
     org, location = _create_org_and_location(db_session)
     media = MediaAsset(

@@ -29,10 +29,19 @@ class Settings(BaseSettings):
     EMAIL_FROM: str = ""
     POSTMARK_SERVER_TOKEN: str = ""
 
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_PRICE_ID: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_SUCCESS_URL: AnyHttpUrl | None = None
+    STRIPE_CANCEL_URL: AnyHttpUrl | None = None
+
+    CLIENT_APP_URL: AnyHttpUrl = cast(AnyHttpUrl, "http://localhost:3000")
+
     ACTION_DISPATCH_BATCH_SIZE: int = 50
     ACTION_MAX_ATTEMPTS: int = 5
     ACTION_BASE_BACKOFF_SECONDS: int = 30
     ACTION_MAX_BACKOFF_SECONDS: int = 60 * 60
+    GLOBAL_POSTING_PAUSE: bool = False
 
 
 settings = Settings()

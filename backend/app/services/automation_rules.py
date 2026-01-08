@@ -249,9 +249,11 @@ class AutomationRuleService:
             priority=rule.priority,
         )
         self.audit.log(
-            event_type="automation.rule.executed",
+            action="automation.rule.executed",
             organization_id=rule.organization_id,
             location_id=rule.location_id,
+            entity_type="automation_rule",
+            entity_id=str(rule.id),
             metadata={"rule_id": str(rule.id), "metrics": metrics},
         )
         return action

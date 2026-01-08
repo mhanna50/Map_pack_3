@@ -2,153 +2,132 @@
 
 import { useState } from "react";
 import { StatusBadge } from "@/components/status-badge";
-import { Drawer } from "@/components/drawer";
 import { useToast } from "@/components/toast";
 
-const mockPosts = [
-  { id: 1, topic: "Summer tune-up", location: "Downtown", status: "Scheduled", date: "Aug 12", details: "Rotating offer" },
-  { id: 2, topic: "Emergency service", location: "Uptown", status: "Posted", date: "Aug 10", details: "Posted with photo" },
-  { id: 3, topic: "Financing offer", location: "Downtown", status: "Failed", date: "Aug 9", error: "Image rejected", details: "CTA missing" },
+const scheduledPosts = [
+  { id: 1, title: "Winter furnace tune-up", type: "Offer", status: "Scheduled", datetime: "Jan 22 • 9:00 AM", channel: "Post + photo" },
+  { id: 2, title: "New hire spotlight", type: "Update", status: "Draft", datetime: "Jan 24 • 11:30 AM", channel: "Post only" },
 ];
 
-type Post = (typeof mockPosts)[number];
+const pastPosts = [
+  { id: 3, title: "Emergency weekend coverage", type: "Event", status: "Published", datetime: "Jan 18", engagement: "113 clicks" },
+  { id: 4, title: "New thermostat installs", type: "Offer", status: "Published", datetime: "Jan 15", engagement: "94 clicks" },
+];
+
+const mediaLibrary = [
+  { id: 1, label: "Before/after coil clean", status: "Approved", lastUsed: "3 days ago" },
+  { id: 2, label: "Technician team", status: "Pending", lastUsed: "—" },
+  { id: 3, label: "Smart thermostat install", status: "Approved", lastUsed: "8 days ago" },
+];
 
 export default function PostsPage() {
-  const [showModal, setShowModal] = useState(false);
-  const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const { pushToast } = useToast();
+  const [aiPrompt, setAiPrompt] = useState("Offer: Furnace tune-up");
+
   return (
-    <div className="space-y-8">
-      <header className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Posts</h1>
-          <p className="text-sm text-slate-600">List view of upcoming and past posts.</p>
-        </div>
-        <button
-          onClick={() => setShowModal(true)}
-          className="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white"
-        >
-          Create Post
-        </button>
+    <div className="space-y-6">
+      <header className="space-y-2">
+        <p className="text-xs uppercase tracking-[0.3em] text-primary">Posts & media</p>
+        <h1 className="text-2xl font-semibold">Consistency + creativity in one place</h1>
+        <p className="text-sm text-slate-600">See the calendar, compose new ideas, and manage your photo library.</p>
       </header>
-      <div className="rounded-3xl bg-white p-4 shadow-sm">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-slate-500">
-              <th className="px-3 py-2">Topic</th>
-              <th className="px-3 py-2">Location</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Date</th>
-              <th className="px-3 py-2">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {mockPosts.map((post) => (
-              <tr key={post.id} className="border-t border-slate-100">
-                <td className="px-3 py-3 font-medium text-slate-800">{post.topic}</td>
-                <td className="px-3 py-3 text-slate-600">{post.location}</td>
-                <td className="px-3 py-3">
-                  <StatusBadge status={post.status} />
-                  {post.error && <p className="text-xs text-red-500">{post.error}</p>}
-                </td>
-                <td className="px-3 py-3 text-slate-600">{post.date}</td>
-                <td className="px-3 py-3">
-                  <button className="text-sm font-semibold text-primary" onClick={() => setSelectedPost(post)}>
-                    View
-                  </button>
-                </td>
-              </tr>
+
+      <section className="rounded-3xl bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-[0.3em] text-primary">Calendar</p>
+            <h3 className="text-lg font-semibold">Scheduled posts</h3>
+          </div>
+          <button className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600">Download calendar</button>
+        </div>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          {scheduledPosts.map((post) => (
+            <div key={post.id} className="rounded-2xl border border-slate-100 p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">{post.title}</p>
+                  <p className="text-xs text-slate-500">{post.datetime}</p>
+                </div>
+                <StatusBadge status={post.status} />
+              </div>
+              <p className="mt-3 text-xs text-slate-500">{post.type} • {post.channel}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-6">
+          <p className="text-xs uppercase tracking-[0.3em] text-primary">Recently published</p>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            {pastPosts.map((post) => (
+              <div key={post.id} className="rounded-2xl border border-slate-100 p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-semibold text-slate-900">{post.title}</p>
+                    <p className="text-xs text-slate-500">{post.datetime}</p>
+                  </div>
+                  <p className="text-xs text-slate-500">{post.engagement}</p>
+                </div>
+              </div>
             ))}
-          </tbody>
-        </table>
-      </div>
-      {showModal && (
-        <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/40 px-4 py-8">
-          <div className="w-full max-w-lg space-y-4 rounded-3xl bg-white p-6 shadow-xl">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold">Create post</h2>
-              <button className="text-sm text-slate-500" onClick={() => setShowModal(false)}>
-                Close
-              </button>
-            </div>
-            <div className="space-y-3 text-sm">
-              <label className="block">
-                <span className="text-slate-600">Location</span>
-                <select className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2">
-                  <option>Downtown</option>
-                  <option>Uptown</option>
-                </select>
-              </label>
-              <label className="block">
-                <span className="text-slate-600">Topic / service</span>
-                <input className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2" placeholder="Tune-up" />
-              </label>
-              <label className="flex items-center gap-2 text-slate-600">
-                <input type="checkbox" />
-                AI generate caption
-              </label>
-              <label className="block">
-                <span className="text-slate-600">Schedule time</span>
-                <input type="datetime-local" className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2" />
-              </label>
-              <label className="block">
-                <span className="text-slate-600">Attach photo</span>
-                <input type="file" className="mt-1 block w-full text-xs" />
-              </label>
-            </div>
-            <div className="flex justify-end gap-2 text-sm font-semibold">
-              <button className="rounded-full border border-slate-200 px-4 py-2 text-slate-600" onClick={() => setShowModal(false)}>
-                Cancel
-              </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-6 lg:grid-cols-2">
+        <div className="rounded-3xl bg-white p-6 shadow-sm">
+          <h3 className="text-lg font-semibold">Composer</h3>
+          <p className="text-sm text-slate-600">AI rotates services, keywords, and cities automatically. You can nudge the prompt below.</p>
+          <div className="mt-4 space-y-3 text-sm">
+            <label className="block">
+              <span className="text-slate-600">What should we highlight?</span>
+              <textarea
+                className="mt-1 w-full rounded-2xl border border-slate-200 p-3"
+                rows={3}
+                value={aiPrompt}
+                onChange={(event) => setAiPrompt(event.target.value)}
+              />
+            </label>
+            <label className="block">
+              <span className="text-slate-600">Schedule</span>
+              <input type="datetime-local" className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2" />
+            </label>
+            <div className="flex items-center gap-3">
               <button
-                className="rounded-full bg-primary px-4 py-2 text-white"
-                onClick={() => {
-                  setShowModal(false);
-                  pushToast({ title: "Post scheduled", description: "We’ll publish at the selected time.", tone: "success" });
-                }}
+                className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white"
+                onClick={() => pushToast({ title: "AI post created", description: "Draft saved to the queue.", tone: "success" })}
               >
-                Schedule post
+                Generate draft
               </button>
+              <button className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600">Attach media</button>
             </div>
           </div>
         </div>
-      )}
-      <Drawer open={Boolean(selectedPost)} onClose={() => setSelectedPost(null)} title="Post detail">
-        {selectedPost && (
-          <div className="space-y-4 text-sm text-slate-600">
-            <div>
-              <p className="text-xs uppercase tracking-[0.3em] text-primary">Topic</p>
-              <p className="text-base font-semibold text-slate-900">{selectedPost.topic}</p>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs uppercase tracking-[0.3em] text-primary">Location</p>
-                <p className="font-semibold text-slate-900">{selectedPost.location}</p>
-                <p>{selectedPost.details}</p>
-              </div>
-              <StatusBadge status={selectedPost.status} />
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-[0.3em] text-primary">Schedule</p>
-              <p>{selectedPost.date}</p>
-            </div>
-            {selectedPost.error && (
-              <div className="rounded-2xl border border-rose-100 bg-rose-50 p-3 text-rose-700">
-                Error: {selectedPost.error}. Retry once the content is updated.
-              </div>
-            )}
-            <button
-              className="w-full rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700"
-              onClick={() => {
-                pushToast({ title: "Retry queued", description: "We’ll re-attempt publishing shortly." });
-                setSelectedPost(null);
-              }}
-            >
-              Retry post
-            </button>
+        <div className="rounded-3xl bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold">Media library</h3>
+            <label className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white cursor-pointer">
+              Upload
+              <input type="file" className="hidden" multiple />
+            </label>
           </div>
-        )}
-      </Drawer>
+          <div className="mt-4 grid gap-3">
+            {mediaLibrary.map((asset) => (
+              <div key={asset.id} className="flex items-center justify-between rounded-2xl border border-slate-100 p-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">{asset.label}</p>
+                  <p className="text-xs text-slate-500">Last used {asset.lastUsed}</p>
+                </div>
+                <span
+                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                    asset.status === "Approved" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                  }`}
+                >
+                  {asset.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
