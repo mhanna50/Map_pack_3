@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { getAccessToken } from "@/lib/supabase/session";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
@@ -20,11 +21,16 @@ export default function GoogleCallbackPage() {
     }
     const handleCallback = async () => {
       try {
+        const token = await getAccessToken();
+        if (!token) {
+          throw new Error("Sign in to finish connecting Google.");
+        }
         const redirectUri = `${window.location.origin}/onboarding/google/callback`;
         const response = await fetch(`${API_BASE_URL}/google/oauth/callback`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ code, state, redirect_uri: redirectUri }),
         });

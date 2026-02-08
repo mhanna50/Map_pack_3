@@ -1,4 +1,20 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: map_pack
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d map_pack"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   redis:
     image: redis:7-alpine
     ports:
@@ -7,5 +23,161 @@ services:
     volumes:
       - redis_data:/data
 
+  db-init:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.backend
+    command: python -m backend.app.db.create_db
+    working_dir: /app
+    env_file:
+      - ../.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    volumes:
+      - ..:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.backend
+    command: uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/backend
+    working_dir: /app
+    env_file:
+      - ../.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    volumes:
+      - ..:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.worker
+    command: celery -A worker.app worker --loglevel=info
+    working_dir: /app
+    env_file:
+      - ../.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    volumes:
+      - ..:/app
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  scheduler:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.worker
+    command: celery -A scheduler.app:app beat --loglevel=info
+    working_dir: /app
+    env_file:
+      - ../.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    volumes:
+      - ..:/app
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  frontend-client:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.frontend
+      args:
+        APP_DIR: frontend
+    command: npm run dev -- --hostname 0.0.0.0 --port 3000
+    working_dir: /app/frontend
+    env_file:
+      - ../.env
+    environment:
+      NEXT_TELEMETRY_DISABLED: "1"
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - ..:/app
+      - frontend_client_node_modules:/app/frontend/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_started
+
+  frontend-marketing:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.frontend
+      args:
+        APP_DIR: frontend-marketing
+    command: npm run dev -- --hostname 0.0.0.0 --port 3001
+    working_dir: /app/frontend-marketing
+    env_file:
+      - ../.env
+    environment:
+      NEXT_TELEMETRY_DISABLED: "1"
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - ..:/app
+      - frontend_marketing_node_modules:/app/frontend-marketing/node_modules
+    ports:
+      - "3001:3001"
+    depends_on:
+      backend:
+        condition: service_started
+
+  frontend-admin:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.frontend
+      args:
+        APP_DIR: frontend-admin
+    command: npm run dev -- --hostname 0.0.0.0 --port 3002
+    working_dir: /app/frontend-admin
+    env_file:
+      - ../.env
+    environment:
+      NEXT_TELEMETRY_DISABLED: "1"
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - ..:/app
+      - frontend_admin_node_modules:/app/frontend-admin/node_modules
+    ports:
+      - "3002:3002"
+    depends_on:
+      backend:
+        condition: service_started
+
 volumes:
+  postgres_data:
   redis_data:
+  frontend_client_node_modules:
+  frontend_marketing_node_modules:
+  frontend_admin_node_modules:

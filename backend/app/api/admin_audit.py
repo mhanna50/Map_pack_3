@@ -7,9 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
+from backend.app.api.deps import get_current_staff
 from backend.app.db.session import get_db
 from backend.app.models.audit_log import AuditLog
-from backend.app.services.access import AccessDeniedError, AccessService
+from backend.app.models.user import User
 
 router = APIRouter(prefix="/admin/audit", tags=["admin_audit"])
 
@@ -32,7 +33,6 @@ class AuditEntryResponse(BaseModel):
 
 @router.get("/", response_model=list[AuditEntryResponse])
 def list_audit_entries(
-    user_id: uuid.UUID = Query(...),
     organization_id: uuid.UUID | None = Query(None),
     actor_id: uuid.UUID | None = Query(None),
     action: str | None = Query(None),
@@ -40,12 +40,8 @@ def list_audit_entries(
     end: datetime | None = Query(None),
     limit: int = Query(200, ge=1, le=1000),
     db: Session = Depends(get_db),
+    _: User = Depends(get_current_staff),
 ) -> list[AuditLog]:
-    access = AccessService(db)
-    try:
-        access.require_staff(user_id)
-    except AccessDeniedError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
     query = db.query(AuditLog)
     if organization_id:
         query = query.filter(AuditLog.organization_id == organization_id)

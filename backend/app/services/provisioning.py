@@ -55,13 +55,16 @@ class ClientProvisioningService:
         self.db.add(membership)
         self.db.commit()
         token = self.token_signer.create_token(org_id=str(organization.id), email=email, org_name=organization.name)
-        onboarding_link = f"{settings.CLIENT_APP_URL}/onboarding?token={token}"
-        subject = "You're ready to onboard to Map Pack 3"
-        body = (
-            f"<p>Thanks for your payment! Use the secure link below to finish setting up your dashboard.</p>"
-            f"<p><a href=\"{onboarding_link}\">Open onboarding</a></p>"
-            f"<p>If you didn't authorize this, reply to this email.</p>"
+        client_base = str(settings.CLIENT_APP_URL).rstrip("/")
+        onboarding_link = f"{client_base}/onboarding?token={token}"
+        self.notifier.send_onboarding_email(
+            to_email=email,
+            redirect_url=onboarding_link,
+            metadata={
+                "organization_id": str(organization.id),
+                "organization_name": organization.name,
+                "plan": plan,
+            },
         )
-        self.notifier.send_email(to_email=email, subject=subject, html_body=body)
         logger.info("Provisioned organization %s for %s via checkout %s", organization.id, email, checkout_reference)
         return organization

@@ -1,5 +1,84 @@
-import { SignUp } from "@clerk/nextjs";
+"use client";
+
+import { FormEvent, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+import { createClient } from "@/lib/supabase/client";
 
 export default function Page() {
-  return <SignUp />;
+  const router = useRouter();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      const supabase = createClient();
+      const { error: authError } = await supabase.auth.signUp({
+        email,
+        password,
+      });
+      if (authError) {
+        throw authError;
+      }
+      router.push("/app");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to sign up");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-6">
+      <form onSubmit={handleSubmit} className="w-full max-w-md space-y-6 rounded-3xl bg-white p-8 shadow-sm">
+        <div className="space-y-1 text-center">
+          <p className="text-xs uppercase tracking-[0.3em] text-primary">Get started</p>
+          <h1 className="text-2xl font-semibold text-slate-900">Create your account</h1>
+          <p className="text-sm text-slate-600">Use the email address that received the checkout link.</p>
+        </div>
+        {error && <p className="rounded-2xl bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</p>}
+        <label className="block text-sm">
+          <span className="text-slate-600">Work email</span>
+          <input
+            className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="you@agency.com"
+            required
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="text-slate-600">Password</span>
+          <input
+            className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="Create a strong password"
+            required
+          />
+        </label>
+        <button
+          type="submit"
+          className="w-full rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          disabled={loading}
+        >
+          {loading ? "Creating account..." : "Create account"}
+        </button>
+        <p className="text-center text-sm text-slate-500">
+          Already have an account?{" "}
+          <Link href="/sign-in" className="font-semibold text-primary">
+            Sign in
+          </Link>
+        </p>
+      </form>
+    </div>
+  );
 }

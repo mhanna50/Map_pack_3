@@ -6,12 +6,37 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from backend.app.api.deps import get_current_user
 from backend.app.db.session import get_db
 from backend.app.models.membership import Membership
 from backend.app.models.enums import MembershipRole
+from backend.app.models.user import User
 from backend.app.services.invites import InviteService
+from backend.app.services.access import AccessService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+class CurrentUserResponse(BaseModel):
+    id: uuid.UUID
+    email: str
+    is_staff: bool
+    organization_ids: list[uuid.UUID]
+
+
+@router.get("/me", response_model=CurrentUserResponse)
+def current_user_profile(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CurrentUserResponse:
+    access = AccessService(db)
+    orgs = access.member_orgs(current_user.id)
+    return CurrentUserResponse(
+        id=current_user.id,
+        email=current_user.email,
+        is_staff=current_user.is_staff,
+        organization_ids=[org.id for org in orgs],
+    )
 
 
 class AcceptInviteRequest(BaseModel):

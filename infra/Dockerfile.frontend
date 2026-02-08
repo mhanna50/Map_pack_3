@@ -1,0 +1,12 @@
+FROM node:20-alpine
+
+ARG APP_DIR=frontend
+
+WORKDIR /app/${APP_DIR}
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY ${APP_DIR}/package.json ${APP_DIR}/package-lock.json ./
+RUN npm ci
+
+COPY ${APP_DIR} ./

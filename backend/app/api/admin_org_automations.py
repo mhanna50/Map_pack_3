@@ -6,8 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
+from backend.app.api.deps import get_current_staff
 from backend.app.db.session import get_db
-from backend.app.services.access import AccessDeniedError, AccessService
+from backend.app.models.user import User
 from backend.app.services.automation_settings import (
     AUTOMATION_DEFINITIONS,
     AutomationSettingsService,
@@ -33,14 +34,9 @@ class AutomationResponse(BaseModel):
 @router.get("/{organization_id}/automations", response_model=list[AutomationResponse])
 def get_org_automations(
     organization_id: uuid.UUID,
-    user_id: uuid.UUID,
     db: Session = Depends(get_db),
+    _: User = Depends(get_current_staff),
 ) -> list[dict]:
-    access = AccessService(db)
-    try:
-        access.require_staff(user_id)
-    except AccessDeniedError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     service = AutomationSettingsService(db)
     return service.list_org_automations(organization_id)
 
@@ -53,7 +49,6 @@ class AutomationUpdatePayload(BaseModel):
 
 class AutomationUpdateRequest(BaseModel):
     automations: list[AutomationUpdatePayload]
-    user_id: uuid.UUID
 
 
 @router.patch("/{organization_id}/automations", response_model=list[AutomationResponse])
@@ -61,18 +56,13 @@ def update_org_automations(
     organization_id: uuid.UUID,
     payload: AutomationUpdateRequest,
     db: Session = Depends(get_db),
+    _: User = Depends(get_current_staff),
 ) -> list[dict]:
-    access = AccessService(db)
-    try:
-        access.require_staff(payload.user_id)
-    except AccessDeniedError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     service = AutomationSettingsService(db)
     return service.update_org_automations(organization_id, [item.model_dump() for item in payload.automations])
 
 
 class RunNowRequest(BaseModel):
-    user_id: uuid.UUID
     type: str
     location_id: uuid.UUID | None = None
     payload: dict | None = None
@@ -89,12 +79,8 @@ def run_automation_now(
     organization_id: uuid.UUID,
     payload: RunNowRequest,
     db: Session = Depends(get_db),
+    _: User = Depends(get_current_staff),
 ) -> RunNowResponse:
-    access = AccessService(db)
-    try:
-        access.require_staff(payload.user_id)
-    except AccessDeniedError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     definition = AUTOMATION_DEFINITIONS.get(payload.type)
     if not definition:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown automation type")

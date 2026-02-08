@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from backend.app.api.deps import get_current_user
 from ..db.session import get_db
 from ..services.dashboard import DashboardService
 
@@ -24,15 +25,15 @@ class DashboardOverviewResponse(BaseModel):
 
 @router.get("/overview", response_model=DashboardOverviewResponse)
 def dashboard_overview(
-    user_id: uuid.UUID = Query(...),
     organization_id: uuid.UUID | None = Query(None),
     location_id: uuid.UUID | None = Query(None),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> DashboardOverviewResponse:
     service = DashboardService(db)
     try:
         data = service.get_overview(
-            user_id=user_id,
+            user_id=current_user.id,
             organization_id=organization_id,
             location_id=location_id,
         )

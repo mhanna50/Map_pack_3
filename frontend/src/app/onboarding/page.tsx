@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { getAccessToken } from "@/lib/supabase/session";
 
 const steps = [
   "Create org",
@@ -138,10 +139,15 @@ export default function OnboardingPage() {
     setCreatingOrg(true);
     setCreateOrgError(null);
     try {
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error("Sign in to create your organization.");
+      }
       const response = await fetch(`${API_BASE_URL}/orgs/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           name: orgInfo.name.trim(),
@@ -173,11 +179,16 @@ export default function OnboardingPage() {
     setConnectError(null);
     setConnectingGoogle(true);
     try {
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error("Sign in to connect Google.");
+      }
       const redirectUri = typeof window !== "undefined" ? `${window.location.origin}/onboarding/google/callback` : undefined;
       const response = await fetch(`${API_BASE_URL}/google/oauth/start`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           organization_id: organizationId,
@@ -235,6 +246,11 @@ export default function OnboardingPage() {
           <h1 className="text-3xl font-semibold">Launch your automations</h1>
           <p className="text-sm text-slate-600">Finish the wizard so the dashboard is fully configured before day one.</p>
         </header>
+        {tokenError && (
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {tokenError}
+          </div>
+        )}
 
         <div>
           <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">

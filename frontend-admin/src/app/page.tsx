@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { getAccessToken } from "@/lib/supabase/session";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const CLIENT_APP_URL = process.env.NEXT_PUBLIC_CLIENT_APP_URL ?? "";
+const DEV_BYPASS = process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_DISABLE_AUTH === "true";
 
 type Organization = {
   id: string;
@@ -16,6 +18,32 @@ type Organization = {
 };
 
 const planOptions = ["starter", "pro", "agency"];
+const mockOrganizations: Organization[] = [
+  {
+    id: "org-acme",
+    name: "Acme HVAC",
+    org_type: "agency",
+    plan_tier: "pro",
+    created_at: "2025-11-18T12:00:00Z",
+    locationCount: 3,
+  },
+  {
+    id: "org-north",
+    name: "Northside Plumbing",
+    org_type: "local",
+    plan_tier: "starter",
+    created_at: "2025-12-02T12:00:00Z",
+    locationCount: 1,
+  },
+  {
+    id: "org-primetime",
+    name: "Primetime Roofing",
+    org_type: "agency",
+    plan_tier: "agency",
+    created_at: "2026-01-09T12:00:00Z",
+    locationCount: 8,
+  },
+];
 
 export default function AdminDashboardPage() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -23,16 +51,54 @@ export default function AdminDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [planDrafts, setPlanDrafts] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
+  const [checkoutEmail, setCheckoutEmail] = useState("");
+  const [checkoutCompany, setCheckoutCompany] = useState("");
+  const [checkoutPlan, setCheckoutPlan] = useState(planOptions[0]);
+  const [sendingCheckout, setSendingCheckout] = useState(false);
+  const [checkoutMessage, setCheckoutMessage] = useState<string | null>(null);
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
 
   useEffect(() => {
     void loadOrganizations();
   }, []);
 
+  const ensureAdminToken = async () => {
+    if (DEV_BYPASS) {
+      return null;
+    }
+    const token = await getAccessToken();
+    if (!token) {
+      throw new Error("You must be signed in to access the admin dashboard.");
+    }
+    const profileResponse = await fetch(`${API_BASE_URL}/auth/me`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (!profileResponse.ok) {
+      throw new Error("Unable to verify admin access.");
+    }
+    const profile = await profileResponse.json();
+    if (!profile.is_staff) {
+      throw new Error("Admin access required.");
+    }
+    return token;
+  };
+
   const loadOrganizations = async () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/orgs/`);
+      const token = await ensureAdminToken();
+      if (!token) {
+        setOrganizations(mockOrganizations);
+        return;
+      }
+      const response = await fetch(`${API_BASE_URL}/orgs/`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
       if (!response.ok) {
         throw new Error("Failed to load organizations");
       }
@@ -40,7 +106,11 @@ export default function AdminDashboardPage() {
       const withCounts = await Promise.all(
         orgs.map(async (org) => {
           try {
-            const locResp = await fetch(`${API_BASE_URL}/orgs/${org.id}/locations`);
+            const locResp = await fetch(`${API_BASE_URL}/orgs/${org.id}/locations`, {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            });
             const locations = locResp.ok ? await locResp.json() : [];
             return { ...org, locationCount: locations.length };
           } catch {
@@ -56,6 +126,50 @@ export default function AdminDashboardPage() {
     }
   };
 
+  const handleSendCheckout = async () => {
+    if (!checkoutEmail.trim() || !checkoutCompany.trim()) {
+      setCheckoutMessage("Enter a client email and company name.");
+      return;
+    }
+    if (DEV_BYPASS) {
+      setCheckoutMessage("Dev mode: checkout link generation is disabled.");
+      return;
+    }
+    setSendingCheckout(true);
+    setCheckoutMessage(null);
+    setCheckoutUrl(null);
+    try {
+      const token = await ensureAdminToken();
+      const response = await fetch(`${API_BASE_URL}/billing/checkout-link`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          email: checkoutEmail.trim(),
+          company_name: checkoutCompany.trim(),
+          plan: checkoutPlan,
+        }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || "Unable to send checkout link");
+      }
+      const payload = await response.json();
+      setCheckoutUrl(payload.checkout_url);
+      setCheckoutMessage(
+        payload.emailed
+          ? "Checkout link sent."
+          : "Checkout link generated (email not sent — Supabase Auth handles onboarding emails only).",
+      );
+    } catch (sendError) {
+      setCheckoutMessage(sendError instanceof Error ? sendError.message : "Unable to send checkout link");
+    } finally {
+      setSendingCheckout(false);
+    }
+  };
+
   const handlePlanChange = (orgId: string, value: string) => {
     setPlanDrafts((prev) => ({ ...prev, [orgId]: value }));
   };
@@ -65,10 +179,18 @@ export default function AdminDashboardPage() {
     if (!nextPlan) return;
     setSaving((prev) => ({ ...prev, [orgId]: true }));
     try {
+      if (DEV_BYPASS) {
+        setOrganizations((prev) =>
+          prev.map((org) => (org.id === orgId ? { ...org, plan_tier: nextPlan } : org)),
+        );
+        return;
+      }
+      const token = await ensureAdminToken();
       const response = await fetch(`${API_BASE_URL}/orgs/${orgId}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ plan_tier: nextPlan }),
       });
@@ -136,6 +258,69 @@ export default function AdminDashboardPage() {
         <section className="rounded-3xl bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
+              <h2 className="text-xl font-semibold">New client checkout</h2>
+              <p className="text-sm text-slate-600">Send a Stripe checkout link after closing the deal.</p>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-4 md:grid-cols-3">
+            <label className="text-sm text-slate-600">
+              Client email
+              <input
+                className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm"
+                type="email"
+                placeholder="client@company.com"
+                value={checkoutEmail}
+                onChange={(event) => setCheckoutEmail(event.target.value)}
+              />
+            </label>
+            <label className="text-sm text-slate-600">
+              Company name
+              <input
+                className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm"
+                type="text"
+                placeholder="Acme HVAC"
+                value={checkoutCompany}
+                onChange={(event) => setCheckoutCompany(event.target.value)}
+              />
+            </label>
+            <label className="text-sm text-slate-600">
+              Plan
+              <select
+                className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm"
+                value={checkoutPlan}
+                onChange={(event) => setCheckoutPlan(event.target.value)}
+              >
+                {planOptions.map((plan) => (
+                  <option key={plan} value={plan}>
+                    {plan}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              onClick={() => void handleSendCheckout()}
+              disabled={sendingCheckout}
+            >
+              {sendingCheckout ? "Sending..." : "Send checkout link"}
+            </button>
+            {checkoutUrl && (
+              <button
+                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600"
+                onClick={() => navigator.clipboard.writeText(checkoutUrl)}
+              >
+                Copy checkout link
+              </button>
+            )}
+            {checkoutMessage && <p className="text-sm text-slate-600">{checkoutMessage}</p>}
+          </div>
+        </section>
+
+        <section className="rounded-3xl bg-white p-6 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
               <h2 className="text-xl font-semibold">Organizations</h2>
               <p className="text-sm text-slate-600">Plan tier, locations, and admin shortcuts.</p>
             </div>
@@ -197,9 +382,12 @@ export default function AdminDashboardPage() {
                       </td>
                       <td className="px-3 py-3">
                         <div className="flex flex-wrap gap-2 text-xs font-semibold">
-                          <Link href={`/app?org=${org.id}`} className="rounded-full border border-slate-200 px-3 py-1 text-slate-600">
+                          <a
+                            href={`${CLIENT_APP_URL || ""}/app?org=${org.id}`}
+                            className="rounded-full border border-slate-200 px-3 py-1 text-slate-600"
+                          >
                             Open dashboard
-                          </Link>
+                          </a>
                           <button
                             className="rounded-full border border-slate-200 px-3 py-1 text-slate-600"
                             onClick={() => navigator.clipboard.writeText(org.id)}

@@ -7,10 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import AnyHttpUrl, BaseModel, Field, ConfigDict
 from sqlalchemy.orm import Session
 
+from backend.app.api.deps import get_current_user
 from ..db.session import get_db
 from ..models.connected_account import ConnectedAccount
 from ..models.enums import LocationStatus, ProviderType
-from ..models.organization import Organization
+from ..models.user import User
+from ..services.access import AccessDeniedError, AccessService
 from ..services.connected_accounts import ConnectedAccountService
 from ..services.google import (
     GoogleBusinessClient,
@@ -39,11 +41,15 @@ class OAuthStartResponse(BaseModel):
 
 @router.post("/oauth/start", response_model=OAuthStartResponse)
 def start_oauth(
-    payload: OAuthStartRequest, db: Session = Depends(get_db)
+    payload: OAuthStartRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> OAuthStartResponse:
-    organization = db.get(Organization, payload.organization_id)
-    if not organization:
-        raise HTTPException(status_code=404, detail="Organization not found")
+    access = AccessService(db)
+    try:
+        _, organization = access.resolve_org(user_id=current_user.id, organization_id=payload.organization_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     signer = OAuthStateSigner()
     state_payload = {
         "organization_id": str(payload.organization_id),
@@ -80,14 +86,18 @@ class OAuthCallbackResponse(BaseModel):
 
 @router.post("/oauth/callback", response_model=OAuthCallbackResponse)
 def oauth_callback(
-    payload: OAuthCallbackRequest, db: Session = Depends(get_db)
+    payload: OAuthCallbackRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> OAuthCallbackResponse:
     signer = OAuthStateSigner()
     decoded = signer.decode(payload.state)
     organization_id = uuid.UUID(decoded["organization_id"])
-    organization = db.get(Organization, organization_id)
-    if not organization:
-        raise HTTPException(status_code=404, detail="Organization not found")
+    access = AccessService(db)
+    try:
+        _, organization = access.resolve_org(user_id=current_user.id, organization_id=organization_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     oauth = GoogleOAuthService()
     token_data = oauth.exchange_code_for_tokens(
@@ -131,7 +141,13 @@ def oauth_callback(
 def list_accounts(
     organization_id: uuid.UUID = Query(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> list[ConnectedAccount]:
+    access = AccessService(db)
+    try:
+        access.resolve_org(user_id=current_user.id, organization_id=organization_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return (
         db.query(ConnectedAccount)
         .filter(
@@ -166,8 +182,14 @@ def _get_connected_account(
 def list_remote_locations(
     account_id: uuid.UUID,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> list[GoogleLocationResponse]:
     account = _get_connected_account(db, account_id)
+    access = AccessService(db)
+    try:
+        access.resolve_org(user_id=current_user.id, organization_id=account.organization_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     if not account.external_account_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -220,10 +242,16 @@ def connect_location(
     account_id: uuid.UUID,
     payload: ConnectLocationRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     account = _get_connected_account(db, account_id)
     if account.organization_id != payload.organization_id:
         raise HTTPException(status_code=403, detail="Organization mismatch")
+    access = AccessService(db)
+    try:
+        access.resolve_org(user_id=current_user.id, organization_id=payload.organization_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     account_service = ConnectedAccountService(db)
     oauth = GoogleOAuthService()

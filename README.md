@@ -93,10 +93,15 @@ Automation platform for agencies that need to manage and grow multiple Google Bu
 ### Setup
 
 1. Copy `.env.example` → `.env` and fill in provider keys. At minimum you need `DATABASE_URL`, `REDIS_URL`, `CELERY_*`, `ENCRYPTION_KEY` (generate via `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`), and Google OAuth credentials before auth/token storage will work.  
-2. Start Redis:
+2. Start the full local stack (marketing + client + admin frontends, backend API, worker, scheduler, Postgres, Redis):
    ```bash
-   docker compose -f infra/docker-compose.yml up -d
+   docker compose -f infra/docker-compose.yml up --build
    ```
+   By default Docker uses the local Postgres container. To point at Supabase instead, set `DATABASE_URL` in your shell before running the compose command.
+   Local URLs:
+   - Marketing site: `http://localhost:3001`
+   - Client dashboard: `http://localhost:3000/app`
+   - Admin dashboard: `http://localhost:3002`
 3. Install dependencies into the shared virtualenv:
    ```bash
    ./scripts/bootstrap.sh
@@ -121,28 +126,91 @@ python -m backend.app.db.migrations.0007_dashboard_and_plan
 python scripts/run_migrations.py
 ```
 
-### Run Services
+### Run Services (manual, optional)
+
+If you prefer to run services outside Docker, you can still use the commands below:
 
 ```bash
 # Backend API
 uvicorn backend.app.main:app --reload --port 8000
 
 # Celery worker (separate terminal)
-celery -A worker.app.tasks worker --loglevel=info
+celery -A worker.app worker --loglevel=info
 
-# Celery beat / cron trigger (third terminal)
-celery -A worker.app.tasks beat --loglevel=info
-
-# Automation rules schedule (beat handles this every 15 min)
-# actions.schedule_automation_rules enqueues RUN_AUTOMATION_RULES actions for each org
+# Scheduler (Celery beat) (third terminal)
+celery -A scheduler.app:app beat --loglevel=info
 ```
 
 Frontend commands (e.g., `npm install`, `npm run dev`) can run with the Python virtualenv still active; they’re isolated.
+Frontend directories:
+- `frontend/` (client dashboard)
+- `frontend-marketing/` (marketing site)
+- `frontend-admin/` (admin dashboard)
 
 Plan tiers and usage limits can be updated via:
 
 ```bash
 python scripts/set_plan_tier.py <organization_id> pro 60 10
+```
+
+---
+
+## Stripe Billing + Automatic Login Email
+
+When a client completes a Stripe Checkout payment, the backend provisions their org + membership and emails a dashboard access message (login URL + onboarding link). This flow is handled by `/api/billing/webhook`.
+
+### 1) Stripe setup
+
+1. Create a Product + Price in Stripe and copy the price ID.
+2. Set these environment variables (see `.env.example`):
+   - `STRIPE_SECRET_KEY`
+   - `STRIPE_PRICE_ID` (or per-plan: `STRIPE_PRICE_ID_STARTER`, `STRIPE_PRICE_ID_PRO`, `STRIPE_PRICE_ID_AGENCY`)
+   - `STRIPE_WEBHOOK_SECRET`
+   - `STRIPE_SUCCESS_URL`
+   - `STRIPE_CANCEL_URL`
+3. Create a webhook endpoint in Stripe that points to:
+   - `https://<your-backend-domain>/api/billing/webhook`
+4. Subscribe the webhook to:
+   - `checkout.session.completed`
+   - `invoice.paid` (if you later add subscriptions)
+
+Local testing tip (optional): use the Stripe CLI to forward webhooks to your local API.
+
+### 2) Supabase Auth email
+
+Onboarding emails are sent through Supabase Auth invites. Set:
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+
+Make sure your Supabase Auth settings allow redirects to your `CLIENT_APP_URL` onboarding link.
+
+### 3) Client app URL
+
+Set `CLIENT_APP_URL` so the onboarding + sign-in links in the email point to your client dashboard (e.g., `https://app.yourdomain.com`).
+Set `NEXT_PUBLIC_CLIENT_APP_URL` for the admin UI so dashboard links point to the client app.
+
+---
+
+## Supabase Auth (Client + Admin Login)
+
+This repo now uses Supabase Auth for login (email + password). Configure Supabase and then set the env vars in `.env.example`.
+
+### 1) Supabase project
+1. Create a Supabase project.
+2. Enable Email/Password auth in the Supabase Auth settings.
+3. Add your frontend URL to allowed redirect URLs (for password resets).
+
+### 2) Environment variables
+Set these in `.env`:
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_URL`
+
+### 3) Admin access
+Your admin user needs `is_staff=true` in the backend `users` table. After signing up, run:
+
+```bash
+python scripts/set_staff_user.py you@yourdomain.com true
 ```
 
 ---

@@ -25,12 +25,25 @@ class Settings(BaseSettings):
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
     TWILIO_FROM_NUMBER: str = ""
-    SENDGRID_API_KEY: str = ""
-    EMAIL_FROM: str = ""
-    POSTMARK_SERVER_TOKEN: str = ""
+
+    SUPABASE_URL: str = ""
+    SUPABASE_JWKS_URL: str = ""
+    SUPABASE_JWT_ISSUER: str = ""
+    SUPABASE_JWT_AUDIENCE: str = "authenticated"
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
+    SUPABASE_JWT_SECRET: str = ""
 
     STRIPE_SECRET_KEY: str = ""
     STRIPE_PRICE_ID: str = ""
+    STRIPE_PRICE_ID_STARTER: str = ""
+    STRIPE_PRICE_ID_PRO: str = ""
+    STRIPE_PRICE_ID_AGENCY: str = ""
+    STRIPE_PRICE_AMOUNT_STARTER: int | None = None
+    STRIPE_PRICE_AMOUNT_PRO: int | None = None
+    STRIPE_PRICE_AMOUNT_AGENCY: int | None = None
+    STRIPE_PRICE_AMOUNT: int | None = None
+    STRIPE_PRICE_CURRENCY: str = "usd"
+    STRIPE_PRICE_INTERVAL: str = "month"
     STRIPE_WEBHOOK_SECRET: str = ""
     STRIPE_SUCCESS_URL: AnyHttpUrl | None = None
     STRIPE_CANCEL_URL: AnyHttpUrl | None = None

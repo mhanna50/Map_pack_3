@@ -38,7 +38,7 @@ HOLIDAY_EVENTS = [
     {"month": 10, "day": 31, "name": "Halloween", "bucket": "local_highlight", "boost": 8},
     {"month": 12, "day": 25, "name": "Holiday Season", "bucket": "offer", "boost": 12},
     {"month": 11, "weekday": 3, "occurrence": 4, "name": "Thanksgiving", "bucket": "proof", "boost": 10},
-}
+]
 
 WEATHER_TRIGGERS = {
     "storm": {"name": "Storm Alert", "bucket": "seasonal_tip", "message": "Share preparation tips."},

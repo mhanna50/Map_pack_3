@@ -8,11 +8,14 @@ from datetime import datetime
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from sqlalchemy.orm import Session
 
+from backend.app.api.deps import get_current_staff, get_current_user
 from ..db.session import get_db
 from ..models.enums import LocationStatus, OrganizationType
 from ..models.location import Location
 from ..models.location_settings import LocationSettings
 from ..models.organization import Organization
+from ..models.user import User
+from ..services.access import AccessDeniedError, AccessService
 from ..services.onboarding_tokens import OnboardingTokenSigner
 
 router = APIRouter(prefix="/orgs", tags=["organizations"])
@@ -37,8 +40,11 @@ class OrganizationCreateRequest(BaseModel):
 
 @router.post("/", response_model=OrganizationResponse, status_code=status.HTTP_201_CREATED)
 def create_organization(
-    payload: OrganizationCreateRequest, db: Session = Depends(get_db)
+    payload: OrganizationCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_staff),
 ) -> Organization:
+    _ = current_user
     org = Organization(name=payload.name, org_type=payload.org_type, slug=payload.slug)
     db.add(org)
     db.commit()
@@ -47,8 +53,12 @@ def create_organization(
 
 
 @router.get("/", response_model=list[OrganizationResponse])
-def list_organizations(db: Session = Depends(get_db)) -> list[Organization]:
-    return db.query(Organization).order_by(Organization.created_at.desc()).all()
+def list_organizations(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[Organization]:
+    access = AccessService(db)
+    return access.member_orgs(current_user.id)
 
 
 class LocationResponse(BaseModel):
@@ -92,10 +102,13 @@ def create_location(
     organization_id: uuid.UUID,
     payload: LocationCreateRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> Location:
-    organization = db.get(Organization, organization_id)
-    if not organization:
-        raise HTTPException(status_code=404, detail="Organization not found")
+    access = AccessService(db)
+    try:
+        _, organization = access.resolve_org(user_id=current_user.id, organization_id=organization_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     location = Location(
         organization_id=organization_id,
@@ -121,8 +134,15 @@ def create_location(
 
 @router.get("/{organization_id}/locations", response_model=list[LocationResponse])
 def list_locations(
-    organization_id: uuid.UUID, db: Session = Depends(get_db)
+    organization_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> list[Location]:
+    access = AccessService(db)
+    try:
+        access.resolve_org(user_id=current_user.id, organization_id=organization_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return (
         db.query(Location)
         .filter(Location.organization_id == organization_id)
@@ -140,10 +160,16 @@ def update_location_settings(
     location_id: uuid.UUID,
     payload: LocationSettingsRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> Location:
     location = db.get(Location, location_id)
     if not location:
         raise HTTPException(status_code=404, detail="Location not found")
+    access = AccessService(db)
+    try:
+        access.resolve_org(user_id=current_user.id, organization_id=location.organization_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     if location.settings:
         for key, value in payload.model_dump(exclude_unset=True).items():
@@ -170,11 +196,16 @@ def update_organization(
     organization_id: uuid.UUID,
     payload: OrganizationUpdateRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> Organization:
-    organization = db.get(Organization, organization_id)
-    if not organization:
-        raise HTTPException(status_code=404, detail="Organization not found")
+    access = AccessService(db)
+    try:
+        _, organization = access.resolve_org(user_id=current_user.id, organization_id=organization_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     data = payload.model_dump(exclude_unset=True)
+    if not current_user.is_staff and any(key in data for key in ("plan_tier", "usage_limits")):
+        raise HTTPException(status_code=403, detail="Only admins can update plan or usage limits")
     if "name" in data and data["name"]:
         organization.name = data["name"]
     if "plan_tier" in data:

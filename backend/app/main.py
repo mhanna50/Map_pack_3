@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from .api.actions import router as actions_router
 from .api.google import router as google_router
@@ -24,6 +25,18 @@ from .api.admin_observability import router as admin_observability_router
 from .api.auth import router as auth_router
 
 app = FastAPI(title="Map 3-Pack API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:3002",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(health_router, prefix="/api")
 app.include_router(orgs_router, prefix="/api")

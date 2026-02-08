@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { ApprovalQueueWidget } from "@/components/approval-queue-widget";
+import { ApprovalQueueWidget, type ApprovalItem } from "@/components/approval-queue-widget";
 import { ActivityLog } from "@/components/activity-log";
 
 const kpis = [
@@ -57,9 +57,9 @@ const alerts = [
   { id: "al-5", label: "No posts in 7 days → scheduled", severity: "info" },
 ];
 
-const approvalItems = [
+const approvalItems: ApprovalItem[] = [
   { id: "1", type: "review", title: "⭐️ 2 — Late technician", location: "Downtown", submittedAt: "5m ago", status: "Needs approval" },
-  { id: "2", type: "gbp_edit", title: "Business hours edit", location: "Uptown", submittedAt: "1h ago", status: "Needs approval" },
+  { id: "2", type: "edit", title: "Business hours edit", location: "Uptown", submittedAt: "1h ago", status: "Needs approval" },
   { id: "3", type: "post", title: "Emergency checklist post", location: "Mobile crews", submittedAt: "Yesterday", status: "Draft" },
 ];
 

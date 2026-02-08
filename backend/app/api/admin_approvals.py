@@ -8,10 +8,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
+from backend.app.api.deps import get_current_staff
 from backend.app.db.session import get_db
 from backend.app.models.approval_request import ApprovalRequest
 from backend.app.models.enums import ApprovalCategory, ApprovalStatus
-from backend.app.services.access import AccessDeniedError, AccessService
+from backend.app.models.user import User
 from backend.app.services.approvals import ApprovalService
 
 router = APIRouter(prefix="/admin/approvals", tags=["admin_approvals"])
@@ -42,7 +43,6 @@ class AdminApprovalResponse(BaseModel):
 
 @router.get("/", response_model=list[AdminApprovalResponse])
 def admin_list_approvals(
-    user_id: uuid.UUID = Query(...),
     status_filter: ApprovalStatus | None = Query(None, alias="status"),
     organization_id: uuid.UUID | None = Query(None),
     location_id: uuid.UUID | None = Query(None),
@@ -50,12 +50,8 @@ def admin_list_approvals(
     severity: str | None = Query(None),
     older_than_hours: int | None = Query(None, ge=0),
     db: Session = Depends(get_db),
+    _: User = Depends(get_current_staff),
 ) -> list[ApprovalRequest]:
-    access = AccessService(db)
-    try:
-        access.require_staff(user_id)
-    except AccessDeniedError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     query = db.query(ApprovalRequest)
     if status_filter:
         query = query.filter(ApprovalRequest.status == status_filter)
@@ -75,7 +71,6 @@ def admin_list_approvals(
 
 class AdminApprovalUpdateRequest(BaseModel):
     action: Literal["approve", "reject"]
-    user_id: uuid.UUID
     notes: str | None = None
     content: str | None = None
 
@@ -85,12 +80,8 @@ def admin_update_approval(
     approval_id: uuid.UUID,
     payload: AdminApprovalUpdateRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_staff),
 ) -> ApprovalRequest:
-    access = AccessService(db)
-    try:
-        access.require_staff(payload.user_id)
-    except AccessDeniedError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     service = ApprovalService(db)
     request = db.get(ApprovalRequest, approval_id)
     if not request:
@@ -98,19 +89,18 @@ def admin_update_approval(
     if payload.action == "approve":
         return service.approve(
             request,
-            approved_by=payload.user_id,
+            approved_by=current_user.id,
             notes=payload.notes,
             content=payload.content,
         )
     return service.reject(
         request,
-        rejected_by=payload.user_id,
+        rejected_by=current_user.id,
         notes=payload.notes,
     )
 
 
 class AdminPublishRequest(BaseModel):
-    user_id: uuid.UUID
     external_id: str | None = None
     content: str | None = None
 
@@ -120,12 +110,8 @@ def admin_publish_approval(
     approval_id: uuid.UUID,
     payload: AdminPublishRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_staff),
 ) -> ApprovalRequest:
-    access = AccessService(db)
-    try:
-        access.require_staff(payload.user_id)
-    except AccessDeniedError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     service = ApprovalService(db)
     request = db.get(ApprovalRequest, approval_id)
     if not request:
@@ -133,7 +119,7 @@ def admin_publish_approval(
     try:
         return service.publish(
             request,
-            actor_user_id=payload.user_id,
+            actor_user_id=current_user.id,
             external_id=payload.external_id,
             content=payload.content,
         )

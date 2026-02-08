@@ -14,7 +14,6 @@ from backend.app.models.job import Job
 from backend.app.models.review_request import ReviewRequest
 from backend.app.services.actions import ActionService
 from backend.app.services.audit import AuditService
-from backend.app.services.notifications import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +23,6 @@ class ReviewRequestService:
         self.db = db
         self.actions = ActionService(db)
         self.audit = AuditService(db)
-        self.notifier = NotificationService()
 
     def create_contact(
         self,
@@ -139,13 +137,8 @@ class ReviewRequestService:
                     raise ValueError("Contact missing phone number")
                 self._send_sms(contact.phone, message)
             else:
-                if not contact.email:
-                    raise ValueError("Contact missing email")
-                self.notifier.send_email(
-                    to_email=contact.email,
-                    subject="Share your experience",
-                    html_body=f"<p>{greeting}</p><p>Please leave a review: <a href=\"{link}\">Leave review</a></p>",
-                )
+                logger.info("Email review requests are disabled; SMS is the supported channel.")
+                return
             self.mark_sent(review_request)
             self.audit.log(
                 action="review_request.sent",

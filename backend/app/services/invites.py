@@ -138,14 +138,13 @@ class InviteService:
 
     def _send_invite_email(self, invite: OrganizationInvite, token: str) -> None:
         accept_url = f"{settings.CLIENT_APP_URL}/accept-invite?token={token}"
-        subject = f"You're invited to join {invite.organization.name}"
-        html_body = (
-            "<p>You've been invited to manage locations in Map Pack 3.</p>"
-            f"<p><a href=\"{accept_url}\">Accept your invite</a></p>"
-            "<p>If you were not expecting this, ignore the email.</p>"
-        )
-        self.notifier.send_email(
+        self.notifier.send_onboarding_email(
             to_email=invite.email,
-            subject=subject,
-            html_body=html_body,
+            redirect_url=accept_url,
+            metadata={
+                "organization_id": str(invite.organization_id),
+                "organization_name": invite.organization.name,
+                "role": invite.role.value,
+                "invite_id": str(invite.id),
+            },
         )

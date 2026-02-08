@@ -7,13 +7,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy.orm import Session
 
+from backend.app.api.deps import get_current_staff
 from backend.app.api.orgs import LocationResponse
 from backend.app.db.session import get_db
 from backend.app.models.alert import Alert
 from backend.app.models.enums import AlertStatus, MembershipRole, OrganizationType
 from backend.app.models.invite import OrganizationInvite
+from backend.app.models.location import Location
 from backend.app.models.organization import Organization
-from backend.app.services.access import AccessDeniedError, AccessService
+from backend.app.models.user import User
 from backend.app.services.audit import log_audit
 from backend.app.services.impersonation import ImpersonationService
 from backend.app.services.invites import InviteService
@@ -92,14 +94,9 @@ class AdminOrganizationDetailResponse(BaseModel):
 @router.post("/", response_model=AdminOrganizationSummary, status_code=status.HTTP_201_CREATED)
 def admin_create_org(
     payload: AdminOrganizationCreateRequest,
-    user_id: uuid.UUID = Query(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_staff),
 ) -> AdminOrganizationSummary:
-    access = AccessService(db)
-    try:
-        staff_user = access.require_staff(user_id)
-    except AccessDeniedError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     organization = Organization(
         name=payload.name,
         org_type=payload.org_type,
@@ -114,7 +111,7 @@ def admin_create_org(
     log_audit(
         db,
         action="organization.created",
-        actor=staff_user.id,
+        actor=current_user.id,
         org_id=organization.id,
         entity="organization",
         entity_id=str(organization.id),
@@ -125,16 +122,11 @@ def admin_create_org(
 
 @router.get("/", response_model=list[AdminOrganizationSummary])
 def admin_list_orgs(
-    user_id: uuid.UUID = Query(...),
     search: str | None = Query(None),
     plan: str | None = Query(None),
     db: Session = Depends(get_db),
+    _: User = Depends(get_current_staff),
 ) -> list[AdminOrganizationSummary]:
-    access = AccessService(db)
-    try:
-        access.require_staff(user_id)
-    except AccessDeniedError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     query = db.query(Organization)
     if search:
         search_term = f"%{search.lower()}%"
@@ -151,14 +143,9 @@ def admin_list_orgs(
 )
 def admin_org_detail(
     organization_id: uuid.UUID,
-    user_id: uuid.UUID = Query(...),
     db: Session = Depends(get_db),
+    _: User = Depends(get_current_staff),
 ) -> AdminOrganizationDetailResponse:
-    access = AccessService(db)
-    try:
-        access.require_staff(user_id)
-    except AccessDeniedError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     organization = db.get(Organization, organization_id)
     if not organization:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
@@ -199,14 +186,9 @@ def admin_org_detail(
 def admin_update_org_posting_controls(
     organization_id: uuid.UUID,
     payload: AdminPostingControlRequest,
-    user_id: uuid.UUID = Query(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_staff),
 ) -> AdminPostingControlResponse:
-    access = AccessService(db)
-    try:
-        staff_user = access.require_staff(user_id)
-    except AccessDeniedError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     organization = db.get(Organization, organization_id)
     if not organization:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
@@ -229,7 +211,7 @@ def admin_update_org_posting_controls(
         log_audit(
             db,
             action="organization.posting_controls_updated",
-            actor=staff_user.id,
+            actor=current_user.id,
             org_id=organization.id,
             entity="organization",
             entity_id=str(organization.id),
@@ -253,14 +235,9 @@ def admin_update_location_posting_controls(
     organization_id: uuid.UUID,
     location_id: uuid.UUID,
     payload: AdminPostingControlRequest,
-    user_id: uuid.UUID = Query(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_staff),
 ) -> AdminPostingControlResponse:
-    access = AccessService(db)
-    try:
-        staff_user = access.require_staff(user_id)
-    except AccessDeniedError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     location = db.get(Location, location_id)
     if not location or location.organization_id != organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Location not found")
@@ -283,7 +260,7 @@ def admin_update_location_posting_controls(
         log_audit(
             db,
             action="location.posting_controls_updated",
-            actor=staff_user.id,
+            actor=current_user.id,
             org_id=organization_id,
             entity="location",
             entity_id=str(location.id),
@@ -313,21 +290,16 @@ class AdminInviteRequest(BaseModel):
 def admin_create_invite(
     organization_id: uuid.UUID,
     payload: AdminInviteRequest,
-    user_id: uuid.UUID = Query(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_staff),
 ) -> AdminInviteResponse:
-    access = AccessService(db)
-    try:
-        staff_user = access.require_staff(user_id)
-    except AccessDeniedError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     service = InviteService(db)
     try:
         invite, token = service.create_invite(
             organization_id=organization_id,
             email=payload.email,
             role=payload.role,
-            invited_by=staff_user.id,
+            invited_by=current_user.id,
             expires_in_days=payload.expires_in_days,
         )
     except ValueError as exc:
@@ -338,7 +310,6 @@ def admin_create_invite(
 
 
 class ImpersonateRequest(BaseModel):
-    user_id: uuid.UUID
     reason: str | None = None
 
 
@@ -357,18 +328,12 @@ def impersonate_org(
     payload: ImpersonateRequest,
     request: Request,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_staff),
 ) -> ImpersonateResponse:
-    access = AccessService(db)
-    try:
-        staff_user = access.require_staff(payload.user_id)
-    except AccessDeniedError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    if not staff_user.is_staff:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only platform admins can impersonate")
     ip_addr = request.client.host if request.client else None
     service = ImpersonationService(db)
     session, token = service.start_session(
-        admin_user_id=staff_user.id,
+        admin_user_id=current_user.id,
         organization_id=organization_id,
         reason=payload.reason,
         ip_address=ip_addr,
