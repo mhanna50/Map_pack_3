@@ -64,6 +64,7 @@ export function Hero({
             >
               <div className="overflow-hidden rounded-3xl bg-[#05070f] shadow-[0_30px_80px_rgba(2,6,23,0.65)]">
                 {showImage ? (
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={imageSrc}
                     alt="Dashboard preview"

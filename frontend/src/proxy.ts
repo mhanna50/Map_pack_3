@@ -47,7 +47,7 @@ export default async function proxy(request: NextRequest) {
 
   if (user && (pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up"))) {
     const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/app";
+    redirectUrl.pathname = "/dashboard";
     return NextResponse.redirect(redirectUrl);
   }
 
