@@ -11,6 +11,7 @@ from backend.app.models.listing_audit import ListingAudit
 from backend.app.models.pending_change import PendingChange
 from backend.app.models.enums import PendingChangeStatus, PendingChangeType
 from backend.app.models.service_template import ServiceTemplate
+from backend.app.services.validators import assert_location_in_org
 
 
 class ListingOptimizationService:
@@ -29,6 +30,7 @@ class ListingOptimizationService:
         photos_count: int,
         hours_status: str,
     ) -> ListingAudit:
+        assert_location_in_org(self.db, location_id=location_id, organization_id=organization_id)
         missing_services = self._missing_services(category, current_services)
         missing_attributes = self._missing_attributes(category, current_attributes)
         description_suggestions = []

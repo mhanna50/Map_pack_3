@@ -7,14 +7,20 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
+from backend.app.api.deps import get_current_user, require_org_member
 from ..db.session import get_db
 from ..models.enums import MediaStatus, MediaType, PendingChangeStatus
 from ..models.media_album import MediaAlbum
 from ..models.media_asset import MediaAsset
 from ..models.media_upload_request import MediaUploadRequest
 from ..services.media_management import MediaManagementService
+from ..services.access import AccessService
 
-router = APIRouter(prefix="/media", tags=["media"])
+router = APIRouter(
+    prefix="/media",
+    tags=["media"],
+    dependencies=[Depends(get_current_user), Depends(require_org_member)],
+)
 
 
 class AlbumResponse(BaseModel):
@@ -35,15 +41,27 @@ class AlbumCreateRequest(BaseModel):
 
 
 @router.post("/albums", response_model=AlbumResponse, status_code=status.HTTP_201_CREATED)
-def create_album(payload: AlbumCreateRequest, db: Session = Depends(get_db)) -> MediaAlbum:
+def create_album(
+    payload: AlbumCreateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> MediaAlbum:
+    access = AccessService(db)
+    try:
+        access.resolve_org(user_id=current_user.id, organization_id=payload.organization_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     service = MediaManagementService(db)
-    return service.create_album(
-        organization_id=payload.organization_id,
-        location_id=payload.location_id,
-        name=payload.name,
-        description=payload.description,
-        tags=payload.tags,
-    )
+    try:
+        return service.create_album(
+            organization_id=payload.organization_id,
+            location_id=payload.location_id,
+            name=payload.name,
+            description=payload.description,
+            tags=payload.tags,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 class MediaUploadRequestModel(BaseModel):
@@ -81,23 +99,35 @@ class MediaAssetResponse(BaseModel):
 
 
 @router.post("/assets", response_model=MediaAssetResponse, status_code=status.HTTP_201_CREATED)
-def upload_media(payload: MediaUploadRequestModel, db: Session = Depends(get_db)) -> MediaAsset:
+def upload_media(
+    payload: MediaUploadRequestModel,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> MediaAsset:
+    access = AccessService(db)
+    try:
+        access.resolve_org(user_id=current_user.id, organization_id=payload.organization_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     service = MediaManagementService(db)
-    asset = service.upload_media(
-        organization_id=payload.organization_id,
-        location_id=payload.location_id,
-        storage_url=payload.storage_url,
-        file_name=payload.file_name,
-        media_type=payload.media_type,
-        categories=payload.categories,
-        album_id=payload.album_id,
-        description=payload.description,
-        job_type=payload.job_type,
-        season=payload.season,
-        shot_stage=payload.shot_stage,
-        upload_request_id=payload.upload_request_id,
-    )
-    return asset
+    try:
+        asset = service.upload_media(
+            organization_id=payload.organization_id,
+            location_id=payload.location_id,
+            storage_url=payload.storage_url,
+            file_name=payload.file_name,
+            media_type=payload.media_type,
+            categories=payload.categories,
+            album_id=payload.album_id,
+            description=payload.description,
+            job_type=payload.job_type,
+            season=payload.season,
+            shot_stage=payload.shot_stage,
+            upload_request_id=payload.upload_request_id,
+        )
+        return asset
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 class MediaRequestResponse(BaseModel):
@@ -126,7 +156,13 @@ class MediaRequestTriggerResponse(BaseModel):
 def create_media_request(
     payload: MediaRequestTriggerPayload,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> MediaRequestTriggerResponse:
+    access = AccessService(db)
+    try:
+        access.resolve_org(user_id=current_user.id, organization_id=payload.organization_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     service = MediaManagementService(db)
     request = service.request_upload_if_stale(
         organization_id=payload.organization_id,

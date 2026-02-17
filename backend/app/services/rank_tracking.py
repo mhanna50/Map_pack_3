@@ -11,6 +11,7 @@ from backend.app.models.geo_grid_point import GeoGridPoint
 from backend.app.models.location_keyword import LocationKeyword
 from backend.app.models.rank_snapshot import RankSnapshot
 from backend.app.models.visibility_score import VisibilityScore
+from backend.app.services.validators import assert_location_in_org
 if TYPE_CHECKING:
     from backend.app.services.actions import ActionService
 
@@ -32,6 +33,7 @@ class RankTrackingService:
         keyword: str,
         importance: int = 1,
     ) -> LocationKeyword:
+        assert_location_in_org(self.db, location_id=location_id, organization_id=organization_id)
         keyword_obj = LocationKeyword(
             organization_id=organization_id,
             location_id=location_id,
@@ -53,6 +55,7 @@ class RankTrackingService:
         radius_index: int = 0,
         label: str | None = None,
     ) -> GeoGridPoint:
+        assert_location_in_org(self.db, location_id=location_id, organization_id=organization_id)
         point = GeoGridPoint(
             organization_id=organization_id,
             location_id=location_id,
@@ -75,6 +78,7 @@ class RankTrackingService:
         grid_point_ids: Sequence[uuid.UUID],
         run_at: datetime,
     ) -> None:
+        assert_location_in_org(self.db, location_id=location_id, organization_id=organization_id)
         payload = {
             "keyword_ids": [str(k) for k in keyword_ids],
             "grid_point_ids": [str(g) for g in grid_point_ids],

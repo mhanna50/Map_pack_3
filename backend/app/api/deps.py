@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from typing import Any
+import uuid
 
 import logging
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from backend.app.db.session import get_db
 from backend.app.models.user import User
+from backend.app.models.location import Location
 from backend.app.services.access import AccessDeniedError, AccessService
 from backend.app.services.supabase_auth import SupabaseTokenVerifier
 
@@ -57,6 +59,48 @@ def get_current_staff(user: User = Depends(get_current_user), db: Session = Depe
         return access.require_staff(user.id)
     except AccessDeniedError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+def require_org_member(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Ensure the authenticated user belongs to the organization inferred from the request.
+
+    The org is derived from path/query params (organization_id) or a location_id that maps to an org.
+    If no org context is present, the dependency is a no-op.
+    """
+    org_id = _extract_org_id(request, db)
+    if not org_id:
+        return None
+    access = AccessService(db)
+    try:
+        access.resolve_org(user_id=current_user.id, organization_id=org_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    return None
+
+
+def _extract_org_id(request: Request, db: Session) -> Any:
+    if "organization_id" in request.path_params:
+        return _safe_uuid(request.path_params.get("organization_id"))
+    if request.query_params.get("organization_id"):
+        return _safe_uuid(request.query_params["organization_id"])
+    location_ref = request.path_params.get("location_id") or request.query_params.get("location_id")
+    if location_ref:
+        location = db.get(Location, _safe_uuid(location_ref))
+        if not location:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Location not found")
+        return location.organization_id
+    return None
+
+
+def _safe_uuid(value: Any) -> Any:
+    try:
+        return uuid.UUID(str(value))
+    except Exception:
+        return None
 
 
 def _extract_email(payload: dict[str, Any]) -> str | None:

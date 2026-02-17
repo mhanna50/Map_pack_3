@@ -7,13 +7,19 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy.orm import Session
 
+from backend.app.api.deps import get_current_user, require_org_member
 from ..db.session import get_db
 from ..models.enums import PostStatus, PostType
 from ..models.media_asset import MediaAsset
 from ..models.post import Post
 from ..services.posts import PostService
+from ..services.access import AccessService
 
-router = APIRouter(prefix="/posts", tags=["posts"])
+router = APIRouter(
+    prefix="/posts",
+    tags=["posts"],
+    dependencies=[Depends(get_current_user), Depends(require_org_member)],
+)
 
 
 class PostVariantResponse(BaseModel):
@@ -59,8 +65,22 @@ class PostCreateRequest(BaseModel):
 def create_post(
     payload: PostCreateRequest,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> Post:
+    access = AccessService(db)
+    try:
+        access.resolve_org(user_id=current_user.id, organization_id=payload.organization_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     service = PostService(db)
+    try:
+        service.validate_scope(
+            organization_id=payload.organization_id,
+            location_id=payload.location_id,
+            connected_account_id=payload.connected_account_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     rotation = service.select_rotation_values(
         organization_id=payload.organization_id,
         location_id=payload.location_id,
@@ -96,7 +116,9 @@ def list_posts(
     organization_id: uuid.UUID | None = None,
     location_id: uuid.UUID | None = None,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> list[Post]:
+    # Membership already enforced by require_org_member when org_id/location_id present
     query = db.query(Post).order_by(Post.scheduled_at.desc().nullslast())
     if organization_id:
         query = query.filter(Post.organization_id == organization_id)
@@ -114,11 +136,18 @@ def update_post_status(
     post_id: uuid.UUID,
     payload: PostStatusUpdateRequest,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> Post:
     post = db.get(Post, post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
+    AccessService(db).resolve_org(user_id=current_user.id, organization_id=post.organization_id)
     service = PostService(db)
+    service.validate_scope(
+        organization_id=post.organization_id,
+        location_id=post.location_id,
+        connected_account_id=post.connected_account_id,
+    )
     return service.update_post_status(post, payload.status)
 
 
@@ -131,14 +160,21 @@ def attach_media(
     post_id: uuid.UUID,
     payload: MediaAttachmentRequest,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> Post:
     post = db.get(Post, post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
+    AccessService(db).resolve_org(user_id=current_user.id, organization_id=post.organization_id)
     asset = db.get(MediaAsset, payload.media_asset_id)
     if not asset:
         raise HTTPException(status_code=404, detail="Media asset not found")
     service = PostService(db)
+    service.validate_scope(
+        organization_id=post.organization_id,
+        location_id=post.location_id,
+        connected_account_id=post.connected_account_id,
+    )
     service.attach_media(post, asset)
     db.refresh(post)
     return post

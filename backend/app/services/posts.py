@@ -11,6 +11,10 @@ from backend.app.models.post import Post
 from backend.app.models.post_media_attachment import PostMediaAttachment
 from backend.app.models.post_variant import PostVariant
 from backend.app.models.media_asset import MediaAsset
+from backend.app.services.validators import (
+    assert_location_in_org,
+    assert_connected_account_in_org,
+)
 from backend.app.services.captions import CaptionGenerator
 from backend.app.services.media_selection import MediaSelector
 from backend.app.services.rotation import RotationEngine
@@ -29,6 +33,21 @@ class PostService:
         self.scheduler = AutoScheduler(db)
         self.safety = PostingSafetyService(db)
         self.approvals = ApprovalService(db)
+
+    def validate_scope(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        location_id: uuid.UUID,
+        connected_account_id: uuid.UUID | None,
+    ) -> None:
+        assert_location_in_org(self.db, location_id=location_id, organization_id=organization_id)
+        if connected_account_id:
+            assert_connected_account_in_org(
+                self.db,
+                connected_account_id=connected_account_id,
+                organization_id=organization_id,
+            )
 
     def create_post(
         self,

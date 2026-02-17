@@ -1,25 +1,60 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { Header } from "@/components/Header";
 import { TypewriterText } from "@/components/TypewriterText";
 
 export function Hero() {
+  const [startSecondLine, setStartSecondLine] = useState(false);
+  const startedRef = useRef(false);
+  const pauseRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pauseRef.current !== null) {
+        window.clearTimeout(pauseRef.current);
+      }
+    };
+  }, []);
+
+  const handleFirstComplete = () => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    pauseRef.current = window.setTimeout(() => setStartSecondLine(true), 1000);
+  };
+
   return (
     <div className="relative min-h-screen bg-[#05060f] text-white" aria-label="Hero">
       <Header show />
 
       <div className="mx-auto flex max-w-6xl flex-col items-center gap-12 px-6 pb-12 pt-32 text-center">
         <div className="flex flex-col items-center gap-3">
-          <TypewriterText
-            text={"Welcome to\nMap Pack 3."}
-            className="whitespace-pre-line text-5xl font-semibold leading-tight md:text-6xl lg:text-7xl"
-            speed={51}
-          />
-          <TypewriterText
-            text={"Your all-in-one Google Business Profile and review command center."}
-            className="max-w-3xl whitespace-pre-line text-lg text-slate-200 md:text-xl"
-            speed={40}
-          />
+          <div className="relative">
+            <span className="invisible block whitespace-pre-line text-5xl font-semibold leading-tight md:text-6xl lg:text-7xl">
+              Welcome to
+              {"\n"}
+              Map Pack 3.
+            </span>
+            <TypewriterText
+              text={"Welcome to\nMap Pack 3."}
+              className="absolute inset-0 whitespace-pre-line text-5xl font-semibold leading-tight md:text-6xl lg:text-7xl"
+              speed={61}
+              showCaretAfterComplete
+              forceHideCaret={startSecondLine}
+              onComplete={handleFirstComplete}
+            />
+          </div>
+          <div className="relative">
+            <span className="invisible block max-w-3xl whitespace-pre-line text-lg text-slate-200 md:text-xl">
+              Your all-in-one Google Business Profile and review command center.
+            </span>
+            <TypewriterText
+              text={"Your all-in-one Google Business Profile and review command center."}
+              className="absolute inset-0 max-w-3xl whitespace-pre-line text-lg text-slate-200 md:text-xl"
+              speed={48}
+              start={startSecondLine}
+            />
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center justify-center gap-4">

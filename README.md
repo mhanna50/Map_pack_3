@@ -122,6 +122,7 @@ python -m backend.app.db.migrations.0004_competitors
 python -m backend.app.db.migrations.0005_automation_rules
 python -m backend.app.db.migrations.0006_approval_requests
 python -m backend.app.db.migrations.0007_dashboard_and_plan
+python -m backend.app.db.migrations.0008_actions_add_org_id
 # or run them sequentially
 python scripts/run_migrations.py
 ```

@@ -4,9 +4,13 @@ ARG APP_DIR=frontend
 
 WORKDIR /app/${APP_DIR}
 
-ENV NEXT_TELEMETRY_DISABLED=1
+# Disable Next.js telemetry in CI builds and relax peer-dep strictness.
+# `@lottiefiles/dotlottie-react` currently declares React <=18 while the app
+# uses React 19, so we install with legacy peer dependency resolution.
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    NPM_CONFIG_LEGACY_PEER_DEPS=true
 
 COPY ${APP_DIR}/package.json ${APP_DIR}/package-lock.json ./
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
 COPY ${APP_DIR} ./

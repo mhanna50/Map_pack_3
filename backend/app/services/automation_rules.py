@@ -23,6 +23,7 @@ from backend.app.models.review import Review
 from backend.app.models.automation_rule import AutomationRule
 from backend.app.models.rule_simulation import RuleSimulation
 from backend.app.services.audit import AuditService
+from backend.app.services.validators import assert_location_in_org
 
 if TYPE_CHECKING:
     from backend.app.services.actions import ActionService
@@ -39,6 +40,12 @@ class AutomationRuleService:
             self.action_service = action_service
         self.audit = AuditService(db)
 
+    def validate_rule_access(self, rule: AutomationRule, user_id: uuid.UUID) -> None:
+        from backend.app.services.access import AccessService
+
+        access = AccessService(self.db)
+        access.resolve_org(user_id=user_id, organization_id=rule.organization_id)
+
     def create_rule(
         self,
         *,
@@ -53,6 +60,8 @@ class AutomationRuleService:
         priority: int = 0,
         weight: int = 100,
     ) -> AutomationRule:
+        if location_id:
+            assert_location_in_org(self.db, location_id=location_id, organization_id=organization_id)
         rule = AutomationRule(
             organization_id=organization_id,
             location_id=location_id,

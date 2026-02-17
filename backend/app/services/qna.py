@@ -9,6 +9,10 @@ from sqlalchemy.orm import Session
 
 from backend.app.models.enums import ActionType, QnaStatus
 from backend.app.models.qna_entry import QnaEntry
+from backend.app.services.validators import (
+    assert_location_in_org,
+    assert_connected_account_in_org,
+)
 
 if TYPE_CHECKING:
     from backend.app.services.actions import ActionService
@@ -31,6 +35,21 @@ class QnaService:
         self.db = db
         self.action_service = action_service
 
+    def validate_scope(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        location_id: uuid.UUID,
+        connected_account_id: uuid.UUID | None,
+    ) -> None:
+        assert_location_in_org(self.db, location_id=location_id, organization_id=organization_id)
+        if connected_account_id:
+            assert_connected_account_in_org(
+                self.db,
+                connected_account_id=connected_account_id,
+                organization_id=organization_id,
+            )
+
     def generate_qna(
         self,
         *,
@@ -43,6 +62,11 @@ class QnaService:
         competitor_names: Sequence[str] | None = None,
         scheduled_at: datetime | None = None,
     ) -> QnaEntry:
+        self.validate_scope(
+            organization_id=organization_id,
+            location_id=location_id,
+            connected_account_id=connected_account_id,
+        )
         category = categories[0] if categories else "default"
         template_pool = QUESTION_LIBRARY.get(category, QUESTION_LIBRARY["default"])
         template = template_pool[0]

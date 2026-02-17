@@ -9,6 +9,8 @@ MIGRATIONS = [
     "backend.app.db.migrations.0005_automation_rules",
     "backend.app.db.migrations.0006_approval_requests",
     "backend.app.db.migrations.0007_dashboard_and_plan",
+    "backend.app.db.migrations.0008_actions_add_org_id",
+    "backend.app.db.migrations.0009_action_status_lowercase",
 ]
 
 

@@ -43,11 +43,10 @@ export function HeroGlobe({ className, animateDown, dimmed = false, showInfo = f
   }, []);
 
   useEffect(() => {
-    if (!showInfo) {
-      setPinsVisible(false);
-      return;
-    }
-    const id = window.setTimeout(() => setPinsVisible(true), prefersReducedMotion ? 0 : 800);
+    const id = window.setTimeout(
+      () => setPinsVisible(!!showInfo),
+      showInfo ? (prefersReducedMotion ? 0 : 800) : 0
+    );
     return () => window.clearTimeout(id);
   }, [showInfo, prefersReducedMotion]);
 

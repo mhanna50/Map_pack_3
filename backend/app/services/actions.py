@@ -27,6 +27,7 @@ from .post_composition import PostCompositionService
 from .post_scheduler import PostSchedulerService
 from .post_metrics import PostMetricsService
 from ..models.media_upload_request import MediaUploadRequest
+from .validators import assert_location_in_org, assert_connected_account_in_org
 
 
 class ActionService:
@@ -47,6 +48,14 @@ class ActionService:
         dedupe_key: str | None = None,
         priority: int = 0,
     ) -> Action:
+        if location_id:
+            assert_location_in_org(self.db, location_id=location_id, organization_id=organization_id)
+        if connected_account_id:
+            assert_connected_account_in_org(
+                self.db,
+                connected_account_id=connected_account_id,
+                organization_id=organization_id,
+            )
         scheduled_for = (
             run_at.replace(tzinfo=timezone.utc)
             if run_at.tzinfo is None

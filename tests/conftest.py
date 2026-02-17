@@ -24,6 +24,8 @@ from backend.app.db.session import get_db
 from backend.app.main import app as fastapi_app
 from backend.app.models import *  # noqa: F401,F403
 from backend.app.services.encryption import get_encryption_service
+from backend.app.api.deps import get_current_user
+from backend.app.models.user import User
 from worker.app import tasks as worker_tasks
 
 fernet_module = pytest.importorskip("cryptography.fernet")
@@ -74,16 +76,26 @@ def db_session(engine) -> Generator[Session, None, None]:
 
 @pytest.fixture
 def api_client(db_session):
+    # default authenticated staff user for tests
+    user = User(email="tester@example.com", is_staff=True)
+    db_session.add(user)
+    db_session.commit()
+
     def override_get_db() -> Generator[Session, None, None]:
         try:
             yield db_session
         finally:
             pass
 
+    def override_current_user():
+        return user
+
     fastapi_app.dependency_overrides[get_db] = override_get_db
+    fastapi_app.dependency_overrides[get_current_user] = override_current_user
     with TestClient(fastapi_app) as client:
         yield client
     fastapi_app.dependency_overrides.pop(get_db, None)
+    fastapi_app.dependency_overrides.pop(get_current_user, None)
 
 
 @pytest.fixture

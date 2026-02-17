@@ -7,12 +7,18 @@ from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
+from backend.app.api.deps import get_current_user, require_org_member
 from ..db.session import get_db
 from ..models.competitor_profile import CompetitorProfile
 from ..models.competitor_snapshot import CompetitorSnapshot
 from ..services.competitor_monitoring import CompetitorMonitoringService
+from ..services.access import AccessService
 
-router = APIRouter(prefix="/competitors", tags=["competitors"])
+router = APIRouter(
+    prefix="/competitors",
+    tags=["competitors"],
+    dependencies=[Depends(get_current_user), Depends(require_org_member)],
+)
 
 
 class ManualCompetitorItem(BaseModel):
@@ -47,16 +53,25 @@ def add_manual_competitors(
     location_id: uuid.UUID,
     payload: ManualCompetitorRequest,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> list[CompetitorProfile]:
+    access = AccessService(db)
+    try:
+        access.resolve_org(user_id=current_user.id, organization_id=payload.organization_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     service = CompetitorMonitoringService(db)
     competitors = [
         item.model_dump() for item in payload.competitors
     ]
-    return service.upsert_manual_competitors(
-        organization_id=payload.organization_id,
-        location_id=location_id,
-        competitors=competitors,
-    )
+    try:
+        return service.upsert_manual_competitors(
+            organization_id=payload.organization_id,
+            location_id=location_id,
+            competitors=competitors,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 class DiscoverCompetitorsRequest(BaseModel):
@@ -73,13 +88,22 @@ def discover_competitors(
     location_id: uuid.UUID,
     payload: DiscoverCompetitorsRequest,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> list[CompetitorProfile]:
+    access = AccessService(db)
+    try:
+        access.resolve_org(user_id=current_user.id, organization_id=payload.organization_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     service = CompetitorMonitoringService(db)
-    return service.auto_discover_competitors(
-        organization_id=payload.organization_id,
-        location_id=location_id,
-        top_n=payload.top_n,
-    )
+    try:
+        return service.auto_discover_competitors(
+            organization_id=payload.organization_id,
+            location_id=location_id,
+            top_n=payload.top_n,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.get("/locations/{location_id}", response_model=list[CompetitorResponse])
@@ -106,6 +130,7 @@ def schedule_monitoring(
     location_id: uuid.UUID,
     payload: MonitorCompetitorsRequest,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> MonitorCompetitorsResponse:
     service = CompetitorMonitoringService(db)
     action = service.schedule_monitoring(
@@ -133,6 +158,7 @@ def list_competitor_snapshots(
     location_id: uuid.UUID,
     competitor_id: uuid.UUID | None = Query(None),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> list[CompetitorSnapshot]:
     service = CompetitorMonitoringService(db)
     return service.list_snapshots(location_id=location_id, competitor_id=competitor_id)

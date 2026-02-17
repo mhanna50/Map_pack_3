@@ -10,6 +10,7 @@ from backend.app.models.enums import ApprovalCategory, ApprovalStatus, ReviewRat
 from backend.app.models.review import Review
 from backend.app.models.review_reply import ReviewReply
 from backend.app.services.audit import AuditService
+from backend.app.services.validators import assert_location_in_org
 
 
 class ApprovalService:
@@ -31,6 +32,8 @@ class ApprovalService:
         proposal: dict | None = None,
         requested_by: uuid.UUID | None = None,
     ) -> ApprovalRequest:
+        if location_id:
+            assert_location_in_org(self.db, location_id=location_id, organization_id=organization_id)
         request = ApprovalRequest(
             organization_id=organization_id,
             location_id=location_id,

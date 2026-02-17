@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  turbopack: {
+    // Keep the admin app scoped to its own lockfile/workspace
+    root: __dirname,
+  },
 };
 
 export default nextConfig;

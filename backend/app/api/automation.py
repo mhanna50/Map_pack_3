@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from backend.app.api.deps import get_current_user, require_org_member
 from ..db.session import get_db
 from ..models.automation_rule import AutomationRule
 from ..models.rule_simulation import RuleSimulation
@@ -19,8 +20,13 @@ from ..models.enums import (
 )
 from ..services.actions import ActionService
 from ..services.automation_rules import AutomationRuleService
+from ..services.access import AccessService
 
-router = APIRouter(prefix="/automation", tags=["automation"])
+router = APIRouter(
+    prefix="/automation",
+    tags=["automation"],
+    dependencies=[Depends(get_current_user), Depends(require_org_member)],
+)
 
 
 class AutomationRuleResponse(BaseModel):
@@ -54,20 +60,32 @@ class RuleCreateRequest(BaseModel):
 
 
 @router.post("/rules", response_model=AutomationRuleResponse, status_code=status.HTTP_201_CREATED)
-def create_rule(payload: RuleCreateRequest, db: Session = Depends(get_db)) -> AutomationRule:
+def create_rule(
+    payload: RuleCreateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> AutomationRule:
+    access = AccessService(db)
+    try:
+        access.resolve_org(user_id=current_user.id, organization_id=payload.organization_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     service = AutomationRuleService(db)
-    return service.create_rule(
-        organization_id=payload.organization_id,
-        location_id=payload.location_id,
-        name=payload.name,
-        trigger_type=payload.trigger_type,
-        condition=payload.condition,
-        action_type=payload.action_type,
-        config=payload.config,
-        action_config=payload.action_config,
-        priority=payload.priority,
-        weight=payload.weight,
-    )
+    try:
+        return service.create_rule(
+            organization_id=payload.organization_id,
+            location_id=payload.location_id,
+            name=payload.name,
+            trigger_type=payload.trigger_type,
+            condition=payload.condition,
+            action_type=payload.action_type,
+            config=payload.config,
+            action_config=payload.action_config,
+            priority=payload.priority,
+            weight=payload.weight,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.get("/rules", response_model=list[AutomationRuleResponse])
@@ -75,6 +93,7 @@ def list_rules(
     organization_id: uuid.UUID = Query(...),
     location_id: uuid.UUID | None = Query(None),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> list[AutomationRule]:
     service = AutomationRuleService(db)
     return service.list_rules(organization_id=organization_id, location_id=location_id)
@@ -90,11 +109,20 @@ class RuleUpdateRequest(BaseModel):
 
 
 @router.patch("/rules/{rule_id}", response_model=AutomationRuleResponse)
-def update_rule(rule_id: uuid.UUID, payload: RuleUpdateRequest, db: Session = Depends(get_db)) -> AutomationRule:
+def update_rule(
+    rule_id: uuid.UUID,
+    payload: RuleUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> AutomationRule:
     service = AutomationRuleService(db)
     rule = service.get_rule(rule_id)
     if not rule:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
+    try:
+        service.validate_rule_access(rule, current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     updates = payload.model_dump(exclude_unset=True)
     return service.update_rule(rule, **updates)
 
@@ -114,11 +142,16 @@ def simulate_rule(
     rule_id: uuid.UUID,
     days: int = Query(30, ge=1, le=90),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> "RuleSimulation":
     service = AutomationRuleService(db)
     rule = service.get_rule(rule_id)
     if not rule:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
+    try:
+        service.validate_rule_access(rule, current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     return service.simulate(rule, days=days)
 
 
@@ -134,7 +167,16 @@ class RunRulesResponse(BaseModel):
 
 
 @router.post("/rules/run", response_model=RunRulesResponse)
-def run_rules(payload: RunRulesRequest, db: Session = Depends(get_db)) -> RunRulesResponse:
+def run_rules(
+    payload: RunRulesRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> RunRulesResponse:
+    access = AccessService(db)
+    try:
+        access.resolve_org(user_id=current_user.id, organization_id=payload.organization_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     service = AutomationRuleService(db)
     if payload.schedule:
         action_service = ActionService(db)

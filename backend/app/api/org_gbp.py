@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from backend.app.api.deps import get_current_user, require_org_member
 from ..db.session import get_db
 from ..models.enums import ActionType, LocationStatus
 from ..models.location import Location
@@ -17,7 +18,11 @@ from ..services.gbp_connections import GbpConnectionService, GbpLocationSyncServ
 from ..services.google import GoogleBusinessClient, GoogleOAuthService, OAuthStateSigner
 from .orgs import LocationResponse, LocationSettingsPayload
 
-router = APIRouter(prefix="/orgs/{organization_id}", tags=["organizations"])
+router = APIRouter(
+    prefix="/orgs/{organization_id}",
+    tags=["organizations"],
+    dependencies=[Depends(get_current_user), Depends(require_org_member)],
+)
 
 GBP_DEFAULT_SCOPES = ["https://www.googleapis.com/auth/business.manage"]
 

@@ -11,6 +11,7 @@ from backend.app.models.media_album import MediaAlbum
 from backend.app.models.media_asset import MediaAsset
 from backend.app.models.media_upload_request import MediaUploadRequest
 from backend.app.services.media_selection import MediaSelector
+from backend.app.services.validators import assert_location_in_org, assert_connected_account_in_org
 
 if TYPE_CHECKING:
     from backend.app.services.actions import ActionService
@@ -35,6 +36,8 @@ class MediaManagementService:
         description: str | None = None,
         tags: list[str] | None = None,
     ) -> MediaAlbum:
+        if location_id:
+            assert_location_in_org(self.db, location_id=location_id, organization_id=organization_id)
         album = MediaAlbum(
             organization_id=organization_id,
             location_id=location_id,
@@ -63,6 +66,8 @@ class MediaManagementService:
         shot_stage: str | None = None,
         upload_request_id: uuid.UUID | None = None,
     ) -> MediaAsset:
+        if location_id:
+            assert_location_in_org(self.db, location_id=location_id, organization_id=organization_id)
         asset = MediaAsset(
             organization_id=organization_id,
             location_id=location_id,
@@ -114,6 +119,7 @@ class MediaManagementService:
         location_id: uuid.UUID,
         days_without_upload: int = 14,
     ) -> MediaUploadRequest | None:
+        assert_location_in_org(self.db, location_id=location_id, organization_id=organization_id)
         existing_pending = (
             self.db.query(MediaUploadRequest)
             .filter(MediaUploadRequest.location_id == location_id)

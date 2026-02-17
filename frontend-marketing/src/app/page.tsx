@@ -1,49 +1,11 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Lock, Clock3 } from "lucide-react";
+import { Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Hero } from "@/sections/Hero";
-import { FlowChart } from "@/components/FlowChart";
-
-type Plan = {
-  name: string;
-  price: string;
-  description: string;
-  highlights: string[];
-  cta: string;
-  href: string;
-  popular?: boolean;
-};
-
-const plans: Plan[] = [
-  {
-    name: "Starter",
-    price: "$49",
-    description: "Single-location automation with essentials.",
-    highlights: ["1 location", "Posting + review automation", "Email support"],
-    cta: "Start",
-    href: "/checkout?plan=starter",
-  },
-  {
-    name: "Pro",
-    price: "$99",
-    description: "Multi-location control, approvals, and alerts.",
-    highlights: ["Up to 10 locations", "Approval queue & alerts", "Slack/Email notifications"],
-    cta: "Get Pro",
-    href: "/checkout?plan=pro",
-    popular: true,
-  },
-  {
-    name: "Agency",
-    price: "Talk to us",
-    description: "Custom limits, SSO, and dedicated support.",
-    highlights: ["Unlimited locations", "Custom cadences", "Dedicated success"],
-    cta: "Talk to sales",
-    href: "#contact",
-  },
-];
 
 const testimonials = [
   { quote: "We turned GBP into a reliable channel without adding headcount.", name: "Jordan K.", role: "COO, Home Services" },
@@ -109,17 +71,7 @@ export default function Home() {
                   </div>
                   <div className="flex items-start gap-3">
                     <span className="mt-0.5 inline-block h-2.5 w-2.5 rounded-full bg-sky-300" />
-                    <span>Built to boost local visibility</span>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="flex items-start gap-3">
-                    <span className="mt-0.5 inline-block h-2.5 w-2.5 rounded-full bg-sky-300" />
-                    <span>Real support from real humans, responsive and invested in your outcomes</span>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <span className="mt-0.5 inline-block h-2.5 w-2.5 rounded-full bg-sky-300" />
-                    <span>We keep your data secure with disciplined controls and best‑practice safeguards</span>
+                    <span>Real support from real people</span>
                   </div>
                 </div>
               </div>
@@ -129,13 +81,74 @@ export default function Home() {
           <div className="space-y-3 text-center mt-20" style={parallax(0.4)}>
             <p className="text-xs uppercase tracking-[0.3em] text-sky-300">Product flow</p>
             <h2 className="text-3xl font-semibold text-white md:text-4xl">How Map Pack 3 compounds results.</h2>
-            <p className="text-lg text-slate-300">
-              A live flowchart shows the path from automations to outcomes—built directly on your Google Business Profile motion.
-            </p>
           </div>
 
           <div className="flex -mt-12 items-start justify-center">
-            <FlowChart />
+            <Image
+              src="/flow.svg"
+              alt="Product flow for Map Pack 3"
+              className="relative mx-auto h-auto w-full max-w-5xl"
+              width={667}
+              height={667}
+              priority
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* HOW IT WORKS */}
+      <section id="how-it-works" className="relative border-t border-white/5 bg-[#060712] px-6 py-18">
+        <div className="mx-auto max-w-6xl space-y-6 text-center">
+          <div className="space-y-2">
+            <p className="text-xs uppercase tracking-[0.3em] text-sky-300">How Map Pack Works</p>
+            <h3 className="text-3xl font-semibold text-white md:text-4xl">We automate the motions that move local visibility.</h3>
+            <p className="text-sm text-slate-300">A clear pipeline from reputation and posting to measurable lift in calls and actions.</p>
+          </div>
+          <div className="relative">
+            <div className="grid gap-4 md:grid-cols-3 md:gap-6">
+              {[
+                {
+                  title: "Reputation Management",
+                  body: [
+                    "Protect and grow your reputation without manual follow-ups.",
+                    "Automatic SMS review requests, real-time monitoring, and alerts keep trust high.",
+                  ],
+                },
+                {
+                  title: "GBP Posting Automation",
+                  body: [
+                    "Publish service updates, seasonal content, and highlights on a smart schedule.",
+                    "Stay fresh and competitive on Google without posting manually.",
+                  ],
+                },
+                {
+                  title: "Performance & Rank Tracking Insights",
+                  body: [
+                    "See views, calls, direction requests, and local ranking trends over time.",
+                    "Understand what’s driving visibility and growth—no jargon or spreadsheets.",
+                  ],
+                },
+              ].map((card, idx) => (
+                <div key={card.title} className="flex flex-col items-stretch">
+                  <div
+                    className="relative flex h-full flex-1 flex-col rounded-xl border border-white/60 px-5 py-5 text-left"
+                    style={{ color: "#EAEAEA" }}
+                  >
+                    <span className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-2 rounded-full border border-white/50 bg-[#060712] px-2 text-[10px] font-semibold tracking-wide md:hidden">
+                      {idx + 1}
+                    </span>
+                    <h4 className="text-base font-semibold text-white">{card.title}</h4>
+                    <ul className="mt-2 space-y-1 text-sm leading-relaxed">
+                      {card.body.map((line) => (
+                        <li key={line} className="text-[#EAEAEA]">
+                          • {line}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>
@@ -154,49 +167,57 @@ export default function Home() {
         <div className="relative mx-auto max-w-5xl space-y-8">
           <div className="text-center">
             <p className="text-xs uppercase tracking-[0.3em] text-sky-300">Pricing</p>
-            <h2 className="mt-3 text-3xl font-semibold text-white md:text-4xl">Transparent plans built for scale.</h2>
-            <p className="mt-2 text-slate-300">Per-location pricing with automation limits you control.</p>
+            <h2 className="mt-3 text-3xl font-semibold text-white md:text-4xl">Simple, all-in pricing.</h2>
+            <p className="mt-2 text-slate-300">Everything you need to dominate local search, one flat price.</p>
           </div>
-          <div className="grid gap-6 md:grid-cols-3">
-            {plans.map((plan) => (
-              <div
-                key={plan.name}
-                className={cn(
-                  "group flex flex-col rounded-2xl border border-white/10 bg-gradient-to-br from-[#0b0f1a] to-[#0b1224] p-6 shadow-lg shadow-black/40 transition duration-300",
-                  plan.popular && "border-sky-400/60 shadow-sky-900/50",
-                  "hover:-translate-y-1",
-                )}
-                style={repel(plan.popular ? 12 : 6)}
-              >
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xl font-semibold text-white">{plan.name}</h3>
-                  {plan.popular && (
-                    <span className="rounded-full bg-sky-500/20 px-3 py-1 text-xs font-semibold text-sky-100">Most popular</span>
-                  )}
+          <div className="mx-auto max-w-4xl">
+            <div
+              className={cn(
+                "group relative overflow-hidden rounded-3xl border border-white/12 bg-gradient-to-br from-[#0b0f1a] via-[#0b1224] to-[#0a1020] p-8 shadow-[0_40px_120px_rgba(0,0,0,0.45)] transition duration-300 hover:-translate-y-1",
+              )}
+              style={repel(8)}
+            >
+              <div className="pointer-events-none absolute inset-0 opacity-60" style={{ background: "radial-gradient(90% 90% at 50% 10%, rgba(56,189,248,0.18), transparent)" }} />
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:px-4">
+                <div className="flex-1 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-300">Everything Included</p>
+                      <h3 className="mt-2 text-4xl font-semibold text-white">$299 / month</h3>
+                    </div>
+                  </div>
+                  <p className="text-sm font-medium text-slate-300">No contracts • No setup fees • Cancel anytime</p>
+                  <div className="flex flex-wrap gap-3">
+                    <a
+                      href="/checkout?plan=all-in"
+                      className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-sky-500 to-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-900/40 transition hover:from-sky-400 hover:to-indigo-500"
+                    >
+                      Get Started
+                    </a>
+                    <a
+                      href="#contact"
+                      className="inline-flex items-center justify-center rounded-full border border-white/15 px-5 py-3 text-sm font-semibold text-white transition hover:border-sky-400/60"
+                    >
+                      Talk to sales
+                    </a>
+                  </div>
                 </div>
-                <p className="mt-2 text-3xl font-bold text-white">{plan.price}</p>
-                <p className="mt-1 text-sm text-slate-400">{plan.description}</p>
-                <ul className="mt-6 space-y-2 text-sm text-slate-200">
-                  {plan.highlights.map((h) => (
-                    <li key={h} className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full bg-sky-400" />
-                      {h}
+                <ul className="grid w-full gap-3 rounded-2xl border border-white/10 p-4 text-sm text-slate-200 md:mt-1 md:w-auto md:self-start md:ml-auto">
+                  {[
+                    "Automated Google Business Profile posting",
+                    "Reputation management system",
+                    "Local visibility and rank tracking",
+                    "Local directory consistency monitoring tool",
+                    "Personal monitoring dashboard",
+                  ].map((feature) => (
+                    <li key={feature} className="flex items-start gap-3">
+                      <span className="mt-1 inline-block h-2.5 w-2.5 rounded-full bg-sky-400" />
+                      <span>{feature}</span>
                     </li>
                   ))}
                 </ul>
-                <a
-                  href={plan.href}
-                  className={cn(
-                    "mt-auto inline-flex items-center justify-center rounded-full border px-4 py-2 text-sm font-semibold transition",
-                    plan.popular
-                      ? "border-sky-400/70 bg-sky-500/20 text-white hover:bg-sky-500/30"
-                      : "border-white/10 bg-white/5 text-white hover:border-sky-400/60",
-                  )}
-                >
-                  {plan.cta}
-                </a>
               </div>
-            ))}
+            </div>
           </div>
         </div>
       </section>
@@ -233,62 +254,89 @@ export default function Home() {
         </div>
       </section>
 
-      {/* LOGIN / ACCOUNT ACCESS */}
-      <section className="border-t border-white/5 bg-[#060712] px-6 py-18">
-        <div className="mx-auto grid max-w-6xl gap-10 lg:grid-cols-2">
-          <div className="space-y-4" style={parallax(0.6)}>
-            <p className="text-xs uppercase tracking-[0.3em] text-sky-300">Account access</p>
-            <h2 className="text-3xl font-semibold text-white">Clients jump in instantly.</h2>
-            <p className="text-lg text-slate-300">
-              Login stays intact. We simply make it feel premium. The panel reveals itself as you approach.
-            </p>
-            <div className="flex items-center gap-3 text-sm text-slate-400">
-              <Clock3 className="h-4 w-4 text-sky-300" />
-              SSO-ready · Magic link friendly
+      {/* CLIENT LOGIN + READY */}
+      <section className="border-t border-white/5 bg-[#05060c] px-6 py-18">
+        <div className="mx-auto grid max-w-6xl gap-8 md:grid-cols-2">
+          <div className="rounded-3xl border border-white/10 bg-white/5 p-8 shadow-lg shadow-black/40">
+            <div className="grid min-h-[260px] gap-6 md:grid-cols-[1fr,220px] md:items-stretch">
+              <div className="flex flex-col justify-between gap-4 text-left">
+                <div className="space-y-3">
+                  <p className="text-xs uppercase tracking-[0.3em] text-sky-300">Client Login</p>
+                  <h2 className="text-3xl font-semibold text-white">Access your dashboard to manage your local visibility.</h2>
+                </div>
+                <Link
+                  href="/login"
+                  className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-sky-500 to-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-900/40 transition hover:from-sky-400 hover:to-indigo-500"
+                >
+                  Log In
+                </Link>
+              </div>
+              <div className="flex flex-col justify-between gap-3 text-left">
+                <div className="text-sm font-semibold text-slate-200">Need help signing in?</div>
+                <a href="/support" className="text-sm font-semibold text-slate-200 hover:text-white">
+                  Contact support
+                </a>
+              </div>
             </div>
           </div>
-          <div
-            className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-[#0c1224] to-[#0b142b] p-8 shadow-xl shadow-black/50 transition duration-500 hover:-translate-y-1"
-            style={parallax(-0.4)}
-          >
-            <div className="absolute inset-0 opacity-40" style={{ background: "radial-gradient(70% 70% at 30% 20%, rgba(56,189,248,0.18), transparent)" }} />
-            <div className="relative space-y-4">
-              <h3 className="text-2xl font-semibold text-white">Login</h3>
-              <p className="text-sm text-slate-300">Existing customers continue below. Admins are routed automatically.</p>
-              <Link
-                href="/login"
-                className="group inline-flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white transition hover:border-sky-400/60 hover:bg-white/10"
+          <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-indigo-800/30 via-slate-900 to-sky-900/30 px-8 py-12 text-center shadow-[0_40px_120px_rgba(0,0,0,0.45)]">
+            <p className="text-xs uppercase tracking-[0.3em] text-sky-200">Ready</p>
+            <h2 className="mt-3 text-3xl font-semibold text-white md:text-4xl">Automate your GBP playbook in days, not months.</h2>
+            <p className="mt-3 text-lg text-slate-300">Keep the guardrails, lose the busywork. Posts, reviews, and rank all in one motion.</p>
+            <div className="mt-6 flex flex-wrap justify-center gap-3">
+              <a
+                href="#pricing"
+                className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-indigo-600 to-sky-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-900/40 transition hover:from-indigo-500 hover:to-sky-400"
               >
-                Go to login
-                <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
-              </Link>
-              <div className="rounded-2xl border border-white/5 bg-black/30 px-4 py-3 text-xs text-slate-300">
-                Tip: If you’re an admin, we’ll take you to the admin dashboard automatically after sign-in.
-              </div>
+                View plans
+              </a>
+              <a href="#contact" className="inline-flex items-center gap-2 rounded-full border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:border-sky-400/60">
+                Talk to sales
+              </a>
             </div>
           </div>
         </div>
       </section>
 
-      {/* FINAL CTA */}
-      <section className="border-t border-white/5 bg-[#05060c] px-6 py-18">
-        <div className="mx-auto max-w-4xl rounded-3xl border border-white/10 bg-gradient-to-br from-indigo-800/30 via-slate-900 to-sky-900/30 px-8 py-12 text-center shadow-[0_40px_120px_rgba(0,0,0,0.45)]">
-          <p className="text-xs uppercase tracking-[0.3em] text-sky-200">Ready</p>
-          <h2 className="mt-3 text-3xl font-semibold text-white md:text-4xl">Automate your GBP playbook in days, not months.</h2>
-          <p className="mt-3 text-lg text-slate-300">Keep the guardrails, lose the busywork. Posts, reviews, and rank all in one motion.</p>
-          <div className="mt-6 flex flex-wrap justify-center gap-3">
-            <a
-              href="#pricing"
-              className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-indigo-600 to-sky-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-900/40 transition hover:from-indigo-500 hover:to-sky-400"
-            >
-              View plans
-            </a>
-            <a href="#contact" className="inline-flex items-center gap-2 rounded-full border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:border-sky-400/60">
-              Talk to sales
-            </a>
+      {/* FOOTER */}
+      <footer className="border-t border-white/5 bg-[#04050c] px-6 py-12">
+        <div className="mx-auto flex max-w-6xl justify-center">
+          <div className="grid w-full gap-8 md:grid-cols-[1.2fr_1fr_1fr] justify-items-start">
+          <div className="space-y-3">
+            <h3 className="text-xl font-semibold text-white">Map Pack 3</h3>
+            <p className="text-sm text-slate-300">
+              Purpose-built to automate Google Business Profiles, reputation, and local visibility—without adding headcount.
+            </p>
+            <p className="text-sm text-slate-400">
+              214 Market Street, Suite 200<br />
+              San Francisco, CA 94103<br />
+              support@mappack3.com
+            </p>
+          </div>
+          <div>
+            <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-300">Pages</h4>
+            <ul className="mt-3 space-y-2 text-sm text-slate-200">
+              <li><a className="hover:text-white" href="#product">Product</a></li>
+              <li><a className="hover:text-white" href="#pricing">Pricing</a></li>
+              <li><a className="hover:text-white" href="/login">Client Login</a></li>
+              <li><a className="hover:text-white" href="#contact">Contact</a></li>
+            </ul>
+          </div>
+          <div>
+            <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-300">Company</h4>
+            <ul className="mt-3 space-y-2 text-sm text-slate-200">
+              <li><a className="hover:text-white" href="/about">About</a></li>
+              <li><a className="hover:text-white" href="/privacy">Privacy</a></li>
+              <li><a className="hover:text-white" href="/terms">Terms</a></li>
+              <li><a className="hover:text-white" href="/support">Support</a></li>
+            </ul>
           </div>
         </div>
-      </section>
+        </div>
+        <div className="mx-auto mt-8 max-w-6xl border-t border-white/5 pt-4 text-left text-xs text-slate-500">
+          © {new Date().getFullYear()} Map Pack 3. All rights reserved.
+        </div>
+      </footer>
     </div>
   );
 }

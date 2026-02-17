@@ -54,6 +54,19 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
         data: { session },
         error: sessionError,
       } = await supabase.auth.getSession();
+
+      // If the persisted refresh token is invalid/stale, clear it and treat as signed-out.
+      if (sessionError && sessionError.message?.toLowerCase().includes("invalid refresh token")) {
+        await supabase.auth.signOut();
+        setProfile(undefined);
+        setTenant(undefined);
+        setLocations([]);
+        setSelectedLocationId(null);
+        persistLocation(null);
+        setTenantId(null);
+        setLoading(false);
+        return;
+      }
       if (sessionError) throw sessionError;
       const userId = session?.user?.id;
       if (!userId) {

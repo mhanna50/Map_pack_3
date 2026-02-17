@@ -18,6 +18,7 @@ from backend.app.models.post import Post
 from backend.app.models.review import Review
 from backend.app.services.connected_accounts import ConnectedAccountService
 from backend.app.services.google import GoogleBusinessClient, GoogleOAuthService
+from backend.app.services.validators import assert_location_in_org
 
 if TYPE_CHECKING:
     from backend.app.services.actions import ActionService
@@ -62,6 +63,7 @@ class CompetitorMonitoringService:
         location_id: uuid.UUID,
         competitors: Sequence[dict],
     ) -> list[CompetitorProfile]:
+        assert_location_in_org(self.db, location_id=location_id, organization_id=organization_id)
         existing = (
             self.db.query(CompetitorProfile)
             .filter(CompetitorProfile.location_id == location_id)
@@ -111,6 +113,7 @@ class CompetitorMonitoringService:
         location_id: uuid.UUID,
         top_n: int = 5,
     ) -> list[CompetitorProfile]:
+        assert_location_in_org(self.db, location_id=location_id, organization_id=organization_id)
         location = self.db.get(Location, location_id)
         if not location:
             return []
@@ -140,6 +143,7 @@ class CompetitorMonitoringService:
         return sorted(auto_profiles, key=lambda item: item.name.lower())
 
     def schedule_monitoring(self, *, organization_id: uuid.UUID, location_id: uuid.UUID):
+        assert_location_in_org(self.db, location_id=location_id, organization_id=organization_id)
         run_at = datetime.now(timezone.utc)
         return self.action_service.schedule_action(
             organization_id=organization_id,

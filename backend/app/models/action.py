@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String
+from sqlalchemy import DateTime, Enum as SQLEnum, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -29,10 +29,15 @@ class Action(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("connected_accounts.id")
     )
     action_type: Mapped[ActionType] = mapped_column(
-        Enum(ActionType, name="action_type"), nullable=False
+        SQLEnum(ActionType, name="action_type", values_callable=lambda enum: [member.value for member in enum]),
+        nullable=False,
     )
     status: Mapped[ActionStatus] = mapped_column(
-        Enum(ActionStatus, name="action_status"),
+        SQLEnum(
+            ActionStatus,
+            name="action_status",
+            values_callable=lambda enum: [member.value for member in enum],
+        ),
         default=ActionStatus.PENDING,
         nullable=False,
     )
