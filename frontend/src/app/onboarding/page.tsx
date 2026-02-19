@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { getAccessToken } from "@/lib/supabase/session";
 
 const steps = [
@@ -24,6 +24,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8
 
 export default function OnboardingPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [currentStep, setCurrentStep] = useState(0);
   const [googleConnected, setGoogleConnected] = useState(false);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
@@ -219,6 +220,16 @@ export default function OnboardingPage() {
     }));
   };
 
+  const handleSkipToDemoDashboard = () => {
+    setGoogleConnected(true);
+    setCurrentStep(steps.length - 1);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("onboarding.googleConnected", "true");
+      sessionStorage.setItem("onboarding.demoMode", "true");
+    }
+    router.push("/app");
+  };
+
   const goNext = async () => {
     if (currentStep === 0 && !organizationId) {
       try {
@@ -313,20 +324,27 @@ export default function OnboardingPage() {
             <div className="space-y-6">
               <div>
                 <h2 className="text-xl font-semibold">Connect Google Business Profile</h2>
-                <p className="text-sm text-slate-600">Authorize Map Pack 3 so we can read listings and post on your behalf.</p>
-              </div>
-              <button
-                className="flex items-center justify-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
-                onClick={handleConnectGoogle}
-                disabled={googleConnected || connectingGoogle || !organizationId}
-              >
-                {googleConnected ? "Google Connected ✓" : connectingGoogle ? "Redirecting…" : "Connect Google"}
-              </button>
-              {!organizationId && (
-                <p className="text-xs text-amber-600">Create the organization first to unlock the Google connect button.</p>
-              )}
-              {googleConnected && (
-                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-600">
+              <p className="text-sm text-slate-600">Authorize Map Pack 3 so we can read listings and post on your behalf.</p>
+            </div>
+            <button
+              className="flex items-center justify-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+              onClick={handleConnectGoogle}
+              disabled={googleConnected || connectingGoogle || !organizationId}
+            >
+              {googleConnected ? "Google Connected ✓" : connectingGoogle ? "Redirecting…" : "Connect Google"}
+            </button>
+            <button
+              type="button"
+              className="flex items-center justify-center gap-2 rounded-full border border-dashed border-slate-300 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-primary hover:text-primary"
+              onClick={handleSkipToDemoDashboard}
+            >
+              Skip Google for now — open demo dashboard
+            </button>
+            {!organizationId && (
+              <p className="text-xs text-amber-600">Create the organization first to unlock the Google connect button.</p>
+            )}
+            {googleConnected && (
+              <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-600">
                   Success! We can now fetch your GBP locations.
                 </div>
               )}

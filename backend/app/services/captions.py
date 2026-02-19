@@ -12,8 +12,11 @@ class CaptionGenerator:
     In production this would call OpenAI or another provider.
     """
 
-    def __init__(self, brand_voice: dict | None = None) -> None:
+    PROFANITY_LIST = {"damn", "hell", "shit", "fuck"}
+
+    def __init__(self, brand_voice: dict | None = None, banned_phrases: list[str] | None = None) -> None:
         self.brand_voice = brand_voice or {}
+        self.banned = set((banned_phrases or [])) | self.PROFANITY_LIST
 
     def generate_variants(
         self,
@@ -41,11 +44,13 @@ class CaptionGenerator:
             variants.append({"body": body, "compliance_flags": compliance})
         return variants
 
-    @staticmethod
-    def _run_compliance_checks(body: str, *, post_type: PostType) -> dict[str, Any]:
+    def _run_compliance_checks(self, body: str, *, post_type: PostType) -> dict[str, Any]:
+        lowered = body.lower()
+        banned_hit = any(phrase in lowered for phrase in self.banned)
         checks = {
             "length_ok": len(body) <= 1500,
             "has_phone": any(token.isdigit() and len(token) >= 7 for token in body.split()),
+            "banned_phrases": banned_hit,
             "post_type": post_type.value,
         }
         return checks

@@ -1,0 +1,165 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: .
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.dev.txt
+            backend/requirements.txt
+            worker/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.dev.txt
+
+      - name: Run pytest
+        run: pytest
+
+  frontend-lint:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [frontend, frontend-admin, frontend-marketing]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ${{ matrix.app }}
+
+      - name: Lint ${{ matrix.app }}
+        run: npm run lint
+        working-directory: ${{ matrix.app }}
+
+  sast-bandit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Bandit
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit
+
+      - name: Run Bandit (Python SAST)
+        run: bandit -r backend worker -ll -x backend/app/db/migrations
+
+  sca-python:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.dev.txt
+            backend/requirements.txt
+            worker/requirements.txt
+
+      - name: Install pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
+
+      - name: Python dependency audit
+        run: pip-audit -r requirements.dev.txt
+
+  sca-node:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [frontend, frontend-admin, frontend-marketing]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ${{ matrix.app }}
+
+      - name: npm audit (${{ matrix.app }})
+        run: npm audit --audit-level=high --production
+        working-directory: ${{ matrix.app }}
+
+  container-scan:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: backend
+            dockerfile: infra/Dockerfile.backend
+          - name: frontend
+            dockerfile: infra/Dockerfile.frontend
+          - name: worker
+            dockerfile: infra/Dockerfile.worker
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      TRIVY_CACHE_DIR: .trivycache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build ${{ matrix.name }} image
+        run: docker build -f ${{ matrix.dockerfile }} -t map-pack-${{ matrix.name }}:ci .
+
+      - name: Scan ${{ matrix.name }} image with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: map-pack-${{ matrix.name }}:ci
+          format: 'table'
+          exit-code: '1'
+          severity: 'HIGH,CRITICAL'
+          vuln-type: 'os,library'
+          ignore-unfixed: true
+          cache-dir: .trivycache

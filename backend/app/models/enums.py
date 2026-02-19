@@ -47,6 +47,8 @@ class ActionType(str, Enum):
     GENERATE_POST_CANDIDATES = "generate_post_candidates"
     COMPOSE_POST_CANDIDATE = "compose_post_candidate"
     SCHEDULE_POST = "schedule_post"
+    PLAN_CONTENT = "plan_content"
+    EXECUTE_POST_JOB = "execute_post_job"
     CUSTOM = "custom"
 
 
@@ -63,6 +65,74 @@ class PostStatus(str, Enum):
     PUBLISHED = "published"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+class ContentItemStatus(str, Enum):
+    DRAFT = "draft"
+    APPROVED = "approved"
+    SCHEDULED = "scheduled"
+    POSTED = "posted"
+    RETIRED = "retired"
+
+
+class ContentPlanStatus(str, Enum):
+    PLANNED = "planned"
+    SELECTED = "selected"
+    SCHEDULED = "scheduled"
+    POSTED = "posted"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    NEEDS_CLIENT_INPUT = "needs_client_input"
+
+
+class PostJobStatus(str, Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    SKIPPED = "skipped"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    RATE_LIMITED = "rate_limited"
+    NEEDS_CLIENT_INPUT = "needs_client_input"
+
+
+class PhotoRequestStatus(str, Enum):
+    PENDING = "pending"
+    REQUESTED = "requested"
+    COMPLETED = "completed"
+
+
+class ContentItemStatus(str, Enum):
+    DRAFT = "draft"
+    APPROVED = "approved"
+    SCHEDULED = "scheduled"
+    POSTED = "posted"
+    RETIRED = "retired"
+
+
+class ContentPlanStatus(str, Enum):
+    PLANNED = "planned"
+    SELECTED = "selected"
+    SCHEDULED = "scheduled"
+    POSTED = "posted"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    NEEDS_CLIENT_INPUT = "needs_client_input"
+
+
+class PostJobStatus(str, Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    SKIPPED = "skipped"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    RATE_LIMITED = "rate_limited"
+    NEEDS_CLIENT_INPUT = "needs_client_input"
+
+
+class PhotoRequestStatus(str, Enum):
+    PENDING = "pending"
+    REQUESTED = "requested"
+    COMPLETED = "completed"
 
 
 class MediaType(str, Enum):

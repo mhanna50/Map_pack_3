@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     ACTION_BASE_BACKOFF_SECONDS: int = 30
     ACTION_MAX_BACKOFF_SECONDS: int = 60 * 60
     GLOBAL_POSTING_PAUSE: bool = False
+    DRY_RUN_MODE: bool = False
+    SHADOW_MODE: bool = False
+    RATE_LIMIT_PER_HOUR: int = 200
+    ALERT_SMS_RECIPIENTS: str = ""  # comma-separated E.164 numbers
 
 
 settings = Settings()

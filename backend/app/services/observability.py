@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session
 
 from backend.app.models.action import Action
 from backend.app.models.alert import Alert
-from backend.app.models.enums import ActionStatus, ActionType, AlertStatus
+from backend.app.models.enums import ActionStatus, ActionType, AlertStatus, PostJobStatus
 from backend.app.models.post import Post
+from backend.app.models.post_job import PostJob
+from backend.app.models.rate_limit_state import RateLimitState
 
 
 class ObservabilityService:
@@ -23,6 +25,8 @@ class ObservabilityService:
             "publishing": self._publishing_metrics(publish_window),
             "token_refresh": self._token_refresh_metrics(window_start),
             "alerts": self._alert_metrics(),
+            "rate_limits": self._rate_limit_metrics(),
+            "post_jobs": self._post_job_metrics(window_start),
             "window_hours": window_hours,
         }
 
@@ -125,4 +129,40 @@ class ObservabilityService:
         return {
             "open_by_type": {alert_type: count for alert_type, count in counts},
             "open_total": sum(count for _, count in counts),
+        }
+
+    def _rate_limit_metrics(self) -> dict:
+        states = self.db.query(RateLimitState).all()
+        active_cooldowns = [
+            state for state in states if state.cooldown_until and state.cooldown_until > datetime.now(timezone.utc)
+        ]
+        return {
+            "scopes_tracked": len(states),
+            "active_cooldowns": len(active_cooldowns),
+        }
+
+    def _post_job_metrics(self, window_start: datetime) -> dict:
+        total = (
+            self.db.query(func.count(PostJob.id))
+            .filter(PostJob.created_at >= window_start)
+            .scalar()
+            or 0
+        )
+        failed = (
+            self.db.query(func.count(PostJob.id))
+            .filter(PostJob.created_at >= window_start)
+            .filter(PostJob.status.in_([PostJobStatus.FAILED, PostJobStatus.RATE_LIMITED]))
+            .scalar()
+            or 0
+        )
+        needs_input = (
+            self.db.query(func.count(PostJob.id))
+            .filter(PostJob.status == PostJobStatus.NEEDS_CLIENT_INPUT)
+            .scalar()
+            or 0
+        )
+        return {
+            "total": total,
+            "failed_or_rate_limited": failed,
+            "needs_client_input": needs_input,
         }

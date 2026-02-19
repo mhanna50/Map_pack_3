@@ -16,6 +16,9 @@ from backend.app.services.alerts import AlertService
 from backend.app.services.bucket_performance import BucketPerformanceService
 from backend.app.services.daily_signals import DailySignalService
 from backend.app.services.seasonal import SeasonalPlanner
+from backend.app.services.photo_requests import PhotoRequestService
+from backend.app.services.settings import SettingsService
+from math import isclose
 
 
 BUCKETS: list[dict[str, Any]] = [
@@ -35,6 +38,8 @@ class PostCandidateService:
         self.daily_signals = DailySignalService(db)
         self.bucket_perf = BucketPerformanceService(db)
         self.seasonal = SeasonalPlanner()
+        self.photo_requests = PhotoRequestService(db)
+        self.settings = SettingsService(db)
 
     def generate(
         self,
@@ -55,6 +60,7 @@ class PostCandidateService:
         location = self.db.get(Location, location_id)
         if not location:
             raise ValueError("Location not found")
+        settings = self.settings.merged(organization_id, location_id)
         best: tuple[dict[str, Any], float] | None = None
         as_of = datetime.combine(target_date, datetime.min.time(), tzinfo=timezone.utc)
         reasons: dict[str, Any] = {
@@ -87,8 +93,15 @@ class PostCandidateService:
                 location_id=location_id,
             )
             return None
+        mix = settings.get("content_mix", {})
+        total_weight = sum(v for v in mix.values() if isinstance(v, (int, float)) and v > 0)
         for bucket in BUCKETS:
+            raw_weight = mix.get(bucket["id"], 0.0)
+            if raw_weight <= 0:
+                continue
+            norm_weight = raw_weight / total_weight if total_weight and not isclose(total_weight, 0.0) else 1.0
             score = self._score_bucket(bucket, signal, location_id, target_date, as_of=as_of)
+            score = score * (0.5 + norm_weight)  # blend base score with mix weight
             if seasonal_bucket and bucket["id"] == seasonal_bucket:
                 score += 10
             if event_trigger and bucket["id"] == event_trigger.get("bucket"):
@@ -119,6 +132,19 @@ class PostCandidateService:
         )
         reasons["selected_bucket"] = selected_bucket
         reasons["bucket_performance_score"] = performance_score
+        # trigger photo request if media is stale and bucket prefers visuals
+        photo_gap = self.settings.merged(organization_id, location_id).get("photo_cadence_days", 14)
+        if (signal.extra_metrics or {}).get("new_media_14d", 0) == 0 and selected_bucket in {
+            "proof",
+            "service_spotlight",
+            "local_highlight",
+        }:
+            self.photo_requests.request_if_stale(
+                organization_id=organization_id,
+                location_id=location_id,
+                reason="Fresh photos improve GBP engagement; none uploaded recently",
+                min_days_between_requests=photo_gap,
+            )
         candidate = PostCandidate(
             organization_id=organization_id,
             location_id=location_id,
@@ -182,6 +208,19 @@ class PostCandidateService:
         )
         return recent is None
 
+    def _topic_cooldown_ok(self, topic_tag: str | None, location_id: uuid.UUID, target_date: date, cooldown_days: int) -> bool:
+        if not topic_tag:
+            return True
+        cutoff = datetime.combine(target_date - timedelta(days=cooldown_days), datetime.min.time(), tzinfo=timezone.utc)
+        recent = (
+            self.db.query(Post)
+            .filter(Post.location_id == location_id)
+            .filter(Post.topic_tags.contains([topic_tag]))
+            .filter(Post.published_at >= cutoff)
+            .first()
+        )
+        return recent is None
+
     def _coverage_gap_bonus(self, bucket_id: str, location_id: uuid.UUID, target_date: date) -> float:
         cutoff = datetime.combine(target_date - timedelta(days=30), datetime.min.time(), tzinfo=timezone.utc)
         used = (
@@ -192,6 +231,7 @@ class PostCandidateService:
             .count()
         )
         return 10.0 if used == 0 else 0.0
+
 
     @staticmethod
     def _location_category(location: Location) -> str | None:

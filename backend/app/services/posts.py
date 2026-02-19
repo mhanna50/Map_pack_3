@@ -21,6 +21,7 @@ from backend.app.services.rotation import RotationEngine
 from backend.app.services.scheduling import AutoScheduler
 from backend.app.services.posting_safety import PostingSafetyService
 from backend.app.services.approvals import ApprovalService
+from backend.app.services.settings import SettingsService
 
 if TYPE_CHECKING:
     from backend.app.services.actions import ActionService
@@ -33,6 +34,7 @@ class PostService:
         self.scheduler = AutoScheduler(db)
         self.safety = PostingSafetyService(db)
         self.approvals = ApprovalService(db)
+        self.settings = SettingsService(db)
 
     def validate_scope(
         self,
@@ -72,26 +74,37 @@ class PostService:
         scheduled_time = scheduled_at or self.scheduler.next_post_time(
             organization_id=organization_id, location_id=location_id
         )
+        merged_settings = self.settings.merged(organization_id, location_id)
         self.safety.validate(
             organization_id=organization_id,
             location_id=location_id,
             scheduled_at=scheduled_time,
             bucket=bucket,
         )
+        fingerprint = self._fingerprint(base_prompt, bucket, topic_tags or [])
+        existing = (
+            self.db.query(Post)
+            .filter(Post.organization_id == organization_id, Post.location_id == location_id)
+            .filter(Post.fingerprint == fingerprint)
+            .first()
+        )
+        if existing:
+            raise ValueError("Similar content recently planned; deduped.")
         post = Post(
             organization_id=organization_id,
-                location_id=location_id,
-                connected_account_id=connected_account_id,
-                post_type=post_type,
-                body=base_prompt,
-                ai_prompt_context=context,
-                scheduled_at=scheduled_time,
-                status=PostStatus.SCHEDULED,
-                bucket=bucket,
-                topic_tags=topic_tags or [],
-                media_asset_id=media_asset_id,
-                window_id=window_id,
-            )
+            location_id=location_id,
+            connected_account_id=connected_account_id,
+            post_type=post_type,
+            body=base_prompt,
+            ai_prompt_context=context,
+            scheduled_at=scheduled_time,
+            status=PostStatus.SCHEDULED,
+            bucket=bucket,
+            topic_tags=topic_tags or [],
+            media_asset_id=media_asset_id,
+            window_id=window_id,
+            fingerprint=fingerprint,
+        )
         self.db.add(post)
         self.db.flush()
 
@@ -101,7 +114,9 @@ class PostService:
                 asset.last_used_at = datetime.now(timezone.utc)
                 self.db.add(asset)
 
-        generator = CaptionGenerator(brand_voice)
+        brand_voice = brand_voice or {"tone": merged_settings.get("tone_of_voice")}
+        banned_phrases = merged_settings.get("banned_phrases", [])
+        generator = CaptionGenerator(brand_voice, banned_phrases=banned_phrases)
         for variant_payload in generator.generate_variants(
             base_prompt=base_prompt,
             services=services or [],
@@ -110,6 +125,8 @@ class PostService:
             count=variants,
             post_type=post_type,
         ):
+            if variant_payload["compliance_flags"].get("banned_phrases"):
+                raise ValueError("Caption contains banned or profane language")
             variant = PostVariant(
                 post_id=post.id,
                 body=variant_payload["body"],
@@ -209,3 +226,11 @@ class PostService:
         lowered = text.lower()
         triggers = ["%", "discount", "sale", "save ", "$"]
         return any(token in lowered for token in triggers)
+
+    @staticmethod
+    def _fingerprint(text: str, bucket: str | None, topic_tags: list[str]) -> str:
+        import hashlib
+        base = " ".join(text.lower().split())
+        extra = "|".join(sorted(topic_tags)) if topic_tags else ""
+        payload = f"{base}|{bucket or ''}|{extra}"
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]

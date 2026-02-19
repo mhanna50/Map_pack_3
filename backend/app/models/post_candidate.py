@@ -29,6 +29,7 @@ class PostCandidate(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     media_asset_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("media_assets.id"))
     status: Mapped[PostStatus] = mapped_column(Enum(PostStatus, name="post_status"), default=PostStatus.DRAFT)
     window_id: Mapped[str | None] = mapped_column(String(32))
+    fingerprint: Mapped[str | None] = mapped_column(String(255), index=True)
 
     organization = relationship("Organization")
     location = relationship("Location")

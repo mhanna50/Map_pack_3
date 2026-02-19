@@ -22,5 +22,6 @@ class LocationSettings(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     services: Mapped[list | None] = mapped_column(JSONB, default=list)
     keywords: Mapped[list | None] = mapped_column(JSONB, default=list)
     competitors: Mapped[list | None] = mapped_column(JSONB, default=list)
+    settings_json: Mapped[dict | None] = mapped_column(JSONB, default=dict)
 
     location = relationship("Location", back_populates="settings")

@@ -8,9 +8,12 @@ from sqlalchemy.orm import Session
 
 from backend.app.models.post import Post
 from backend.app.models.review import Review
+from backend.app.models.enums import PostStatus
 from backend.app.services.audit import log_audit
 from backend.app.services.gbp_connections import GbpConnectionService
 from backend.app.services.google import GoogleBusinessClient, GoogleOAuthService
+from backend.app.services.rate_limits import RateLimitService, RateLimitError
+from backend.app.core.config import settings
 
 
 class GbpPublishingService:
@@ -22,8 +25,39 @@ class GbpPublishingService:
         self.db = db
         self.connections = GbpConnectionService(db)
         self.oauth = GoogleOAuthService()
+        self.rate_limits = RateLimitService(db, limit_per_window=settings.RATE_LIMIT_PER_HOUR)
 
     def publish_post(self, post: Post) -> dict[str, Any]:
+        # Shadow/dry-run modes skip external calls but keep audit trail.
+        if settings.SHADOW_MODE or settings.DRY_RUN_MODE:
+            result = {
+                "shadow_mode": settings.SHADOW_MODE,
+                "dry_run": settings.DRY_RUN_MODE,
+                "skipped": True,
+            }
+            post.publish_result = result
+            post.status = PostStatus.SCHEDULED
+            self.db.add(post)
+            self.db.commit()
+            log_audit(
+                self.db,
+                action="gbp.post.shadow",
+                actor=None,
+                org_id=post.organization_id,
+                entity="post",
+                entity_id=str(post.id),
+                metadata=result,
+            )
+            return result
+        # proactive rate limit guard
+        try:
+            self.rate_limits.check_and_increment(
+                organization_id=post.organization_id,
+                location_id=post.location_id,
+            )
+        except RateLimitError as exc:
+            raise
+
         client = self._client(post.organization_id)
         location = post.location
         if not location or not location.google_location_id:

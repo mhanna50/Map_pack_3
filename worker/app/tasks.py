@@ -11,6 +11,7 @@ from backend.app.db.session import SessionLocal
 from backend.app.models.action import Action
 from backend.app.models.enums import ActionStatus, ActionType
 from backend.app.models.organization import Organization
+from backend.app.services.gbp_connections import GbpConnectionService
 from backend.app.services.actions import ActionExecutor, ActionService
 
 logger = get_task_logger(__name__)
@@ -80,10 +81,54 @@ def _schedule_automation_rules() -> Dict[str, int]:
         db.close()
 
 
+def _plan_content() -> Dict[str, int]:
+    db = SessionLocal()
+    scheduled = 0
+    try:
+        service = ActionService(db)
+        org_ids = [org_id for (org_id,) in db.query(Organization.id).all()]
+        for org_id in org_ids:
+            service.schedule_action(
+                organization_id=org_id,
+                action_type=ActionType.PLAN_CONTENT,
+                run_at=datetime.now(timezone.utc),
+                payload={"horizon_days": 14},
+            )
+            scheduled += 1
+        return {"scheduled": scheduled}
+    finally:
+        db.close()
+
+
+def _connection_health() -> Dict[str, int]:
+    db = SessionLocal()
+    scheduled = 0
+    try:
+        service = ActionService(db)
+        org_ids = [org_id for (org_id,) in db.query(Organization.id).all()]
+        for org_id in org_ids:
+            service.schedule_action(
+                organization_id=org_id,
+                action_type=ActionType.REFRESH_GOOGLE_TOKEN,
+                run_at=datetime.now(timezone.utc),
+                payload={"organization_id": str(org_id)},
+            )
+            scheduled += 1
+        return {"scheduled": scheduled}
+    finally:
+        db.close()
+
+
 dispatch_due_actions = cast(
     Task, celery_app.task(name="actions.dispatch_due")(_dispatch_due_actions)
 )
 execute_action = cast(Task, celery_app.task(name="actions.execute")(_execute_action))
 sched_automation_rules = cast(
     Task, celery_app.task(name="actions.schedule_automation_rules")(_schedule_automation_rules)
+)
+plan_content = cast(
+    Task, celery_app.task(name="actions.plan_content")(_plan_content)
+)
+connection_health = cast(
+    Task, celery_app.task(name="actions.connection_health")(_connection_health)
 )

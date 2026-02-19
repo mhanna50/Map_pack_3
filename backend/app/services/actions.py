@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..core.config import settings
 from ..models.action import Action
-from ..models.enums import ActionStatus, ActionType, PostStatus, QnaStatus
+from ..models.enums import ActionStatus, ActionType, PostStatus, QnaStatus, AlertSeverity
 from ..models.post import Post
 from ..models.qna_entry import QnaEntry
 from .audit import AuditService
@@ -26,6 +26,14 @@ from .post_candidates import PostCandidateService
 from .post_composition import PostCompositionService
 from .post_scheduler import PostSchedulerService
 from .post_metrics import PostMetricsService
+from .content_planner import ContentPlannerService
+from .post_jobs import PostJobService
+from ..models.location import Location
+from ..models.post_job import PostJob
+from ..models.gbp_connection import GbpConnection
+from ..services.gbp_connections import GbpConnectionService
+from ..services.alerts import AlertService
+from ..services.google import GoogleOAuthService
 from ..models.media_upload_request import MediaUploadRequest
 from .validators import assert_location_in_org, assert_connected_account_in_org
 
@@ -199,6 +207,11 @@ class ActionExecutor:
         self.post_composer = PostCompositionService(db)
         self.post_scheduler_service = PostSchedulerService(db)
         self.post_metrics = PostMetricsService(db)
+        self.content_planner = ContentPlannerService(db)
+        self.post_jobs = PostJobService(db)
+        self.connection_service = GbpConnectionService(db)
+        self.alerts = AlertService(db)
+        self.oauth = GoogleOAuthService()
         self.handlers: dict[ActionType, Callable[[Action], dict[str, Any]]] = {
             ActionType.PUBLISH_GBP_POST: self._handle_publish_post,
             ActionType.PUBLISH_QA: self._handle_publish_qna,
@@ -214,6 +227,8 @@ class ActionExecutor:
             ActionType.GENERATE_POST_CANDIDATES: self._handle_generate_post_candidates,
             ActionType.COMPOSE_POST_CANDIDATE: self._handle_compose_post_candidate,
             ActionType.SCHEDULE_POST: self._handle_schedule_post,
+            ActionType.PLAN_CONTENT: self._handle_plan_content,
+            ActionType.EXECUTE_POST_JOB: self._handle_execute_post_job,
             ActionType.CUSTOM: self._handle_noop,
         }
 
@@ -347,14 +362,33 @@ class ActionExecutor:
         return {"status": "automation_run", "triggered": len(results)}
 
     def _handle_refresh_token(self, action: Action) -> dict[str, Any]:
-        self.audit.log(
-            action="gbp.token.refresh_requested",
-            organization_id=action.organization_id,
-            entity_type="action",
-            entity_id=str(action.id),
-        )
-        # Token refresh is a no-op for now; the actual logic will call Google OAuth.
-        return {"status": "token_refresh_stubbed"}
+        org_id = action.organization_id
+        connection = self.connection_service.get_by_org(org_id)
+        if not connection:
+            self.alerts.create_alert(
+                severity=AlertSeverity.WARNING,
+                alert_type="gbp_disconnected",
+                message="No GBP connection on file",
+                organization_id=org_id,
+            )
+            return {"status": "missing_connection"}
+        try:
+            token = self.connection_service.ensure_access_token(connection, refresh_callback=self.oauth.refresh_access_token)
+            self.audit.log(
+                action="gbp.token.refreshed",
+                organization_id=org_id,
+                entity_type="gbp_connection",
+                entity_id=str(connection.id),
+            )
+            return {"status": "token_ok", "expires_at": connection.access_token_expires_at.isoformat() if connection.access_token_expires_at else None}
+        except Exception as exc:  # noqa: BLE001
+            self.alerts.create_alert(
+                severity=AlertSeverity.CRITICAL,
+                alert_type="gbp_token_refresh_failed",
+                message=str(exc),
+                organization_id=org_id,
+            )
+            raise
 
     def _handle_sync_locations(self, action: Action) -> dict[str, Any]:
         self.audit.log(
@@ -415,6 +449,32 @@ class ActionExecutor:
             return {"status": "missing_candidate"}
         candidate = self.post_scheduler_service.schedule(uuid.UUID(candidate_id))
         return {"status": "post_scheduled", "candidate_id": str(candidate.id)}
+
+    def _handle_plan_content(self, action: Action) -> dict[str, Any]:
+        organization_id = action.organization_id
+        horizon = action.payload.get("horizon_days", 14) if action.payload else 14
+        locations = (
+            self.db.query(Location)
+            .filter(Location.organization_id == organization_id)
+            .filter(Location.posting_paused == False)  # noqa: E712
+            .all()
+        )
+        total = 0
+        for loc in locations:
+            plans = self.content_planner.plan_horizon(
+                organization_id=organization_id,
+                location=loc,
+                horizon_days=horizon,
+            )
+            total += len(plans)
+        return {"status": "planned", "plans_created": total}
+
+    def _handle_execute_post_job(self, action: Action) -> dict[str, Any]:
+        job_id = action.payload.get("post_job_id") if action.payload else None
+        if not job_id:
+            return {"status": "missing_post_job"}
+        result = self.post_jobs.execute(uuid.UUID(job_id))
+        return result
 
     def _handle_noop(self, action: Action) -> dict[str, Any]:
         return {"status": "no-op"}

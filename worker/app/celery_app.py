@@ -29,5 +29,13 @@ celery_app.conf.beat_schedule = {
     "schedule-automation-rules": {
         "task": "actions.schedule_automation_rules",
         "schedule": crontab(minute="*/15"),
-    }
+    },
+    "plan-content-daily": {
+        "task": "actions.plan_content",
+        "schedule": crontab(minute=0, hour="*/4"),  # every 4 hours
+    },
+    "connection-health": {
+        "task": "actions.connection_health",
+        "schedule": crontab(minute="*/30"),
+    },
 }

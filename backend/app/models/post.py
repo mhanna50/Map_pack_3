@@ -51,6 +51,7 @@ class Post(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("media_assets.id")
     )
     window_id: Mapped[str | None] = mapped_column(String(32))
+    fingerprint: Mapped[str | None] = mapped_column(String(255), index=True)
 
     organization = relationship("Organization")
     location = relationship("Location")

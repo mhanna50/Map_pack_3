@@ -6,6 +6,7 @@ import uuid
 import logging
 
 from fastapi import Depends, Header, HTTPException, Request, status
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.app.db.session import get_db
@@ -79,6 +80,7 @@ def require_org_member(
         access.resolve_org(user_id=current_user.id, organization_id=org_id)
     except AccessDeniedError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    _set_org_rls(db, org_id)
     return None
 
 
@@ -113,3 +115,12 @@ def _extract_email(payload: dict[str, Any]) -> str | None:
 def _extract_name(payload: dict[str, Any]) -> str | None:
     user_metadata = payload.get("user_metadata") or {}
     return user_metadata.get("full_name") or user_metadata.get("name")
+
+
+def _set_org_rls(db: Session, org_id: uuid.UUID) -> None:
+    """Set per-session org context for Postgres RLS."""
+    try:
+        if db.bind and db.bind.dialect.name == "postgresql":
+            db.execute(text("SET LOCAL app.current_org = :org_id"), {"org_id": str(org_id)})
+    except Exception:
+        logger.exception("Failed to set RLS org context; continuing without it")

@@ -46,6 +46,14 @@ from .post_candidate import PostCandidate
 from .post_metrics_daily import PostMetricsDaily
 from .posting_window_stat import PostingWindowStat
 from .bucket_performance import BucketPerformance
+from .content_item import ContentItem
+from .content_plan import ContentPlan
+from .post_job import PostJob
+from .post_attempt import PostAttempt
+from .rate_limit_state import RateLimitState
+from .client_upload import ClientUpload
+from .photo_request import PhotoRequest
+from .org_settings import OrgSettings
 
 __all__ = [
     "Action",
@@ -96,4 +104,12 @@ __all__ = [
     "PostMetricsDaily",
     "PostingWindowStat",
     "BucketPerformance",
+    "ContentItem",
+    "ContentPlan",
+    "PostJob",
+    "PostAttempt",
+    "RateLimitState",
+    "ClientUpload",
+    "PhotoRequest",
+    "OrgSettings",
 ]
