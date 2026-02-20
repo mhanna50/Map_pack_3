@@ -79,6 +79,8 @@ class GbpConnectionService:
         decrypt = self.encryptor.decrypt
         access_token = decrypt(connection.encrypted_access_token)
         expires_at = connection.access_token_expires_at or datetime.now(timezone.utc)
+        if expires_at.tzinfo is None or expires_at.tzinfo.utcoffset(expires_at) is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
         if expires_at - now > timedelta(seconds=60):
             return access_token

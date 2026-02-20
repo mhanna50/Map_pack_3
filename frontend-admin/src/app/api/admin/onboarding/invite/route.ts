@@ -5,15 +5,12 @@ export async function POST(request: NextRequest) {
   try {
     const admin = await requireAdminUser();
     const body = await request.json();
-    const redirectTo = "https://yourapp.com/onboarding?step=account";
+    const clientBase =
+      process.env.NEXT_PUBLIC_CLIENT_APP_URL || process.env.CLIENT_APP_URL || "http://localhost:3000";
+    const redirectTo = `${clientBase.replace(/\/$/, "")}/onboarding?step=account`;
 
     const { pending } = await upsertPendingOnboarding({
       email: body.email,
-      business_name: body.business_name,
-      first_name: body.first_name,
-      last_name: body.last_name,
-      plan: body.plan,
-      location_limit: body.location_limit,
       invited_by: admin.id,
     });
 

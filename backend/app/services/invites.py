@@ -90,7 +90,10 @@ class InviteService:
         )
         if not invite:
             raise ValueError("Invalid invite token")
-        if invite.expires_at < datetime.now(timezone.utc):
+        expires_at = invite.expires_at
+        if expires_at.tzinfo is None or expires_at.tzinfo.utcoffset(expires_at) is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < datetime.now(timezone.utc):
             raise ValueError("Invite has expired")
         if invite.accepted_at:
             raise ValueError("Invite already accepted")

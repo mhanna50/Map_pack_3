@@ -23,11 +23,11 @@ class RankSnapshot(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     location_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("locations.id"), nullable=False
     )
-    keyword_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("location_keywords.id"), nullable=False
+    keyword_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("location_keywords.id"), nullable=True
     )
-    grid_point_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("geo_grid_points.id"), nullable=False
+    grid_point_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("geo_grid_points.id"), nullable=True
     )
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     rank: Mapped[int | None] = mapped_column(Integer)

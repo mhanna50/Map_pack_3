@@ -45,10 +45,13 @@ class PostingWindowService:
         sampled = []
         for window in windows:
             stat = stats.get(window["id"])
-            alpha = 1 + (stat.clicks + stat.conversions if stat else 0)
-            impressions = stat.impressions if stat else 0
-            beta = 1 + max(impressions - (stat.clicks if stat else 0), 0)
-            sample = random.betavariate(alpha, beta)
+            if not stat:
+                sample = random.betavariate(1, 3)  # modest prior so known performers win
+            else:
+                alpha = 1 + (stat.clicks + stat.conversions)
+                impressions = stat.impressions
+                beta = 1 + max(impressions - stat.clicks, 0)
+                sample = random.betavariate(alpha, beta)
             sampled.append((window, sample))
         sampled.sort(key=lambda item: item[1], reverse=True)
         return sampled[0][0]
@@ -108,9 +111,12 @@ class PostingWindowService:
                 location_id=location_id,
                 window_id=window_id,
             )
-        stat.impressions += impressions
-        stat.clicks += clicks
-        stat.conversions += conversions
+            stat.impressions = 0
+            stat.clicks = 0
+            stat.conversions = 0
+        stat.impressions = (stat.impressions or 0) + impressions
+        stat.clicks = (stat.clicks or 0) + clicks
+        stat.conversions = (stat.conversions or 0) + conversions
         self.db.add(stat)
         self.db.commit()
         self.db.refresh(stat)

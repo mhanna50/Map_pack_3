@@ -36,6 +36,7 @@ class RateLimitService:
             )
             .one_or_none()
         )
+        state = self._normalize_state(state)
         now = datetime.now(timezone.utc)
         window_start = now.replace(minute=0, second=0, microsecond=0)
         window_end = window_start + timedelta(seconds=self.WINDOW_SECONDS)
@@ -65,4 +66,18 @@ class RateLimitService:
         self.db.add(state)
         self.db.commit()
         self.db.refresh(state)
+        return state
+
+    @staticmethod
+    def _normalize_dt(dt: datetime | None) -> datetime | None:
+        if dt and (dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None):
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    def _normalize_state(self, state: RateLimitState | None) -> RateLimitState | None:
+        if not state:
+            return state
+        state.window_starts_at = self._normalize_dt(state.window_starts_at)
+        state.window_ends_at = self._normalize_dt(state.window_ends_at)
+        state.cooldown_until = self._normalize_dt(state.cooldown_until)
         return state

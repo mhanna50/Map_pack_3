@@ -15,6 +15,7 @@ def _setup(db_session):
     db_session.flush()
     loc = Location(name="Job Loc", organization_id=org.id, timezone="UTC")
     db_session.add(loc)
+    db_session.flush()
     plan = ContentPlan(
         organization_id=org.id,
         location_id=loc.id,

@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { AdminShell } from "@/components/admin/shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -12,12 +11,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { adminApi } from "@/lib/adminApiClient";
 import { useToast } from "@/components/ui/toast";
 import { formatDate } from "@/lib/date-utils";
-
-const planOptions = [
-  { label: "Starter", value: "starter" },
-  { label: "Pro", value: "pro" },
-  { label: "Agency", value: "agency" },
-];
 
 type PendingInvite = {
   email: string;
@@ -38,7 +31,7 @@ type PendingInvite = {
 
 export default function OnboardingPage() {
   const { pushToast } = useToast();
-  const [form, setForm] = useState({ email: "", business_name: "", first_name: "", last_name: "", plan: "starter", location_limit: 1 });
+  const [form, setForm] = useState({ email: "" });
   const [sending, setSending] = useState(false);
   const [link, setLink] = useState<string | null>(null);
   const [rows, setRows] = useState<PendingInvite[]>([]);
@@ -146,33 +139,10 @@ export default function OnboardingPage() {
         <Card>
           <CardHeader>
             <CardTitle>New invite</CardTitle>
-            <CardDescription>Client email, business details, plan, and location selection UI (placeholder)</CardDescription>
+            <CardDescription>Send an onboarding link to the client’s email.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="grid gap-3 md:grid-cols-2">
-              <Input placeholder="Client email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
-              <Input placeholder="Business name" value={form.business_name} onChange={(e) => setForm((f) => ({ ...f, business_name: e.target.value }))} />
-              <Input placeholder="First name" value={form.first_name} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} />
-              <Input placeholder="Last name" value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} />
-              <Select
-                value={form.plan}
-                onChange={(e) => setForm((f) => ({ ...f, plan: e.target.value }))}
-                options={planOptions}
-              />
-              <div>
-                <label className="text-sm text-muted-foreground">Location limit (UI only)</label>
-                <div className="mt-2 flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setForm((f) => ({ ...f, location_limit: Math.max(1, f.location_limit - 1) }))}>
-                    -
-                  </Button>
-                  <span className="w-10 text-center text-sm font-semibold">{form.location_limit}</span>
-                  <Button variant="outline" size="sm" onClick={() => setForm((f) => ({ ...f, location_limit: f.location_limit + 1 }))}>
-                    +
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">Allow location amount selection (future functionality).</p>
-              </div>
-            </div>
+            <Input placeholder="Client email" value={form.email} onChange={(e) => setForm({ email: e.target.value })} />
             <div className="flex gap-2">
               <Button onClick={handleInvite} disabled={sending}>
                 {sending ? "Sending…" : "Create invite link"}
@@ -205,7 +175,7 @@ export default function OnboardingPage() {
                     <div key={row.email} className="rounded-lg border border-border bg-white/60 p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div>
-                          <p className="font-semibold">{row.business_name}</p>
+                          <p className="font-semibold">{row.business_name || "Pending business name"}</p>
                           <p className="text-xs text-muted-foreground">{row.email}</p>
                           <p className="text-xs text-muted-foreground">Invited {formatDate(row.invited_at)}</p>
                         </div>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
@@ -27,9 +28,9 @@ class AlertResponse(BaseModel):
     message: str
     status: AlertStatus
     metadata_json: dict | None = None
-    created_at: str
-    acknowledged_at: str | None = None
-    resolved_at: str | None = None
+    created_at: datetime
+    acknowledged_at: datetime | None = None
+    resolved_at: datetime | None = None
     internal_notes: str | None = None
 
 

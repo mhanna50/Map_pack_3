@@ -63,7 +63,8 @@ class PostingSafetyService:
             .first()
         )
         if last_post and last_post.scheduled_at:
-            delta = target_time - last_post.scheduled_at
+            last_time = self._normalize_dt(last_post.scheduled_at)
+            delta = target_time - last_time
             if delta < timedelta(hours=self.MIN_GAP_HOURS):
                 raise ValueError("Minimum gap between posts not satisfied")
 
@@ -93,3 +94,11 @@ class PostingSafetyService:
         if org and org.posting_cap_per_week:
             return org.posting_cap_per_week
         return None
+
+    @staticmethod
+    def _normalize_dt(dt: datetime | None) -> datetime:
+        if dt is None:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt

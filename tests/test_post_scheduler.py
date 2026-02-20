@@ -16,6 +16,7 @@ def _setup(db_session):
     db_session.flush()
     location = Location(name="Scheduler Location", organization_id=org.id, timezone="UTC")
     db_session.add(location)
+    db_session.flush()
     candidate = PostCandidate(
         organization_id=org.id,
         location_id=location.id,

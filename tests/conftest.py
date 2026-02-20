@@ -3,9 +3,11 @@ from __future__ import annotations
 from collections.abc import Generator
 from pathlib import Path
 import sys
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from fastapi import Request
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.compiler import compiles
@@ -87,7 +89,22 @@ def api_client(db_session):
         finally:
             pass
 
-    def override_current_user():
+    async def override_current_user(request: Request):
+        # Allow tests to impersonate a specific user via ?user_id=<uuid> or JSON body user_id
+        user_param = request.query_params.get("user_id")
+        if not user_param and request.method in {"POST", "PUT", "PATCH"}:
+            try:
+                body = await request.json()
+                user_param = body.get("user_id")
+            except Exception:
+                user_param = None
+        if user_param:
+            try:
+                requested = db_session.get(User, uuid.UUID(str(user_param)))
+                if requested:
+                    return requested
+            except Exception:
+                pass
         return user
 
     fastapi_app.dependency_overrides[get_db] = override_get_db

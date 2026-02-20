@@ -190,6 +190,10 @@ Make sure your Supabase Auth settings allow redirects to your `CLIENT_APP_URL` o
 Set `CLIENT_APP_URL` so the onboarding + sign-in links in the email point to your client dashboard (e.g., `https://app.yourdomain.com`).
 Set `NEXT_PUBLIC_CLIENT_APP_URL` for the admin UI so dashboard links point to the client app.
 
+### 4) Client onboarding invites (backend-driven)
+- The backend uses Supabase Auth invites for all client accounts and sets the redirect to your onboarding flow (`<CLIENT_APP_URL>/onboarding?...`).
+- Ensure `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_URL`, `CLIENT_APP_URL`, and `NEXT_PUBLIC_CLIENT_APP_URL` are populated so the invite email and redirect work end-to-end.
+
 ---
 
 ## Supabase Auth (Client + Admin Login)
@@ -207,12 +211,24 @@ Set these in `.env`:
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_URL`
 
-### 3) Admin access
-Your admin user needs `is_staff=true` in the backend `users` table. After signing up, run:
+### 3) Admin access (manual only)
+Admins must be created manually in Supabase, then promoted via SQL:
 
-```bash
-python scripts/set_staff_user.py you@yourdomain.com true
-```
+1. In the Supabase Dashboard, go to **Auth → Users → Invite user** (or **Create user**) and add the admin email. You do **not** need to set a password; they will set one via reset.
+2. In the SQL editor (or psql), mark the account as staff in your app database:
+   ```sql
+   update users set is_staff = true where email = 'admin@example.com';
+   ```
+   (Run this against the same Postgres instance your backend uses.)
+3. In the Supabase database, set their profile role to admin so the admin UI gate passes:
+   ```sql
+   update profiles
+   set role = 'admin'
+   where user_id = '<supabase_user_id_from_auth_users>';
+   ```
+4. The admin can obtain a password by visiting the admin login screen and clicking **Forgot password?**; Supabase will send the reset email to that address.
+
+Self-serve admin sign-up is intentionally disabled; only the manual flow above should be used.
 
 ---
 

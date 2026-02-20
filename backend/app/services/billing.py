@@ -16,6 +16,41 @@ class BillingService:
         if settings.STRIPE_SECRET_KEY:
             stripe.api_key = settings.STRIPE_SECRET_KEY
 
+    def _get_or_create_customer(self, email: str) -> stripe.Customer:
+        if not settings.STRIPE_SECRET_KEY:
+            raise ValueError("Stripe secret key must be configured")
+        existing = stripe.Customer.list(email=email, limit=1).data
+        if existing:
+            return existing[0]
+        return stripe.Customer.create(email=email)
+
+    def create_subscription_intent(
+        self,
+        *,
+        email: str,
+        company_name: str,
+        plan: str = "starter",
+    ) -> dict[str, str]:
+        price_id = self._resolve_price_id(plan)
+        if not price_id:
+            raise ValueError("Stripe price id must be configured for this plan")
+        customer = self._get_or_create_customer(email)
+        subscription = stripe.Subscription.create(
+          customer=customer.id,
+          items=[{"price": price_id}],
+          payment_behavior="default_incomplete",
+          payment_settings={
+              "save_default_payment_method": "on_subscription",
+              "payment_method_types": ["card"],
+          },
+          metadata={"plan": plan, "company_name": company_name},
+          expand=["latest_invoice.payment_intent"],
+        )
+        intent = subscription.latest_invoice.payment_intent
+        if not intent or not intent.client_secret:
+            raise ValueError("Unable to create payment intent for subscription")
+        return {"subscription_id": subscription.id, "client_secret": intent.client_secret}
+
     def create_checkout_session(
         self,
         *,

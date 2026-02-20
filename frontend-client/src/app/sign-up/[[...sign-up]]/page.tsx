@@ -2,12 +2,13 @@
 
 import { FormEvent, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/client";
 
 export default function Page() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +27,8 @@ export default function Page() {
       if (authError) {
         throw authError;
       }
-      router.push("/app");
+      const redirect = searchParams?.get("redirect") || "/app";
+      router.push(redirect);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign up");
     } finally {

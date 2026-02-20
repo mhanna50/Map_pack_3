@@ -40,6 +40,17 @@ class CheckoutLinkResponse(BaseModel):
     emailed: bool
 
 
+class SubscriptionRequest(BaseModel):
+    email: EmailStr
+    company_name: str = Field(..., min_length=2)
+    plan: str = Field(default="starter", examples=["starter", "pro"])
+
+
+class SubscriptionResponse(BaseModel):
+    client_secret: str
+    subscription_id: str
+
+
 @router.post("/checkout", response_model=CheckoutResponse)
 def create_checkout_session(payload: CheckoutRequest) -> CheckoutResponse:
     service = BillingService()
@@ -74,6 +85,20 @@ def send_checkout_link(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Stripe session missing URL")
     emailed = False
     return CheckoutLinkResponse(checkout_url=session.url, session_id=session.id, emailed=emailed)
+
+
+@router.post("/subscribe", response_model=SubscriptionResponse)
+def create_subscription(payload: SubscriptionRequest) -> SubscriptionResponse:
+    service = BillingService()
+    try:
+        result = service.create_subscription_intent(
+            email=payload.email,
+            company_name=payload.company_name,
+            plan=payload.plan,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return SubscriptionResponse(**result)
 
 
 @router.post("/webhook")

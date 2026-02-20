@@ -9,11 +9,12 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
 from backend.app.models.contact import Contact
-from backend.app.models.enums import ReviewRequestStatus
+from backend.app.models.enums import ReviewRequestStatus, ActionType
 from backend.app.models.job import Job
 from backend.app.models.review_request import ReviewRequest
 from backend.app.services.actions import ActionService
 from backend.app.services.audit import AuditService
+from backend.app.services.notifications import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ class ReviewRequestService:
         self.db = db
         self.actions = ActionService(db)
         self.audit = AuditService(db)
+        self.notifier = NotificationService()
 
     def create_contact(
         self,
@@ -94,7 +96,7 @@ class ReviewRequestService:
         scheduled_for = send_at or datetime.now(timezone.utc)
         self.actions.schedule_action(
             organization_id=organization_id,
-            action_type="custom",
+            action_type=ActionType.CUSTOM,
             run_at=scheduled_for,
             payload={"review_request_id": str(request.id)},
         )
@@ -130,15 +132,23 @@ class ReviewRequestService:
             return
         link = f"{settings.CLIENT_APP_URL}/r/{review_request.id}"
         greeting = f"Hi {contact.name}," if contact.name else "Hi there,"
-        message = f"{greeting} thanks for choosing us! Would you share your experience? {link}"
+        sms_message = f"{greeting} thanks for choosing us! Would you share your experience? {link}"
+        email_message = f"{greeting} Please leave a review: {link}"
         try:
             if review_request.channel == "sms":
                 if not contact.phone:
                     raise ValueError("Contact missing phone number")
-                self._send_sms(contact.phone, message)
+                self._send_sms(contact.phone, sms_message)
             else:
-                logger.info("Email review requests are disabled; SMS is the supported channel.")
-                return
+                if not contact.email:
+                    raise ValueError("Contact missing email")
+                subject = "Please leave a review"
+                self.notifier.send_email(
+                    to_email=contact.email,
+                    subject=subject,
+                    html_body=email_message,
+                    text_body=email_message,
+                )
             self.mark_sent(review_request)
             self.audit.log(
                 action="review_request.sent",

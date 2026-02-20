@@ -46,7 +46,7 @@ class DailySignalService:
                 location_id=location_id,
                 signal_date=target_date,
             )
-        now = datetime.combine(target_date, datetime.min.time(), tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         snapshot.days_since_post = self._days_since_last_post(location_id, now)
         snapshot.review_count_7d = self._review_count(location_id, now, days=7)
         snapshot.avg_rating_30d = self._avg_rating(location_id, now, days=30)
