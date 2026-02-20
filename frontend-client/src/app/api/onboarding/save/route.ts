@@ -32,6 +32,36 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
+  // Basic rate limit: 20 requests per minute per user (in-memory)
+  const key = `onboarding-save-${user.id}`;
+  const now = Date.now();
+  const windowMs = 60_000;
+  const limit = 20;
+  // @ts-expect-error attach to globalThis for simplicity
+  const store = (globalThis.__onboardingRate__ = globalThis.__onboardingRate__ || new Map());
+  const bucket = store.get(key) || [];
+  const recent = bucket.filter((t: number) => now - t < windowMs);
+  recent.push(now);
+  store.set(key, recent);
+  if (recent.length > limit) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
+  // Basic rate limit: 20 requests per minute per user (very lightweight, in-memory)
+  const key = `onboarding-save-${user.id}`;
+  const now = Date.now();
+  const windowMs = 60_000;
+  const limit = 20;
+  // @ts-expect-error attach to globalThis for simplicity
+  const store = (globalThis.__onboardingRate__ = globalThis.__onboardingRate__ || new Map());
+  const bucket = store.get(key) || [];
+  const recent = bucket.filter((t: number) => now - t < windowMs);
+  recent.push(now);
+  store.set(key, recent);
+  if (recent.length > limit) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
   const body = await request.json();
   const svc = createServiceClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
   const email = user.email.toLowerCase();

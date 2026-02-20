@@ -507,6 +507,27 @@ export default function OnboardingPage() {
     }
   };
 
+  // Restore step and orgId from sessionStorage if returning mid-flow
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const storedStep = sessionStorage.getItem("onboarding.step");
+    if (storedStep) {
+      const stepNum = Number(storedStep);
+      if (!Number.isNaN(stepNum) && stepNum >= 0 && stepNum < steps.length) {
+        setCurrentStep(stepNum);
+      }
+    }
+    const storedOrgId = sessionStorage.getItem("onboarding.orgId");
+    if (storedOrgId) {
+      setOrganizationId(storedOrgId);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    sessionStorage.setItem("onboarding.step", String(currentStep));
+  }, [currentStep]);
+
   const handleContinue = async () => {
     if (currentStep === 2) {
       const ok = await stripeSectionRef.current?.submit();

@@ -82,6 +82,18 @@ class PostingSafetyService:
     def _ensure_not_paused(self, *, org: Organization | None, location: Location | None) -> None:
         if settings.GLOBAL_POSTING_PAUSE:
             raise ValueError("Posting is paused globally")
+        # Auto-pause if subscription expired
+        if org:
+            metadata = org.metadata_json or {}
+            cancel_at_period_end = metadata.get("cancel_at_period_end")
+            current_period_end = metadata.get("current_period_end")
+            if cancel_at_period_end and current_period_end:
+                now_ts = datetime.now(timezone.utc).timestamp()
+                if now_ts > current_period_end:
+                    org.posting_paused = True
+                    org.is_active = False
+                    self.db.add(org)
+                    self.db.commit()
         if org and org.posting_paused:
             raise ValueError("Posting is paused for this organization")
         if location and location.posting_paused:

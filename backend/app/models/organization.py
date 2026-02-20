@@ -24,6 +24,7 @@ class Organization(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     usage_limits_json: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     posting_paused: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     posting_cap_per_week: Mapped[int | None] = mapped_column(Integer)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     locations = relationship("Location", back_populates="organization")
     memberships = relationship("Membership", back_populates="organization")

@@ -146,6 +146,11 @@ class BillingService:
             raise ValueError("Stripe webhook secret not configured")
         return stripe.Webhook.construct_event(payload=payload, sig_header=signature, secret=settings.STRIPE_WEBHOOK_SECRET)
 
+    def get_subscription(self, subscription_id: str) -> stripe.Subscription:
+        if not settings.STRIPE_SECRET_KEY:
+            raise ValueError("Stripe secret key must be configured")
+        return stripe.Subscription.retrieve(subscription_id, expand=["customer"])
+
     @staticmethod
     def extract_checkout_data(session: dict[str, Any]) -> dict[str, Any]:
         metadata = session.get("metadata") or {}

@@ -28,7 +28,7 @@ export async function requireAdminUser(): Promise<AdminUser> {
     throw new Error("Not authenticated");
   }
 
-  // Prefer the service client so we can verify is_staff and heal the profile role.
+  // Prefer the service client so we can verify is_staff and validate the profile role.
   const svc = getService();
   if (svc) {
     const { data: staffUser, error: staffErr } = await svc
@@ -48,20 +48,13 @@ export async function requireAdminUser(): Promise<AdminUser> {
       .maybeSingle();
     if (profileErr) throw profileErr;
 
-    if (!profile) {
-      const { error: upsertErr } = await svc
-        .from("profiles")
-        .upsert({ user_id: user.id, role: "admin", email: user.email?.toLowerCase() ?? null });
-      if (upsertErr) throw upsertErr;
-      return { id: user.id, email: user.email, role: "admin", tenant_id: null };
+    if (!profile || profile.role !== "admin") {
+      console.warn(`Admin access denied: profile role is ${profile?.role ?? "missing"} for user ${user.id}`);
+      throw new Error("Admin role required");
     }
-
-    if (profile.role !== "admin" || !profile.email) {
-      const { error: updateErr } = await svc
-        .from("profiles")
-        .update({ role: "admin", email: user.email?.toLowerCase() ?? profile.email })
-        .eq("user_id", user.id);
-      if (updateErr) throw updateErr;
+    if (!profile.email) {
+      console.warn(`Admin profile missing email for user ${user.id}`);
+      throw new Error("Admin role required");
     }
 
     return { id: user.id, email: user.email, role: "admin", tenant_id: profile.tenant_id };

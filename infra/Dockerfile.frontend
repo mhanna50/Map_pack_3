@@ -1,6 +1,7 @@
 FROM node:20-alpine
 
-ARG APP_DIR=frontend
+# Name of the frontend app directory (default matches renamed folder)
+ARG APP_DIR=frontend-client
 
 WORKDIR /app/${APP_DIR}
 

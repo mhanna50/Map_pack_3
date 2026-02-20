@@ -114,9 +114,9 @@ services:
       context: ..
       dockerfile: infra/Dockerfile.frontend
       args:
-        APP_DIR: frontend
+        APP_DIR: frontend-client
     command: npm run dev -- --hostname 0.0.0.0 --port 3000
-    working_dir: /app/frontend
+    working_dir: /app/frontend-client
     env_file:
       - ../.env
     environment:
@@ -124,7 +124,7 @@ services:
       WATCHPACK_POLLING: "true"
     volumes:
       - ..:/app
-      - frontend_client_node_modules:/app/frontend/node_modules
+      - frontend_client_node_modules:/app/frontend-client/node_modules
     ports:
       - "3000:3000"
     depends_on:
