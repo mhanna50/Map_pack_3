@@ -15,6 +15,16 @@ import { useTenant } from "@/lib/tenant-context";
 import { listReviewRequests } from "@/lib/db";
 import { format } from "@/lib/date-utils";
 
+type ReviewRequest = {
+  id: string | number;
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+  last_sent_at?: string | null;
+  location_id?: string | null;
+};
+
 const statusTabs = [
   { value: "all", label: "All" },
   { value: "sent", label: "Sent" },
@@ -25,7 +35,7 @@ const statusTabs = [
 
 export default function ReviewsPage() {
   const { tenantId, selectedLocationId, refresh: refreshTenant } = useTenant();
-  const [requests, setRequests] = useState<Array<Record<string, unknown>>>([]);
+  const [requests, setRequests] = useState<ReviewRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -50,7 +60,7 @@ export default function ReviewsPage() {
       try {
         const data = await listReviewRequests(tenantId, selectedLocationId ?? undefined, { limit: 50 });
         if (!active) return;
-        setRequests((data ?? []) as Array<Record<string, unknown>>);
+        setRequests((data ?? []) as ReviewRequest[]);
       } catch (err: unknown) {
         if (!active) return;
         const message = err instanceof Error ? err.message : "Failed to load review requests";
@@ -121,8 +131,8 @@ export default function ReviewsPage() {
                   </TR>
                 </THead>
                 <TBody>
-                  {filtered.map((req) => (
-                    <TR key={req.id}>
+                  {filtered.map((req, index) => (
+                    <TR key={req.id?.toString?.() ?? `req-${index}`}>
                       <TD>
                         <div className="font-semibold">{req.customer_name ?? "—"}</div>
                         <p className="text-xs text-muted-foreground">{maskPhone(req.customer_phone)}</p>

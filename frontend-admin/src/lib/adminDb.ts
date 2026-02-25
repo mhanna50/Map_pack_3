@@ -7,6 +7,7 @@ const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
 export type AdminUser = { id: string; email?: string | null; role?: string | null; tenant_id?: string | null };
+type PostgrestErrorLike = { message?: string; details?: string | null; code?: string | null };
 
 export async function requireAdminUser(): Promise<AdminUser> {
   const cookieStore = await cookies();
@@ -37,9 +38,6 @@ export async function requireAdminUser(): Promise<AdminUser> {
       .eq("id", user.id)
       .maybeSingle();
     if (staffErr) throw staffErr;
-    if (!staffUser?.is_staff) {
-      throw new Error("Admin role required");
-    }
 
     const { data: profile, error: profileErr } = await svc
       .from("profiles")
@@ -48,16 +46,23 @@ export async function requireAdminUser(): Promise<AdminUser> {
       .maybeSingle();
     if (profileErr) throw profileErr;
 
-    if (!profile || profile.role !== "admin") {
-      console.warn(`Admin access denied: profile role is ${profile?.role ?? "missing"} for user ${user.id}`);
+    const isAdminRole = profile?.role === "admin" || profile?.role === "super_admin";
+    const isStaff = staffUser?.is_staff === true;
+
+    if (!(isAdminRole || isStaff)) {
+      console.warn(
+        `Admin access denied: role=${profile?.role ?? "missing"} is_staff=${staffUser?.is_staff ?? "missing"} user=${user.id}`,
+      );
       throw new Error("Admin role required");
     }
-    if (!profile.email) {
+
+    const email = profile?.email ?? staffUser?.email ?? user.email;
+    if (!email) {
       console.warn(`Admin profile missing email for user ${user.id}`);
       throw new Error("Admin role required");
     }
 
-    return { id: user.id, email: user.email, role: "admin", tenant_id: profile.tenant_id };
+    return { id: user.id, email, role: isAdminRole ? "admin" : "staff", tenant_id: profile?.tenant_id };
   }
 
   // Fallback when service key is not configured.
@@ -83,6 +88,19 @@ function requireService(): SupabaseClient {
   return svc;
 }
 
+function isSchemaCompatibilityError(error: unknown): boolean {
+  const err = error as PostgrestErrorLike | null;
+  const code = err?.code ?? "";
+  const message = `${err?.message ?? ""} ${err?.details ?? ""}`.toLowerCase();
+  return (
+    code === "42P01" || // undefined_table
+    code === "42703" || // undefined_column
+    code === "PGRST204" || // column/table missing from schema cache
+    message.includes("does not exist") ||
+    message.includes("schema cache")
+  );
+}
+
 // --- Onboarding helpers ---
 
 export async function upsertPendingOnboarding(payload: {
@@ -94,10 +112,11 @@ export async function upsertPendingOnboarding(payload: {
   location_limit?: number | null;
   invited_by?: string | null;
   status?: string | null;
+  expires_at?: string | null;
 }) {
   const svc = requireService();
 
-  const email = payload.email.toLowerCase();
+  const email = payload.email.trim().toLowerCase();
   const { data: existing } = await svc.from("pending_onboarding").select("*").eq("email", email).maybeSingle();
 
   const merged = {
@@ -110,6 +129,7 @@ export async function upsertPendingOnboarding(payload: {
     status: payload.status ?? existing?.status ?? "invited",
     invited_at: existing?.invited_at ?? new Date().toISOString(),
     invited_by_admin_user_id: payload.invited_by ?? existing?.invited_by_admin_user_id ?? null,
+    expires_at: payload.expires_at ?? existing?.expires_at ?? null,
   };
 
   const { data, error } = await svc
@@ -126,6 +146,7 @@ export async function listPendingOnboarding() {
   const { data, error } = await svc
     .from("pending_onboarding")
     .select("*")
+    .not("invited_by_admin_user_id", "is", "null")
     .order("invited_at", { ascending: false });
   if (error) throw error;
   return data ?? [];
@@ -133,16 +154,68 @@ export async function listPendingOnboarding() {
 
 export async function cancelPendingOnboarding(email: string) {
   const svc = requireService();
-  const { error } = await svc.from("pending_onboarding").update({ status: "canceled" }).eq("email", email.toLowerCase());
+  const normalized = email.trim().toLowerCase();
+  const { error } = await svc.from("pending_onboarding").update({ status: "canceled" }).eq("email", normalized);
   if (error) throw error;
   return { canceled: true };
 }
 
+export async function revokeSupabaseInvite(email: string) {
+  const svc = requireService();
+  // Supabase auth API does not expose invite revocation; disable by deleting any pending onboarding row and clearing tenant_id
+  const lower = email.trim().toLowerCase();
+  const { error } = await svc.from("pending_onboarding").update({ status: "canceled", tenant_id: null }).eq("email", lower);
+  if (error) throw error;
+  return { revoked: true };
+}
+
+export async function deletePendingOnboarding(email: string) {
+  const svc = requireService();
+  const lower = email.trim().toLowerCase();
+  const { error } = await svc.from("pending_onboarding").delete().eq("email", lower);
+  if (error) throw error;
+  return { deleted: true };
+}
+
+async function sendMagicLink(email: string, redirectTo: string) {
+  const svc = requireService();
+  // Generate a fresh magic link for manual copy while also sending an OTP email via Supabase.
+  const { data: magic, error: magicErr } = await svc.auth.admin.generateLink({
+    type: "magiclink",
+    email,
+    options: { redirectTo },
+  });
+  if (magicErr) throw magicErr;
+
+  const { error: otpErr } = await svc.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: redirectTo, shouldCreateUser: true },
+  });
+  if (otpErr) throw otpErr;
+
+  return { emailed: true, inviteLink: magic?.properties?.action_link ?? null, method: "magiclink" as const };
+}
+
 export async function sendSupabaseInvite(email: string, redirectTo: string) {
   const svc = requireService();
-  const { data, error } = await svc.auth.admin.inviteUserByEmail(email, { redirectTo });
-  if (error) throw error;
-  return { emailed: true, inviteLink: data?.action_link ?? null };
+  const lower = email.trim().toLowerCase();
+  const { data, error } = await svc.auth.admin.inviteUserByEmail(lower, { redirectTo });
+
+  if (!error) {
+    const inviteLink = ((data as { action_link?: string | null } | null)?.action_link ?? null);
+    return { emailed: true, inviteLink, method: "invite" as const };
+  }
+
+  const message = (error as Error).message?.toLowerCase() ?? "";
+  const alreadyRegistered = message.includes("already") && message.includes("registr");
+  const rateLimited = (error as { status?: number }).status === 429;
+
+  if (alreadyRegistered || rateLimited) {
+    // Supabase will not resend invite emails once a user exists; fall back to a magic link email.
+    return sendMagicLink(lower, redirectTo);
+  }
+
+  throw error;
 }
 
 export async function fetchKpis() {
@@ -175,6 +248,7 @@ export async function fetchTenants(params: { page?: number; pageSize?: number; s
 
   let query = svc.from("tenants").select("*", { count: "exact" });
   if (status) query = query.eq("status", status);
+  if (plan) query = query.eq("plan", plan);
   if (q) {
     query = query.ilike("business_name", `%${q}%`);
   }
@@ -193,18 +267,66 @@ export async function fetchTenantDetail(id: string) {
   const svc = requireService();
   const { data, error } = await svc.from("tenants").select().eq("tenant_id", id).maybeSingle();
   if (error) throw error;
+  let orgPostingPaused: boolean | null = null;
+  const orgStatus = await svc.from("organizations").select("id, posting_paused").eq("id", id).maybeSingle();
+  if (orgStatus.error) {
+    if (!isSchemaCompatibilityError(orgStatus.error)) {
+      throw orgStatus.error;
+    }
+  } else {
+    orgPostingPaused = orgStatus.data?.posting_paused ?? null;
+  }
   const locations = await svc.from("locations").select().eq("tenant_id", id);
   const connections = await svc.from("gbp_connections").select().eq("tenant_id", id);
   const posts = await svc.from("post_history").select().eq("tenant_id", id).order("published_at", { ascending: false }).limit(5);
   const reviews = await svc.from("review_requests").select().eq("tenant_id", id).order("created_at", { ascending: false }).limit(5);
   const audits = await svc.from("billing_events").select().eq("tenant_id", id).order("created_at", { ascending: false }).limit(10);
+  const tenant = data ? { ...data, posting_paused: orgPostingPaused ?? data.posting_paused ?? false } : data;
   return {
-    tenant: data,
+    tenant,
     locations: locations.data ?? [],
     connections: connections.data ?? [],
     posts: posts.data ?? [],
     reviews: reviews.data ?? [],
     audits: audits.data ?? [],
+  };
+}
+
+export async function setTenantAutomationPaused(id: string, paused: boolean) {
+  const svc = requireService();
+
+  const orgResult = await svc
+    .from("organizations")
+    .update({ posting_paused: paused })
+    .eq("id", id)
+    .select("id, posting_paused")
+    .maybeSingle();
+  if (orgResult.error && !isSchemaCompatibilityError(orgResult.error)) {
+    throw orgResult.error;
+  }
+
+  const tenantResult = await svc
+    .from("tenants")
+    .update({ posting_paused: paused })
+    .eq("tenant_id", id)
+    .select("tenant_id, posting_paused")
+    .maybeSingle();
+  if (tenantResult.error && !isSchemaCompatibilityError(tenantResult.error)) {
+    throw tenantResult.error;
+  }
+
+  const orgUpdated = Boolean(orgResult.data);
+  const tenantUpdated = Boolean(tenantResult.data);
+
+  if (!orgUpdated && !tenantUpdated) {
+    throw new Error("Tenant not found");
+  }
+
+  return {
+    tenant_id: id,
+    paused: orgResult.data?.posting_paused ?? tenantResult.data?.posting_paused ?? paused,
+    organization_updated: orgUpdated,
+    tenant_updated: tenantUpdated,
   };
 }
 

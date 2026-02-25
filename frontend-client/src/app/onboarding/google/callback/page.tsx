@@ -1,12 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getAccessToken } from "@/lib/supabase/session";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 export default function GoogleCallbackPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-slate-50 px-6">Loading…</div>}>
+      <GoogleCallbackContent />
+    </Suspense>
+  );
+}
+
+function GoogleCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState("Finishing Google connection…");
@@ -38,14 +46,17 @@ export default function GoogleCallbackPage() {
           const payload = await response.json().catch(() => ({}));
           throw new Error(payload.detail || "Google authorization failed");
         }
-        const data = await response.json();
-        const firstAccount = data.connected_accounts?.[0];
-        if (typeof window !== "undefined") {
-          if (firstAccount?.organization_id) {
-            sessionStorage.setItem("onboarding.orgId", firstAccount.organization_id);
-          }
-          sessionStorage.setItem("onboarding.googleConnected", "true");
-        }
+        await response.json();
+        await fetch("/api/onboarding/save", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ status: "google_connected" }),
+        }).catch(() => {
+          // Best effort only; onboarding screen will still continue from session state.
+        });
         setStatus("Connected! Redirecting you back…");
         setTimeout(() => router.push("/onboarding"), 1200);
       } catch (err) {

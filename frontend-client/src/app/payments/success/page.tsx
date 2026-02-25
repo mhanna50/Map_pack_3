@@ -1,13 +1,14 @@
 import Link from "next/link";
 
 type PaymentSuccessProps = {
-  searchParams?: {
+  searchParams?: Promise<{
     session_id?: string;
-  };
+  }>;
 };
 
-export default function PaymentSuccessPage({ searchParams }: PaymentSuccessProps) {
-  const sessionId = searchParams?.session_id;
+export default async function PaymentSuccessPage({ searchParams }: PaymentSuccessProps) {
+  const resolved = await searchParams;
+  const sessionId = resolved?.session_id;
   return (
     <div className="min-h-screen bg-slate-50 px-6 py-12">
       <div className="mx-auto w-full max-w-lg space-y-6 rounded-3xl bg-white p-8 text-center shadow-sm">

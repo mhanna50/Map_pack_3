@@ -36,7 +36,8 @@ export async function listLocations(tenantId: string) {
 
 export async function getDashboardKpis(tenantId: string, locationId?: Nullable<string>) {
   const supabase = createClient();
-  const locationFilter = <T>(query: PostgrestFilterBuilder<T>) => (locationId ? query.eq("location_id", locationId) : query);
+  const locationFilter = (query: PostgrestFilterBuilder<any, any, any, any>) =>
+    locationId ? query.eq("location_id", locationId) : query;
 
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
@@ -45,8 +46,10 @@ export async function getDashboardKpis(tenantId: string, locationId?: Nullable<s
   const postsThisMonthPromise = locationFilter(
     supabase.from("post_history").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).gte("published_at", startOfMonth),
   );
-  const scheduledPostsPromise = locationFilter(
-    supabase.from("post_jobs").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("status", "scheduled"),
+  const scheduledPostsPromise = Promise.resolve(
+    locationFilter(
+      supabase.from("post_jobs").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("status", "scheduled"),
+    ),
   ).catch(() => ({ count: 0 }));
   const reviewRequestsSentPromise = locationFilter(
     supabase

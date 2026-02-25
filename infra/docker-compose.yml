@@ -125,6 +125,7 @@ services:
     volumes:
       - ..:/app
       - frontend_client_node_modules:/app/frontend-client/node_modules
+      - frontend_client_next:/app/frontend-client/.next
     ports:
       - "3000:3000"
     depends_on:
@@ -179,5 +180,6 @@ volumes:
   postgres_data:
   redis_data:
   frontend_client_node_modules:
+  frontend_client_next:
   frontend_marketing_node_modules:
   frontend_admin_node_modules:

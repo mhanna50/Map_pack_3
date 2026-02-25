@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
@@ -15,6 +15,14 @@ const normalizePlan = (value: string | null): Plan | null => {
 };
 
 export default function CheckoutPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen px-6 py-12 text-center text-slate-600">Loading checkout…</div>}>
+      <CheckoutContent />
+    </Suspense>
+  );
+}
+
+function CheckoutContent() {
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [companyName, setCompanyName] = useState("");

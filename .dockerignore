@@ -11,3 +11,12 @@ frontend-admin/node_modules
 backend/.pytest_cache
 worker/.pytest_cache
 .env
+# Exclude large client build artifacts so Docker context stays small
+frontend-client/node_modules
+frontend-client/.next
+frontend-client/.turbo
+frontend-client/.cache
+node_modules
+**/.next
+**/.turbo
+**/.cache

@@ -12,6 +12,31 @@ import { adminApi } from "@/lib/adminApiClient";
 import { useToast } from "@/components/ui/toast";
 import { formatDate } from "@/lib/date-utils";
 
+const STATUS_RANK: Record<string, number> = {
+  invited: 0,
+  in_progress: 1,
+  business_setup: 2,
+  stripe_pending: 3,
+  stripe_started: 4,
+  google_pending: 5,
+  google_connected: 6,
+  activated: 7,
+  completed: 7,
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  invited: "Invited",
+  in_progress: "In progress",
+  business_setup: "Business setup",
+  stripe_pending: "Stripe pending",
+  stripe_started: "Stripe started",
+  google_pending: "Google pending",
+  google_connected: "Google connected",
+  activated: "Onboarding completed",
+  completed: "Onboarding completed",
+  canceled: "Invite canceled",
+};
+
 type PendingInvite = {
   email: string;
   business_name: string;
@@ -62,28 +87,29 @@ export default function OnboardingPage() {
     };
   }, [refreshKey]);
 
+  useEffect(() => {
+    const poller = setInterval(() => {
+      setRefreshKey((k) => k + 1);
+    }, 10000);
+    return () => clearInterval(poller);
+  }, []);
+
   const handleInvite = async () => {
     setSending(true);
     try {
       const res = await adminApi.invite(form);
       setLink(res.link);
-      pushToast({ title: "Invite created", description: "Email delivery is placeholder today.", tone: "success" });
+      pushToast({
+        title: "Invite created",
+        description: res.link ? "Sent via Supabase email (if SMTP is configured)." : "Invite created; copy link to send manually.",
+        tone: "success",
+      });
       setRefreshKey((k) => k + 1);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to create invite";
       pushToast({ title: "Failed to create invite", description: message, tone: "error" });
     } finally {
       setSending(false);
-    }
-  };
-
-  const handleResend = async (email: string) => {
-    try {
-      await adminApi.onboardingResend(email);
-      pushToast({ title: "Invite resent", tone: "success" });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to resend";
-      pushToast({ title: "Failed to resend", description: message, tone: "error" });
     }
   };
 
@@ -98,14 +124,40 @@ export default function OnboardingPage() {
     }
   };
 
+  const handleDelete = async (email: string) => {
+    try {
+      await adminApi.onboardingDelete(email);
+      pushToast({ title: "Invite deleted", tone: "info" });
+      setRefreshKey((k) => k + 1);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to delete";
+      pushToast({ title: "Failed to delete", description: message, tone: "error" });
+    }
+  };
+
   const statusChips = (row: PendingInvite) => {
+    const normalizedStatus = (row.status ?? "").toLowerCase();
+    const rank = STATUS_RANK[normalizedStatus] ?? 0;
+    const completed = normalizedStatus === "completed" || normalizedStatus === "activated";
+    const canceled = normalizedStatus === "canceled";
     const stages = [
-      { key: "invited", label: "Invited", done: row.status === "invited" || row.status === "activated" || row.status === "completed" },
-      { key: "account", label: "Account created", done: Boolean(row.profiles || row.tenant_id) || row.status === "activated" || row.status === "completed" },
-      { key: "agreement", label: "Agreement", done: Boolean(row.agreement_signed_at) },
-      { key: "payment", label: "Payment", done: row.payment_status === "active" || row.payment_status === "past_due" },
-      { key: "gbp", label: "GBP connected", done: row.gbp_connected === true },
-      { key: "automation", label: "Automations", done: row.automations_enabled === true },
+      { key: "invited", label: "Invited", done: !canceled && rank >= STATUS_RANK.invited },
+      {
+        key: "business_setup",
+        label: "Business setup",
+        done: !canceled && (rank >= STATUS_RANK.business_setup || Boolean(row.tenant_id)),
+      },
+      {
+        key: "stripe",
+        label: "Stripe signup",
+        done: !canceled && (rank >= STATUS_RANK.stripe_started || row.payment_status === "active" || row.payment_status === "past_due"),
+      },
+      {
+        key: "google",
+        label: "Google connected",
+        done: !canceled && (rank >= STATUS_RANK.google_connected || row.gbp_connected === true || completed),
+      },
+      { key: "completed", label: "Onboarding completed", done: completed },
     ];
     return (
       <div className="flex flex-wrap gap-2">
@@ -118,7 +170,13 @@ export default function OnboardingPage() {
     );
   };
 
-  const sortedRows = useMemo(() => rows.sort((a, b) => (b.invited_at ? new Date(b.invited_at).getTime() : 0) - (a.invited_at ? new Date(a.invited_at).getTime() : 0)), [rows]);
+  const sortedRows = useMemo(
+    () =>
+      [...rows].sort(
+        (a, b) => (b.invited_at ? new Date(b.invited_at).getTime() : 0) - (a.invited_at ? new Date(a.invited_at).getTime() : 0),
+      ),
+    [rows],
+  );
 
   return (
     <AdminShell>
@@ -166,37 +224,71 @@ export default function OnboardingPage() {
               {loading ? (
                 <Skeleton className="h-40 w-full" />
               ) : error ? (
-                <EmptyState inline title="Could not load onboarding pipeline" description={error} />
+                <div className="space-y-3">
+                  <EmptyState inline title="Could not load onboarding pipeline" description={error} />
+                  {error.toLowerCase().includes("admin role required") || error.toLowerCase().includes("not authenticated") ? (
+                    <Card className="border-amber-200 bg-amber-50">
+                      <CardContent className="space-y-3 pt-4">
+                        <p className="text-sm text-slate-800">
+                          Please sign in with an admin account to continue.
+                        </p>
+                        <div className="flex gap-2">
+                          <Input
+                            type="email"
+                            placeholder="you@agency.com"
+                            value={form.email}
+                            onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
+                            className="max-w-xs"
+                          />
+                          <Button onClick={() => (window.location.href = `/sign-in?redirect=/admin/onboarding&prefill=${encodeURIComponent(form.email)}`)}>
+                            Go to sign-in
+                          </Button>
+                        </div>
+                        <p className="text-xs text-slate-600">After signing in, return here and refresh.</p>
+                      </CardContent>
+                    </Card>
+                  ) : null}
+                </div>
               ) : sortedRows.length === 0 ? (
                 <EmptyState inline title="No invites yet" />
               ) : (
                 <div className="space-y-3 text-sm">
-                  {sortedRows.map((row) => (
-                    <div key={row.email} className="rounded-lg border border-border bg-white/60 p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <p className="font-semibold">{row.business_name || "Pending business name"}</p>
-                          <p className="text-xs text-muted-foreground">{row.email}</p>
-                          <p className="text-xs text-muted-foreground">Invited {formatDate(row.invited_at)}</p>
+                  {sortedRows.map((row) => {
+                    const normalizedStatus = (row.status ?? "").toLowerCase();
+                    const completed = normalizedStatus === "completed" || normalizedStatus === "activated";
+                    const canceled = normalizedStatus === "canceled";
+                    return (
+                      <div key={row.email} className="rounded-lg border border-border bg-white/60 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <p className="font-semibold">{row.business_name || "Pending business name"}</p>
+                            <p className="text-xs text-muted-foreground">{row.email}</p>
+                            <p className="text-xs text-muted-foreground">Invited {formatDate(row.invited_at)}</p>
+                          </div>
+                          <div className="flex flex-col items-end gap-1">
+                            <Badge variant={completed ? "success" : canceled ? "danger" : "muted"}>
+                              {STATUS_LABEL[normalizedStatus] ?? "In progress"}
+                            </Badge>
+                            <Badge variant="muted" className="capitalize">
+                              {row.plan} · {row.location_limit} locations
+                            </Badge>
+                          </div>
                         </div>
-                        <Badge variant="muted" className="capitalize">
-                          {row.plan} · {row.location_limit} locations
-                        </Badge>
+                        <div className="mt-3">{statusChips(row)}</div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button variant="ghost" size="sm" onClick={() => handleCancel(row.email)}>
+                            Cancel invite
+                          </Button>
+                          <Button variant="destructive" size="sm" onClick={() => handleDelete(row.email)}>
+                            Delete
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => setRefreshKey((k) => k + 1)}>
+                            Refresh status
+                          </Button>
+                        </div>
                       </div>
-                      <div className="mt-3">{statusChips(row)}</div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Button variant="outline" size="sm" onClick={() => handleResend(row.email)}>
-                          Resend invite
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleCancel(row.email)}>
-                          Cancel invite
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => setRefreshKey((k) => k + 1)}>
-                          Refresh status
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>

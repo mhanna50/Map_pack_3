@@ -8,15 +8,17 @@ from datetime import datetime
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from sqlalchemy.orm import Session
 
-from backend.app.api.deps import get_current_staff, get_current_user
+from backend.app.api.deps import get_current_user
 from ..db.session import get_db
-from ..models.enums import LocationStatus, OrganizationType
+from ..models.enums import LocationStatus, MembershipRole, OrganizationType
 from ..models.location import Location
 from ..models.location_settings import LocationSettings
+from ..models.membership import Membership
 from ..models.organization import Organization
 from ..models.user import User
 from ..services.access import AccessDeniedError, AccessService
 from ..services.onboarding_tokens import OnboardingTokenSigner
+from ..services.tenant_bridge import ensure_tenant_row
 
 router = APIRouter(prefix="/orgs", tags=["organizations"])
 
@@ -32,6 +34,10 @@ class OrganizationResponse(BaseModel):
     created_at: datetime | None = None
 
 
+class OrganizationDetailResponse(OrganizationResponse):
+    metadata_json: dict | None = None
+
+
 class OrganizationCreateRequest(BaseModel):
     name: str
     org_type: OrganizationType = OrganizationType.AGENCY
@@ -42,11 +48,25 @@ class OrganizationCreateRequest(BaseModel):
 def create_organization(
     payload: OrganizationCreateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_staff),
+    current_user: User = Depends(get_current_user),
 ) -> Organization:
-    _ = current_user
     org = Organization(name=payload.name, org_type=payload.org_type, slug=payload.slug)
     db.add(org)
+    db.flush()
+    ensure_tenant_row(
+        db,
+        tenant_id=org.id,
+        business_name=org.name,
+        tenant_type=org.org_type,
+        slug=org.slug,
+        plan_tier=org.plan_tier or "starter",
+    )
+    membership = Membership(
+        user_id=current_user.id,
+        organization_id=org.id,
+        role=MembershipRole.OWNER,
+    )
+    db.add(membership)
     db.commit()
     db.refresh(org)
     return org
@@ -59,6 +79,20 @@ def list_organizations(
 ) -> list[Organization]:
     access = AccessService(db)
     return access.member_orgs(current_user.id)
+
+
+@router.get("/{organization_id}", response_model=OrganizationDetailResponse)
+def get_organization(
+    organization_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Organization:
+    access = AccessService(db)
+    try:
+        _, organization = access.resolve_org(user_id=current_user.id, organization_id=organization_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return organization
 
 
 class LocationResponse(BaseModel):
@@ -189,6 +223,7 @@ class OrganizationUpdateRequest(BaseModel):
     name: str | None = None
     plan_tier: str | None = None
     usage_limits: dict | None = None
+    onboarding_draft: dict | None = None
 
 
 @router.put("/{organization_id}", response_model=OrganizationResponse)
@@ -212,6 +247,13 @@ def update_organization(
         organization.plan_tier = data["plan_tier"]
     if "usage_limits" in data:
         organization.usage_limits_json = data["usage_limits"]
+    if "onboarding_draft" in data:
+        metadata = dict(organization.metadata_json or {})
+        if data["onboarding_draft"] is None:
+            metadata.pop("onboarding_draft", None)
+        else:
+            metadata["onboarding_draft"] = data["onboarding_draft"]
+        organization.metadata_json = metadata
     db.add(organization)
     db.commit()
     db.refresh(organization)

@@ -1,7 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Activity, AlertTriangle, BarChart3, HeartPulse, ShieldCheck } from "lucide-react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { AdminShell } from "@/components/admin/shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -40,10 +54,10 @@ export default function AdminOverviewPage() {
       setLoading(true);
       setError(null);
       try {
-        const [kpiData, auditData] = await Promise.all([adminApi.kpis(), adminApi.audit({ page: 1, pageSize: 10 })]);
+        const [kpiData, auditData] = await Promise.all([adminApi.kpis(), adminApi.audit({ page: 1, pageSize: 80 })]);
         if (!active) return;
         setKpis(kpiData);
-        setAudit(auditData.rows ?? []);
+        setAudit((auditData.rows ?? []) as AuditEntry[]);
       } catch (err: unknown) {
         if (!active) return;
         const message = err instanceof Error ? err.message : "Unable to load overview";
@@ -61,6 +75,48 @@ export default function AdminOverviewPage() {
   }, [refreshKey]);
 
   const handleRefresh = () => setRefreshKey((k) => k + 1);
+
+  const comparisonData = useMemo(
+    () => [
+      { label: "Posts", value: kpis?.posts30d ?? 0, color: "var(--chart-1)" },
+      { label: "Reviews", value: kpis?.reviews30d ?? 0, color: "var(--chart-2)" },
+      { label: "Failed jobs", value: kpis?.failedJobs ?? 0, color: "var(--chart-5)" },
+      { label: "Churned", value: kpis?.churned30d ?? 0, color: "var(--chart-4)" },
+    ],
+    [kpis],
+  );
+
+  const tenantDistribution = useMemo(
+    () => [
+      { name: "Active", value: kpis?.activeTenants ?? 0, color: "var(--chart-2)" },
+      { name: "Churned (30d)", value: kpis?.churned30d ?? 0, color: "var(--chart-4)" },
+      { name: "Failed jobs", value: kpis?.failedJobs ?? 0, color: "var(--chart-5)" },
+    ],
+    [kpis],
+  );
+
+  const auditTimeline = useMemo(() => {
+    const days = 7;
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - (days - 1));
+
+    const buckets = Array.from({ length: days }, (_, index) => {
+      const day = new Date(start);
+      day.setDate(start.getDate() + index);
+      const key = day.toISOString().slice(0, 10);
+      return { key, label: day.toLocaleDateString(undefined, { month: "short", day: "numeric" }), actions: 0 };
+    });
+    const byDay = new Map(buckets.map((bucket) => [bucket.key, bucket]));
+
+    for (const entry of audit) {
+      if (!entry.created_at) continue;
+      const key = new Date(entry.created_at).toISOString().slice(0, 10);
+      const bucket = byDay.get(key);
+      if (bucket) bucket.actions += 1;
+    }
+    return buckets;
+  }, [audit]);
 
   const kpiCards = [
     { label: "Active tenants", value: kpis?.activeTenants ?? "—", icon: ShieldCheck },
@@ -106,6 +162,91 @@ export default function AdminOverviewPage() {
 
         <div className="grid gap-4 lg:grid-cols-3">
           <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle>Activity comparison</CardTitle>
+              <CardDescription>Last 30 days across core platform metrics</CardDescription>
+            </CardHeader>
+            <CardContent className="h-[280px]">
+              {loading ? (
+                <Skeleton className="h-full w-full" />
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={comparisonData} margin={{ top: 8, right: 12, left: -24, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                    <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="var(--muted-foreground)" />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 12 }} stroke="var(--muted-foreground)" />
+                    <Tooltip
+                      contentStyle={{
+                        borderRadius: 12,
+                        border: "1px solid var(--border)",
+                        background: "var(--card)",
+                      }}
+                    />
+                    <Bar dataKey="value" radius={[8, 8, 0, 0]}>
+                      {comparisonData.map((entry) => (
+                        <Cell key={entry.label} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Status distribution</CardTitle>
+              <CardDescription>Tenant health and failures</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {loading ? (
+                <Skeleton className="h-36 w-full" />
+              ) : tenantDistribution.every((slice) => slice.value === 0) ? (
+                <EmptyState inline title="No status data yet" />
+              ) : (
+                <div className="h-[170px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={tenantDistribution}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius={42}
+                        outerRadius={68}
+                        stroke="transparent"
+                      >
+                        {tenantDistribution.map((entry) => (
+                          <Cell key={entry.name} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{
+                          borderRadius: 12,
+                          border: "1px solid var(--border)",
+                          background: "var(--card)",
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+              <div className="space-y-2 text-sm">
+                {tenantDistribution.map((entry) => (
+                  <div key={entry.name} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
+                      <span>{entry.name}</span>
+                    </div>
+                    <span className="font-semibold">{entry.value}</span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card className="lg:col-span-2">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle>System health</CardTitle>
@@ -113,11 +254,34 @@ export default function AdminOverviewPage() {
               </div>
               <Badge variant="success">Healthy</Badge>
             </CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-2 text-sm">
-              <HealthRow label="Stripe webhooks" value="OK (placeholder)" />
-              <HealthRow label="GBP tokens" value="OK (placeholder)" />
-              <HealthRow label="Scheduler" value="Running" />
-              <HealthRow label="Error rate (24h)" value="Low" />
+            <CardContent className="space-y-4">
+              <div className="h-[180px]">
+                {loading ? (
+                  <Skeleton className="h-full w-full" />
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={auditTimeline} margin={{ top: 8, right: 8, left: -24, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="var(--muted-foreground)" />
+                      <YAxis allowDecimals={false} tick={{ fontSize: 12 }} stroke="var(--muted-foreground)" />
+                      <Tooltip
+                        contentStyle={{
+                          borderRadius: 12,
+                          border: "1px solid var(--border)",
+                          background: "var(--card)",
+                        }}
+                      />
+                      <Line type="monotone" dataKey="actions" stroke="var(--chart-3)" strokeWidth={2.5} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+              <div className="grid gap-3 md:grid-cols-2 text-sm">
+                <HealthRow label="Stripe webhooks" value="OK (placeholder)" />
+                <HealthRow label="GBP tokens" value="OK (placeholder)" />
+                <HealthRow label="Scheduler" value="Running" />
+                <HealthRow label="Error rate (24h)" value="Low" />
+              </div>
             </CardContent>
           </Card>
 

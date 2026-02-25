@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
+import logging
 from typing import Any, Callable
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select, text
+from sqlalchemy.exc import DataError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
@@ -37,11 +40,15 @@ from ..services.google import GoogleOAuthService
 from ..models.media_upload_request import MediaUploadRequest
 from .validators import assert_location_in_org, assert_connected_account_in_org
 
+logger = logging.getLogger(__name__)
+
 
 class ActionService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.audit = AuditService(db)
+        self._actions_has_tenant_id_cache: bool | None = None
+        self._action_type_enum_values_cache: set[str] | None = None
 
     def schedule_action(
         self,
@@ -69,20 +76,35 @@ class ActionService:
             if run_at.tzinfo is None
             else run_at.astimezone(timezone.utc)
         )
-        action = Action(
-            organization_id=organization_id,
-            action_type=action_type,
-            run_at=scheduled_for,
-            payload=payload or {},
-            location_id=location_id,
-            connected_account_id=connected_account_id,
-            max_attempts=max_attempts or settings.ACTION_MAX_ATTEMPTS,
-            dedupe_key=dedupe_key,
-            priority=priority,
-        )
-        self.db.add(action)
-        self.db.commit()
-        self.db.refresh(action)
+        self._ensure_action_type_enum_value(action_type.value)
+        try:
+            action = self._persist_action(
+                organization_id=organization_id,
+                action_type=action_type,
+                run_at=scheduled_for,
+                payload=payload or {},
+                location_id=location_id,
+                connected_account_id=connected_account_id,
+                max_attempts=max_attempts or settings.ACTION_MAX_ATTEMPTS,
+                dedupe_key=dedupe_key,
+                priority=priority,
+            )
+        except DataError as exc:
+            if not self._is_missing_action_type_enum_error(exc, action_type.value):
+                raise
+            self.db.rollback()
+            self._ensure_action_type_enum_value(action_type.value)
+            action = self._persist_action(
+                organization_id=organization_id,
+                action_type=action_type,
+                run_at=scheduled_for,
+                payload=payload or {},
+                location_id=location_id,
+                connected_account_id=connected_account_id,
+                max_attempts=max_attempts or settings.ACTION_MAX_ATTEMPTS,
+                dedupe_key=dedupe_key,
+                priority=priority,
+            )
         self.audit.log(
             action="action.scheduled",
             organization_id=organization_id,
@@ -91,6 +113,176 @@ class ActionService:
             entity_id=str(action.id),
             metadata={"action_type": action_type.value},
         )
+        return action
+
+    def _persist_action(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        action_type: ActionType,
+        run_at: datetime,
+        payload: dict[str, Any],
+        location_id: uuid.UUID | None,
+        connected_account_id: uuid.UUID | None,
+        max_attempts: int,
+        dedupe_key: str | None,
+        priority: int,
+    ) -> Action:
+        if self._actions_has_legacy_tenant_id():
+            return self._insert_action_with_legacy_tenant_id(
+                organization_id=organization_id,
+                action_type=action_type,
+                run_at=run_at,
+                payload=payload,
+                location_id=location_id,
+                connected_account_id=connected_account_id,
+                max_attempts=max_attempts,
+                dedupe_key=dedupe_key,
+                priority=priority,
+            )
+        action = Action(
+            organization_id=organization_id,
+            action_type=action_type,
+            run_at=run_at,
+            payload=payload,
+            location_id=location_id,
+            connected_account_id=connected_account_id,
+            max_attempts=max_attempts,
+            dedupe_key=dedupe_key,
+            priority=priority,
+        )
+        self.db.add(action)
+        self.db.commit()
+        self.db.refresh(action)
+        return action
+
+    def _actions_has_legacy_tenant_id(self) -> bool:
+        if self._actions_has_tenant_id_cache is not None:
+            return self._actions_has_tenant_id_cache
+        bind = self.db.get_bind()
+        inspector = inspect(bind)
+        columns = inspector.get_columns("actions")
+        self._actions_has_tenant_id_cache = any(column.get("name") == "tenant_id" for column in columns)
+        return self._actions_has_tenant_id_cache
+
+    def _action_type_enum_values(self) -> set[str]:
+        if self._action_type_enum_values_cache is not None:
+            return self._action_type_enum_values_cache
+        try:
+            rows = self.db.execute(
+                text(
+                    """
+                    SELECT e.enumlabel
+                    FROM pg_type t
+                    JOIN pg_enum e ON t.oid = e.enumtypid
+                    WHERE t.typname = 'action_type'
+                    """
+                )
+            ).fetchall()
+            self._action_type_enum_values_cache = {str(row[0]) for row in rows}
+        except SQLAlchemyError:
+            # If introspection fails, avoid blocking action scheduling.
+            self._action_type_enum_values_cache = {item.value for item in ActionType}
+        return self._action_type_enum_values_cache
+
+    def _ensure_action_type_enum_value(self, action_type_value: str) -> None:
+        if action_type_value in self._action_type_enum_values():
+            return
+        escaped_value = action_type_value.replace("'", "''")
+        try:
+            self.db.execute(text(f"ALTER TYPE action_type ADD VALUE IF NOT EXISTS '{escaped_value}'"))
+            self.db.commit()
+            self._action_type_enum_values_cache = None
+        except SQLAlchemyError as exc:
+            self.db.rollback()
+            logger.warning(
+                "Unable to add missing action_type enum value '%s': %s",
+                action_type_value,
+                exc,
+            )
+
+    @staticmethod
+    def _is_missing_action_type_enum_error(exc: Exception, action_type_value: str) -> bool:
+        message = str(exc).lower()
+        return (
+            "invalid input value for enum action_type" in message
+            and action_type_value.lower() in message
+        )
+
+    def _insert_action_with_legacy_tenant_id(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        action_type: ActionType,
+        run_at: datetime,
+        payload: dict[str, Any],
+        location_id: uuid.UUID | None,
+        connected_account_id: uuid.UUID | None,
+        max_attempts: int,
+        dedupe_key: str | None,
+        priority: int,
+    ) -> Action:
+        action_id = uuid.uuid4()
+        self.db.execute(
+            text(
+                """
+                INSERT INTO actions (
+                    organization_id,
+                    tenant_id,
+                    location_id,
+                    connected_account_id,
+                    action_type,
+                    status,
+                    payload,
+                    run_at,
+                    locked_at,
+                    attempts,
+                    max_attempts,
+                    priority,
+                    dedupe_key,
+                    error,
+                    next_run_at,
+                    id
+                ) VALUES (
+                    :organization_id,
+                    :tenant_id,
+                    :location_id,
+                    :connected_account_id,
+                    :action_type,
+                    :status,
+                    CAST(:payload AS JSONB),
+                    :run_at,
+                    NULL,
+                    :attempts,
+                    :max_attempts,
+                    :priority,
+                    :dedupe_key,
+                    NULL,
+                    NULL,
+                    :id
+                )
+                """
+            ),
+            {
+                "organization_id": organization_id,
+                "tenant_id": organization_id,
+                "location_id": location_id,
+                "connected_account_id": connected_account_id,
+                "action_type": action_type.value,
+                "status": ActionStatus.PENDING.value,
+                "payload": json.dumps(payload),
+                "run_at": run_at,
+                "attempts": 0,
+                "max_attempts": max_attempts,
+                "priority": priority,
+                "dedupe_key": dedupe_key,
+                "id": action_id,
+            },
+        )
+        self.db.commit()
+        action = self.db.get(Action, action_id)
+        if not action:
+            raise RuntimeError("Scheduled action was not persisted")
         return action
 
     def fetch_due_actions(self, limit: int) -> list[Action]:

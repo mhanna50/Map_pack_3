@@ -1,7 +1,8 @@
 """Add organization active flag for subscription gating."""
 
-from alembic import op
-import sqlalchemy as sa
+from sqlalchemy import text
+
+from backend.app.db.session import engine
 
 
 revision = "0013_org_active_flag"
@@ -11,8 +12,12 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("organizations", sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")))
+    with engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE organizations ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE")
+        )
 
 
 def downgrade():
-    op.drop_column("organizations", "is_active")
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE organizations DROP COLUMN IF EXISTS is_active"))

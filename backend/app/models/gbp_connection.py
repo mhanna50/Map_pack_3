@@ -15,17 +15,26 @@ from .mixins import TimestampMixin, UUIDPrimaryKeyMixin
 class GbpConnection(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "gbp_connections"
     __table_args__ = (
-        UniqueConstraint("organization_id", name="uq_gbp_connection_org"),
+        UniqueConstraint("tenant_id", name="uq_gbp_connection_org"),
     )
 
+    # Physical DB column is still `tenant_id` in existing environments.
+    # Keep Python attribute name as `organization_id` to avoid broad refactors.
     organization_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False
+        "tenant_id",
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id"),
+        nullable=False,
     )
     google_account_email: Mapped[str | None] = mapped_column(String(320))
     account_resource_name: Mapped[str | None] = mapped_column(String(255))
     scopes: Mapped[list[str] | None] = mapped_column(JSONB, default=list)
     status: Mapped[GbpConnectionStatus] = mapped_column(
-        Enum(GbpConnectionStatus, name="gbp_connection_status"),
+        Enum(
+            GbpConnectionStatus,
+            name="gbp_connection_status",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
         default=GbpConnectionStatus.CONNECTED,
         nullable=False,
     )

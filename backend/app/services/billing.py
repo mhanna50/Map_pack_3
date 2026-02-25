@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from typing import Any, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -12,6 +13,17 @@ logger = logging.getLogger(__name__)
 
 
 class BillingService:
+    _BLOCKING_SUBSCRIPTION_STATUSES = frozenset(
+        {
+            "incomplete",
+            "trialing",
+            "active",
+            "past_due",
+            "unpaid",
+            "paused",
+        }
+    )
+
     def __init__(self) -> None:
         if settings.STRIPE_SECRET_KEY:
             stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -19,10 +31,11 @@ class BillingService:
     def _get_or_create_customer(self, email: str) -> stripe.Customer:
         if not settings.STRIPE_SECRET_KEY:
             raise ValueError("Stripe secret key must be configured")
-        existing = stripe.Customer.list(email=email, limit=1).data
+        normalized_email = self._normalize_email(email)
+        existing = stripe.Customer.list(email=normalized_email, limit=1).data
         if existing:
             return existing[0]
-        return stripe.Customer.create(email=email)
+        return stripe.Customer.create(email=normalized_email)
 
     def create_subscription_intent(
         self,
@@ -30,26 +43,48 @@ class BillingService:
         email: str,
         company_name: str,
         plan: str = "starter",
-    ) -> dict[str, str]:
+    ) -> dict[str, str | bool | None]:
+        normalized_email = self._normalize_email(email)
+        self._raise_if_subscription_exists(normalized_email)
         price_id = self._resolve_price_id(plan)
         if not price_id:
             raise ValueError("Stripe price id must be configured for this plan")
-        customer = self._get_or_create_customer(email)
+        customer = self._get_or_create_customer(normalized_email)
         subscription = stripe.Subscription.create(
-          customer=customer.id,
-          items=[{"price": price_id}],
-          payment_behavior="default_incomplete",
-          payment_settings={
-              "save_default_payment_method": "on_subscription",
-              "payment_method_types": ["card"],
-          },
-          metadata={"plan": plan, "company_name": company_name},
-          expand=["latest_invoice.payment_intent"],
+            customer=customer.id,
+            items=[{"price": price_id}],
+            payment_behavior="default_incomplete",
+            payment_settings={
+                "save_default_payment_method": "on_subscription",
+                "payment_method_types": ["card"],
+            },
+            metadata={"plan": plan, "company_name": company_name},
+            expand=["latest_invoice.payment_intent", "pending_setup_intent"],
         )
         intent = subscription.latest_invoice.payment_intent
-        if not intent or not intent.client_secret:
-            raise ValueError("Unable to create payment intent for subscription")
-        return {"subscription_id": subscription.id, "client_secret": intent.client_secret}
+        if intent and intent.client_secret:
+            return {
+                "subscription_id": subscription.id,
+                "client_secret": intent.client_secret,
+                "requires_payment_method": True,
+            }
+
+        # Some Stripe setups (for example trialing subscriptions) can be created
+        # without an immediate payment intent.
+        status = str(getattr(subscription, "status", "") or "").lower()
+        if status in {"trialing", "active"}:
+            logger.info(
+                "Subscription %s created without immediate payment intent (status=%s)",
+                subscription.id,
+                status,
+            )
+            return {
+                "subscription_id": subscription.id,
+                "client_secret": None,
+                "requires_payment_method": False,
+            }
+
+        raise ValueError("Unable to create payment intent for subscription")
 
     def create_checkout_session(
         self,
@@ -60,13 +95,15 @@ class BillingService:
     ) -> stripe.checkout.Session:
         if not settings.STRIPE_SECRET_KEY:
             raise ValueError("Stripe secret key must be configured")
+        normalized_email = self._normalize_email(email)
+        self._raise_if_subscription_exists(normalized_email)
         success_url = settings.STRIPE_SUCCESS_URL or f"{settings.CLIENT_APP_URL}/payments/success"
         cancel_url = settings.STRIPE_CANCEL_URL or f"{settings.CLIENT_APP_URL}/payments/cancel"
         success_url = self._with_checkout_session_id(str(success_url))
         cancel_url = str(cancel_url)
         session = stripe.checkout.Session.create(
             mode="subscription",
-            customer_email=email,
+            customer_email=normalized_email,
             line_items=cast(Any, [self._build_line_item(plan)]),
             metadata={
                 "company_name": company_name,
@@ -76,6 +113,46 @@ class BillingService:
             cancel_url=cancel_url,
         )
         return session
+
+    @staticmethod
+    def _normalize_email(email: str) -> str:
+        normalized_email = email.strip().lower()
+        if not normalized_email:
+            raise ValueError("Email is required")
+        return normalized_email
+
+    @staticmethod
+    def _iter_stripe_list(result: Any) -> Iterable[Any]:
+        auto_paging_iter = getattr(result, "auto_paging_iter", None)
+        if callable(auto_paging_iter):
+            return cast(Iterable[Any], auto_paging_iter())
+        data = getattr(result, "data", None)
+        if isinstance(data, list):
+            return data
+        if isinstance(result, list):
+            return result
+        return []
+
+    def _raise_if_subscription_exists(self, email: str) -> None:
+        if not settings.STRIPE_SECRET_KEY:
+            raise ValueError("Stripe secret key must be configured")
+
+        customers = stripe.Customer.list(email=email, limit=100)
+        for customer in self._iter_stripe_list(customers):
+            customer_id = getattr(customer, "id", None)
+            if not customer_id:
+                continue
+            subscriptions = stripe.Subscription.list(customer=customer_id, status="all", limit=100)
+            for subscription in self._iter_stripe_list(subscriptions):
+                subscription_status = str(getattr(subscription, "status", "") or "").lower()
+                if subscription_status in self._BLOCKING_SUBSCRIPTION_STATUSES:
+                    logger.info(
+                        "Blocked duplicate subscription attempt for %s; existing subscription=%s status=%s",
+                        email,
+                        getattr(subscription, "id", ""),
+                        subscription_status,
+                    )
+                    raise ValueError("An active or pending subscription already exists for this email")
 
     def _resolve_price_id(self, plan: str) -> str | None:
         normalized = plan.strip().lower()

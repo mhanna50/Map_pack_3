@@ -42,13 +42,42 @@ def get_current_user(
     except Exception as exc:  # noqa: BLE001
         logger.exception("Supabase token verification failed (unauthorized): %s", exc)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+    auth_user_id = _extract_user_id(payload)
+    if not auth_user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing subject")
+    if not _auth_user_exists(db, auth_user_id):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Auth user not found")
+
     email = _extract_email(payload)
     if not email:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing email")
-    user = db.query(User).filter(User.email == email.lower()).one_or_none()
+    normalized_email = email.lower()
+    full_name = _extract_name(payload)
+
+    user = db.query(User).filter(User.id == auth_user_id).one_or_none()
+    needs_commit = False
+
     if not user:
-        user = User(email=email.lower(), full_name=_extract_name(payload))
-        db.add(user)
+        legacy = db.query(User).filter(User.email == normalized_email).one_or_none()
+        if legacy:
+            if legacy.id != auth_user_id:
+                _rekey_legacy_user_id(db, old_user_id=legacy.id, new_user_id=auth_user_id)
+                legacy.id = auth_user_id
+                needs_commit = True
+            user = legacy
+        else:
+            user = User(id=auth_user_id, email=normalized_email, full_name=full_name)
+            db.add(user)
+            needs_commit = True
+
+    if user.email != normalized_email:
+        user.email = normalized_email
+        needs_commit = True
+    if full_name and not user.full_name:
+        user.full_name = full_name
+        needs_commit = True
+
+    if needs_commit:
         db.commit()
         db.refresh(user)
     return user
@@ -115,6 +144,37 @@ def _extract_email(payload: dict[str, Any]) -> str | None:
 def _extract_name(payload: dict[str, Any]) -> str | None:
     user_metadata = payload.get("user_metadata") or {}
     return user_metadata.get("full_name") or user_metadata.get("name")
+
+
+def _extract_user_id(payload: dict[str, Any]) -> uuid.UUID | None:
+    raw_sub = payload.get("sub")
+    if not raw_sub:
+        return None
+    try:
+        return uuid.UUID(str(raw_sub))
+    except Exception:
+        return None
+
+
+def _rekey_legacy_user_id(db: Session, old_user_id: uuid.UUID, new_user_id: uuid.UUID) -> None:
+    # Some older environments stored public.users IDs independent of auth.users IDs.
+    # memberships now reference auth.users, so we realign legacy rows by JWT subject.
+    db.execute(
+        text(
+            "update organization_invites "
+            "set invited_by_user_id = :new_user_id "
+            "where invited_by_user_id = :old_user_id"
+        ),
+        {"new_user_id": str(new_user_id), "old_user_id": str(old_user_id)},
+    )
+
+
+def _auth_user_exists(db: Session, user_id: uuid.UUID) -> bool:
+    result = db.execute(
+        text("select 1 from auth.users where id = :user_id limit 1"),
+        {"user_id": str(user_id)},
+    ).first()
+    return result is not None
 
 
 def _set_org_rls(db: Session, org_id: uuid.UUID) -> None:

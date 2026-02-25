@@ -27,7 +27,12 @@ class OrganizationInvite(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     role: Mapped[MembershipRole] = mapped_column(
-        Enum(MembershipRole, name="invite_role"), nullable=False
+        Enum(
+            MembershipRole,
+            name="invite_role",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        nullable=False,
     )
     token_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

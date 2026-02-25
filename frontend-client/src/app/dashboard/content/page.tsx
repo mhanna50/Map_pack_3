@@ -12,9 +12,16 @@ import { useTenant } from "@/lib/tenant-context";
 import { listContentAssets } from "@/lib/db";
 import { format } from "@/lib/date-utils";
 
+type ContentAsset = {
+  id: string | number;
+  tags?: string[];
+  last_used_at?: string | null;
+  created_at?: string | null;
+};
+
 export default function ContentPage() {
   const { tenantId, selectedLocationId, refresh: refreshTenant } = useTenant();
-  const [assets, setAssets] = useState<Array<Record<string, unknown>>>([]);
+  const [assets, setAssets] = useState<ContentAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -36,7 +43,7 @@ export default function ContentPage() {
       try {
         const data = await listContentAssets(tenantId, selectedLocationId ?? undefined, { limit: 30 });
         if (!active) return;
-        setAssets((data ?? []) as Array<Record<string, unknown>>);
+        setAssets((data ?? []) as ContentAsset[]);
       } catch (err: unknown) {
         if (!active) return;
         const message = err instanceof Error ? err.message : "Failed to load content assets";
@@ -93,9 +100,9 @@ export default function ContentPage() {
                 <EmptyState inline title="No uploads yet" description="Add your first photos to improve post quality." />
               ) : (
                 <div className="grid gap-3 md:grid-cols-3">
-                  {assets.map((asset) => (
+                  {assets.map((asset, index) => (
                     <div
-                      key={asset.id}
+                      key={asset.id?.toString?.() ?? `asset-${index}`}
                       className="rounded-lg border border-border bg-white/70 p-3 shadow-sm"
                     >
                       <div className="flex items-center justify-between">

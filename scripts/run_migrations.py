@@ -4,19 +4,21 @@ import importlib
 import sys
 from pathlib import Path
 
-MIGRATIONS = [
-    "backend.app.db.migrations.0004_competitors",
-    "backend.app.db.migrations.0005_automation_rules",
-    "backend.app.db.migrations.0006_approval_requests",
-    "backend.app.db.migrations.0007_dashboard_and_plan",
-    "backend.app.db.migrations.0008_actions_add_org_id",
-    "backend.app.db.migrations.0009_action_status_lowercase",
-]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+MIGRATIONS_DIR = PROJECT_ROOT / "backend" / "app" / "db" / "migrations"
+MIGRATION_PACKAGE = "backend.app.db.migrations"
+
+
+def iter_migrations() -> list[str]:
+    return [
+        f"{MIGRATION_PACKAGE}.{path.stem}"
+        for path in sorted(MIGRATIONS_DIR.glob("[0-9][0-9][0-9][0-9]_*.py"))
+    ]
 
 
 def main() -> None:
-    sys.path.append(str(Path(__file__).resolve().parents[1]))
-    for module_path in MIGRATIONS:
+    sys.path.append(str(PROJECT_ROOT))
+    for module_path in iter_migrations():
         module = importlib.import_module(module_path)
         if hasattr(module, "upgrade"):
             print(f"Running migration {module_path}...")

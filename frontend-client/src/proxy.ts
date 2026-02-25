@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
 const PUBLIC_PATHS = ["/", "/sign-in", "/sign-up", "/reset-password", "/onboarding"];
-const DISABLE_AUTH = process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_DISABLE_AUTH === "true";
+const DISABLE_AUTH = process.env.NEXT_PUBLIC_DISABLE_AUTH === "true";
 
 export default async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

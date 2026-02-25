@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Eye, Shield, Ban, MapPin } from "lucide-react";
+import { Eye, Shield, Ban, MapPin, PauseCircle, PlayCircle } from "lucide-react";
 import { AdminShell } from "@/components/admin/shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +22,7 @@ type Tenant = {
   business_name: string;
   status: string;
   plan_name?: string;
+  posting_paused?: boolean;
   location_limit?: number;
   last_activity?: string;
   created_at?: string;
@@ -52,6 +53,7 @@ export default function AdminClientsPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detail, setDetail] = useState<TenantDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [pauseBusy, setPauseBusy] = useState(false);
   const [terminateId, setTerminateId] = useState<string | null>(null);
   const pageSize = 15;
 
@@ -100,6 +102,38 @@ export default function AdminClientsPage() {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to impersonate";
       pushToast({ title: "Failed to impersonate", description: message, tone: "error" });
+    }
+  };
+
+  const toggleAutomationPause = async () => {
+    if (!detail?.tenant?.tenant_id) return;
+    const tenantId = detail.tenant.tenant_id;
+    const nextPaused = !Boolean(detail.tenant.posting_paused);
+    setPauseBusy(true);
+    try {
+      const updated = await adminApi.setTenantAutomationPaused(tenantId, nextPaused);
+      setDetail((current) =>
+        current?.tenant
+          ? { ...current, tenant: { ...current.tenant, posting_paused: updated.paused } }
+          : current,
+      );
+      setTenants((current) =>
+        current.map((tenant) =>
+          tenant.tenant_id === tenantId ? { ...tenant, posting_paused: updated.paused } : tenant,
+        ),
+      );
+      pushToast({
+        title: updated.paused ? "Automations paused" : "Automations resumed",
+        description: updated.paused
+          ? "Posting automations are now paused for this client."
+          : "Posting automations are now active for this client.",
+        tone: "success",
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to change automation state";
+      pushToast({ title: "Automation update failed", description: message, tone: "error" });
+    } finally {
+      setPauseBusy(false);
     }
   };
 
@@ -249,6 +283,7 @@ export default function AdminClientsPage() {
           if (!open) {
             setDetailId(null);
             setDetail(null);
+            setPauseBusy(false);
           }
         }}
         title="Tenant detail"
@@ -265,7 +300,22 @@ export default function AdminClientsPage() {
                 <p className="text-lg font-semibold">{detail.tenant?.business_name}</p>
                 <p className="text-xs text-muted-foreground">{detail.tenant?.tenant_id}</p>
               </div>
-              <Badge variant="muted">{detail.tenant?.plan_name ?? "—"}</Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant={detail.tenant?.posting_paused ? "warning" : "success"}>
+                  {detail.tenant?.posting_paused ? "Automations paused" : "Automations active"}
+                </Badge>
+                <Badge variant="muted">{detail.tenant?.plan_name ?? "—"}</Badge>
+              </div>
+            </div>
+            <div className="rounded-lg border border-border bg-white/70 p-3">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Automation controls</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Pause all posting automations for this client without disabling dashboard access.
+              </p>
+              <Button className="mt-3" variant={detail.tenant?.posting_paused ? "outline" : "destructive"} onClick={toggleAutomationPause} disabled={pauseBusy}>
+                {detail.tenant?.posting_paused ? <PlayCircle className="h-4 w-4" /> : <PauseCircle className="h-4 w-4" />}
+                {pauseBusy ? "Saving…" : detail.tenant?.posting_paused ? "Resume automations" : "Pause all automations"}
+              </Button>
             </div>
             <div className="grid gap-2">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Locations</p>

@@ -2,6 +2,18 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CalendarClock, Sparkles, TrendingUp } from "lucide-react";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { DashboardShell } from "@/components/dashboard/shell";
 import { KpiCard } from "@/components/kpi-card";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -27,6 +39,22 @@ type ActivityItem = {
   location?: string | null;
 };
 
+type PostRow = {
+  id: string | number;
+  published_at?: string | null;
+  content?: string | null;
+  status?: string | null;
+  location_id?: string | null;
+};
+
+type ReviewRow = {
+  id: string | number;
+  created_at?: string | null;
+  customer_name?: string | null;
+  status?: string | null;
+  location_id?: string | null;
+};
+
 export default function DashboardPage() {
   const { tenantId, locations, selectedLocationId, refresh: refreshTenant, loading: contextLoading } = useTenant();
   const [loading, setLoading] = useState(true);
@@ -38,6 +66,8 @@ export default function DashboardPage() {
     reviewCompletions: 0,
   });
   const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [postRows, setPostRows] = useState<PostRow[]>([]);
+  const [reviewRows, setReviewRows] = useState<ReviewRow[]>([]);
   const [recommendation, setRecommendation] = useState<string | null>(null);
   const [statusMeta, setStatusMeta] = useState<{ lastPost?: string | null; nextPost?: string | null }>({});
   const [refreshKey, setRefreshKey] = useState(0);
@@ -59,16 +89,20 @@ export default function DashboardPage() {
       try {
         const [kpiData, recentPosts, scheduled, reviewRequests, assets] = await Promise.all([
           getDashboardKpis(tenantId, selectedLocationId ?? undefined),
-          listPosts(tenantId, selectedLocationId ?? undefined, { limit: 5 }),
+          listPosts(tenantId, selectedLocationId ?? undefined, { limit: 60 }),
           listPostJobs(tenantId, selectedLocationId ?? undefined, { limit: 1 }),
-          listReviewRequests(tenantId, selectedLocationId ?? undefined, { limit: 5 }),
+          listReviewRequests(tenantId, selectedLocationId ?? undefined, { limit: 60 }),
           listContentAssets(tenantId, selectedLocationId ?? undefined, { limit: 5 }),
         ]);
 
         if (!active) return;
         setKpis(kpiData);
+        setPostRows((recentPosts ?? []) as PostRow[]);
+        setReviewRows((reviewRequests ?? []) as ReviewRow[]);
 
-        const mappedPosts: ActivityItem[] = (recentPosts ?? []).map((post) => ({
+        const mappedPosts: ActivityItem[] = (recentPosts ?? [])
+          .slice(0, 5)
+          .map((post) => ({
           id: post.id,
           type: "post",
           title: post.content ?? "Post",
@@ -76,7 +110,9 @@ export default function DashboardPage() {
           status: post.status,
           location: post.location_id,
         }));
-        const mappedReviews: ActivityItem[] = (reviewRequests ?? []).map((req) => ({
+        const mappedReviews: ActivityItem[] = (reviewRequests ?? [])
+          .slice(0, 5)
+          .map((req) => ({
           id: req.id,
           type: "review",
           title: req.customer_name ?? "Review request",
@@ -125,6 +161,51 @@ export default function DashboardPage() {
     [locations],
   );
 
+  const activityTrend = useMemo(() => {
+    const days = 14;
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - (days - 1));
+
+    const buckets = Array.from({ length: days }, (_, index) => {
+      const day = new Date(start);
+      day.setDate(start.getDate() + index);
+      const key = day.toISOString().slice(0, 10);
+      return {
+        key,
+        label: day.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        posts: 0,
+        reviews: 0,
+      };
+    });
+    const byDay = new Map(buckets.map((bucket) => [bucket.key, bucket]));
+
+    for (const post of postRows) {
+      if (!post.published_at) continue;
+      const key = new Date(post.published_at).toISOString().slice(0, 10);
+      const bucket = byDay.get(key);
+      if (bucket) bucket.posts += 1;
+    }
+
+    for (const review of reviewRows) {
+      if (!review.created_at) continue;
+      const key = new Date(review.created_at).toISOString().slice(0, 10);
+      const bucket = byDay.get(key);
+      if (bucket) bucket.reviews += 1;
+    }
+
+    return buckets;
+  }, [postRows, reviewRows]);
+
+  const completionBreakdown = useMemo(() => {
+    const completed = Math.max(kpis.reviewCompletions, 0);
+    const pending = Math.max(kpis.reviewRequestsSent - completed, 0);
+    return [
+      { name: "Completed", value: completed, color: "var(--chart-2)" },
+      { name: "Pending", value: pending, color: "var(--chart-4)" },
+    ];
+  }, [kpis.reviewCompletions, kpis.reviewRequestsSent]);
+
   const renderActivity = () => {
     if (loading) {
       return <Skeleton className="h-28 w-full" />;
@@ -170,6 +251,99 @@ export default function DashboardPage() {
           <KpiCard label="Scheduled posts" value={kpis.scheduledPosts} delta="Next 14 days" icon={<CalendarClock className="h-5 w-5 text-primary" />} />
           <KpiCard label="Review requests (30d)" value={kpis.reviewRequestsSent} delta="Sent" icon={<Sparkles className="h-5 w-5 text-primary" />} />
           <KpiCard label="Review completions (30d)" value={kpis.reviewCompletions} delta="Reviews left" icon={<Sparkles className="h-5 w-5 text-primary" />} />
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle>Activity trend</CardTitle>
+              <CardDescription>Posts and review requests over the last 14 days</CardDescription>
+            </CardHeader>
+            <CardContent className="h-[280px]">
+              {loading ? (
+                <Skeleton className="h-full w-full" />
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={activityTrend} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="postsGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.45} />
+                        <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0.05} />
+                      </linearGradient>
+                      <linearGradient id="reviewsGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="var(--chart-2)" stopOpacity={0.45} />
+                        <stop offset="95%" stopColor="var(--chart-2)" stopOpacity={0.05} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                    <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="var(--muted-foreground)" />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 12 }} stroke="var(--muted-foreground)" />
+                    <Tooltip
+                      contentStyle={{
+                        borderRadius: 12,
+                        border: "1px solid var(--border)",
+                        background: "var(--card)",
+                      }}
+                    />
+                    <Area type="monotone" dataKey="posts" stroke="var(--chart-1)" fill="url(#postsGradient)" strokeWidth={2} />
+                    <Area type="monotone" dataKey="reviews" stroke="var(--chart-2)" fill="url(#reviewsGradient)" strokeWidth={2} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Review completion rate</CardTitle>
+              <CardDescription>Completed vs pending (30d)</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {loading ? (
+                <Skeleton className="h-40 w-full" />
+              ) : completionBreakdown.every((slice) => slice.value === 0) ? (
+                <EmptyState inline title="No review activity yet" description="Completion rate appears once requests are sent." />
+              ) : (
+                <div className="h-[180px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={completionBreakdown}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius={48}
+                        outerRadius={72}
+                        paddingAngle={2}
+                        stroke="transparent"
+                      >
+                        {completionBreakdown.map((slice) => (
+                          <Cell key={slice.name} fill={slice.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{
+                          borderRadius: 12,
+                          border: "1px solid var(--border)",
+                          background: "var(--card)",
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+              <div className="space-y-2 text-sm">
+                {completionBreakdown.map((slice) => (
+                  <div key={slice.name} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: slice.color }} />
+                      <span>{slice.name}</span>
+                    </div>
+                    <span className="font-semibold">{slice.value}</span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-3">

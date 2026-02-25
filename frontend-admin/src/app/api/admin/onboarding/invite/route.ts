@@ -11,14 +11,21 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const clientBase =
       process.env.NEXT_PUBLIC_CLIENT_APP_URL || process.env.CLIENT_APP_URL || "http://localhost:3000";
-    const redirectTo = `${clientBase.replace(/\/$/, "")}/onboarding?step=account`;
+    const normalizedEmail = String(body.email ?? "").trim().toLowerCase();
+    if (!normalizedEmail) {
+      return NextResponse.json({ error: "email is required" }, { status: 400 });
+    }
+    const redirectTo = `${clientBase.replace(/\/$/, "")}/onboarding?step=account&invite_email=${encodeURIComponent(normalizedEmail)}`;
 
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const { pending } = await upsertPendingOnboarding({
-      email: body.email,
+      email: normalizedEmail,
       invited_by: admin.id,
+      expires_at: expiresAt,
+      status: "invited",
     });
 
-    const invite = await sendSupabaseInvite(body.email, redirectTo);
+    const invite = await sendSupabaseInvite(normalizedEmail, redirectTo);
 
     return NextResponse.json({ link: invite.inviteLink, emailed: invite.emailed, pending });
   } catch (error: unknown) {

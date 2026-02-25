@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { LocationSwitcher } from "@/components/location-switcher";
+import { getOnboardingAccessState } from "@/lib/server/onboarding-guard";
 import "../globals.css";
 
 export const metadata: Metadata = {
@@ -22,7 +24,15 @@ const mockLocations = [
   { id: "suburb", name: "Suburb Install Team", details: "Member" },
 ];
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+export default async function AppLayout({ children }: { children: React.ReactNode }) {
+  const access = await getOnboardingAccessState();
+  if (!access.signedIn) {
+    redirect("/sign-in?redirect=/app");
+  }
+  if (!access.completed) {
+    redirect("/onboarding");
+  }
+
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="border-b border-slate-200 bg-white">

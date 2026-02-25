@@ -15,13 +15,18 @@ from .mixins import TimestampMixin, UUIDPrimaryKeyMixin
 class AutomationRule(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "automation_rules"
     __table_args__ = (
-        Index("ix_rule_org", "organization_id"),
+        Index("ix_rule_org", "tenant_id"),
         Index("ix_rule_location", "location_id"),
         Index("ix_rule_priority", "priority", "weight"),
     )
 
+    # Physical DB column is still `tenant_id` in existing environments.
+    # Keep Python attribute name as `organization_id` to avoid broad refactors.
     organization_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False
+        "tenant_id",
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id"),
+        nullable=False,
     )
     location_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("locations.id")

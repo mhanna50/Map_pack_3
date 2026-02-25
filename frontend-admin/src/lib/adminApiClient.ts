@@ -1,4 +1,4 @@
-type FetchOptions = { method?: "GET" | "POST"; body?: unknown; searchParams?: Record<string, string | number | undefined> };
+type FetchOptions = { method?: "GET" | "POST" | "PATCH"; body?: unknown; searchParams?: Record<string, string | number | undefined> };
 
 async function apiFetch<T>(path: string, { method = "GET", body, searchParams }: FetchOptions = {}): Promise<T> {
   const url = new URL(path, typeof window === "undefined" ? "http://localhost" : window.location.origin);
@@ -36,12 +36,14 @@ export const adminApi = {
   tenants: (params?: { page?: number; pageSize?: number; status?: string; plan?: string; q?: string }) =>
     apiFetch<{ rows: unknown[]; total: number }>("/api/admin/tenants", { searchParams: params }),
   tenant: (id: string) => apiFetch<unknown>(`/api/admin/tenants/${id}`),
+  setTenantAutomationPaused: (id: string, paused: boolean) =>
+    apiFetch<{ tenant_id: string; paused: boolean }>(`/api/admin/tenants/${id}`, { method: "PATCH", body: { paused } }),
   invite: (payload: unknown) => apiFetch<{ link: string | null; emailed: boolean }>("/api/admin/onboarding/invite", { method: "POST", body: payload }),
   onboardingList: () => apiFetch<{ rows: unknown[] }>("/api/admin/onboarding/list"),
-  onboardingResend: (email: string) =>
-    apiFetch<{ emailed: boolean; link?: string | null }>("/api/admin/onboarding/resend", { method: "POST", body: { email } }),
   onboardingCancel: (email: string) =>
     apiFetch<{ canceled: boolean }>("/api/admin/onboarding/cancel", { method: "POST", body: { email } }),
+  onboardingDelete: (email: string) =>
+    apiFetch<{ deleted: boolean }>("/api/admin/onboarding/delete", { method: "POST", body: { email } }),
   updateLocationLimit: (id: string, location_limit: number) =>
     apiFetch(`/api/admin/tenants/${id}/location_limit`, { method: "POST", body: { location_limit } }),
   impersonateStart: (tenantId: string, reason: string) =>

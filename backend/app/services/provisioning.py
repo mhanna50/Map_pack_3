@@ -11,6 +11,7 @@ from backend.app.models.user import User
 from backend.app.models.enums import MembershipRole, OrganizationType
 from backend.app.services.notifications import NotificationService
 from backend.app.services.onboarding_tokens import OnboardingTokenSigner
+from backend.app.services.tenant_bridge import ensure_tenant_row
 from backend.app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,14 @@ class ClientProvisioningService:
         )
         self.db.add(organization)
         self.db.flush()
+        ensure_tenant_row(
+            self.db,
+            tenant_id=organization.id,
+            business_name=organization.name,
+            tenant_type=organization.org_type,
+            slug=organization.slug,
+            plan_tier=organization.plan_tier or plan,
+        )
         membership = Membership(user_id=user.id, organization_id=organization.id, role=MembershipRole.OWNER)
         self.db.add(membership)
         self.db.commit()

@@ -15,19 +15,36 @@ from .mixins import TimestampMixin, UUIDPrimaryKeyMixin
 class Alert(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "alerts"
 
+    # Physical DB column is still `tenant_id` in existing environments.
+    # Keep Python attribute name as `organization_id` to avoid broad refactors.
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id")
+        "tenant_id",
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id"),
     )
     location_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("locations.id")
     )
     severity: Mapped[AlertSeverity] = mapped_column(
-        Enum(AlertSeverity, name="alert_severity"), default=AlertSeverity.INFO, nullable=False
+        Enum(
+            AlertSeverity,
+            name="alert_severity",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        default=AlertSeverity.INFO,
+        nullable=False,
     )
-    alert_type: Mapped[str] = mapped_column("type", String(64), nullable=False)
+    # Legacy schemas use `alert_type`; newer local schemas may use `type`.
+    alert_type: Mapped[str] = mapped_column("alert_type", String(64), nullable=False)
     message: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[AlertStatus] = mapped_column(
-        Enum(AlertStatus, name="alert_status"), default=AlertStatus.OPEN, nullable=False
+        Enum(
+            AlertStatus,
+            name="alert_status",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        default=AlertStatus.OPEN,
+        nullable=False,
     )
     metadata_json: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -1,7 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BarChart3, Clock3 } from "lucide-react";
+import {
+  CartesianGrid,
+  Cell,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { DashboardShell } from "@/components/dashboard/shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -13,10 +25,35 @@ import { useTenant } from "@/lib/tenant-context";
 import { listPostJobs, listPosts } from "@/lib/db";
 import { format } from "@/lib/date-utils";
 
+type Post = {
+  id: string | number;
+  published_at?: string | null;
+  content?: string | null;
+  status?: string | null;
+  location_id?: string | null;
+  metrics?: { views?: number; clicks?: number };
+};
+
+type PostJob = {
+  id: string | number;
+  scheduled_for?: string | null;
+  status?: string | null;
+  location_id?: string | null;
+  title?: string | null;
+  template_id?: string | null;
+};
+
+const statusColorMap: Record<string, string> = {
+  published: "var(--chart-2)",
+  scheduled: "var(--chart-1)",
+  queued: "var(--chart-3)",
+  failed: "var(--chart-5)",
+};
+
 export default function GbpPage() {
   const { tenantId, selectedLocationId, refresh: refreshTenant } = useTenant();
-  const [posts, setPosts] = useState<Array<Record<string, unknown>>>([]);
-  const [jobs, setJobs] = useState<Array<Record<string, unknown>>>([]);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [jobs, setJobs] = useState<PostJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -41,8 +78,8 @@ export default function GbpPage() {
           listPostJobs(tenantId, selectedLocationId ?? undefined, { limit: 10 }),
         ]);
         if (!active) return;
-        setPosts((postData ?? []) as Array<Record<string, unknown>>);
-        setJobs((jobData ?? []) as Array<Record<string, unknown>>);
+        setPosts((postData ?? []) as Post[]);
+        setJobs((jobData ?? []) as PostJob[]);
       } catch (err: unknown) {
         if (!active) return;
         const message = err instanceof Error ? err.message : "Failed to load GBP data";
@@ -57,6 +94,31 @@ export default function GbpPage() {
     };
   }, [tenantId, selectedLocationId, refreshKey]);
 
+  const engagementTrend = useMemo(() => {
+    return [...posts]
+      .filter((post) => Boolean(post.published_at))
+      .sort((a, b) => new Date(a.published_at ?? "").getTime() - new Date(b.published_at ?? "").getTime())
+      .slice(-12)
+      .map((post) => ({
+        label: new Date(post.published_at ?? "").toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        views: post.metrics?.views ?? 0,
+        clicks: post.metrics?.clicks ?? 0,
+      }));
+  }, [posts]);
+
+  const statusDistribution = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const post of posts) {
+      const key = (post.status ?? "published").toLowerCase();
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).map(([name, value]) => ({
+      name,
+      value,
+      color: statusColorMap[name] ?? "var(--chart-4)",
+    }));
+  }, [posts]);
+
   return (
     <DashboardShell onRefresh={handleRefresh}>
       <div className="space-y-5">
@@ -67,6 +129,39 @@ export default function GbpPage() {
           </div>
           <Button variant="primary">Compose new post</Button>
         </header>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Engagement trend</CardTitle>
+            <CardDescription>Views and clicks from recent published posts</CardDescription>
+          </CardHeader>
+          <CardContent className="h-[280px]">
+            {loading ? (
+              <Skeleton className="h-full w-full" />
+            ) : error ? (
+              <EmptyState inline title="Could not load engagement trend" description={error} />
+            ) : engagementTrend.length === 0 ? (
+              <EmptyState inline title="No published post metrics yet" description="Publish posts to start tracking views and clicks over time." />
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={engagementTrend} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="var(--muted-foreground)" />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} stroke="var(--muted-foreground)" />
+                  <Tooltip
+                    contentStyle={{
+                      borderRadius: 12,
+                      border: "1px solid var(--border)",
+                      background: "var(--card)",
+                    }}
+                  />
+                  <Line type="monotone" dataKey="views" stroke="var(--chart-1)" strokeWidth={2.5} dot={false} />
+                  <Line type="monotone" dataKey="clicks" stroke="var(--chart-2)" strokeWidth={2.5} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
@@ -101,8 +196,8 @@ export default function GbpPage() {
                   </TR>
                 </THead>
                 <TBody>
-                  {posts.map((post) => (
-                    <TR key={post.id}>
+                  {posts.map((post, index) => (
+                    <TR key={post.id?.toString?.() ?? `post-${index}`}>
                       <TD>{format(post.published_at)}</TD>
                       <TD className="max-w-xs text-ellipsis text-sm leading-snug text-foreground line-clamp-2">
                         {post.content ?? "—"}
@@ -146,8 +241,8 @@ export default function GbpPage() {
                   onAction={() => {}}
                 />
               ) : (
-                jobs.map((job) => (
-                  <div key={job.id} className="flex items-center justify-between rounded-lg border border-border bg-white/60 px-3 py-2 text-sm">
+                jobs.map((job, index) => (
+                  <div key={job.id?.toString?.() ?? `job-${index}`} className="flex items-center justify-between rounded-lg border border-border bg-white/60 px-3 py-2 text-sm">
                     <div>
                       <p className="font-semibold">{job.template_id ?? "Scheduled post"}</p>
                       <p className="text-xs text-muted-foreground">{format(job.scheduled_for)}</p>
@@ -165,13 +260,53 @@ export default function GbpPage() {
             <CardHeader className="flex flex-row items-center gap-3">
               <BarChart3 className="h-5 w-5 text-primary" />
               <div>
-                <CardTitle>Performance</CardTitle>
-                <CardDescription>Views & clicks (sample)</CardDescription>
+                <CardTitle>Performance mix</CardTitle>
+                <CardDescription>Status distribution and totals</CardDescription>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="rounded-lg border border-dashed border-border bg-muted/40 p-3 text-sm text-muted-foreground">
-                Chart placeholder — connect metrics to visualize post engagement by location.
+              {loading ? (
+                <Skeleton className="h-40 w-full" />
+              ) : statusDistribution.length === 0 ? (
+                <EmptyState inline title="No post status data yet" description="Status distribution appears once posts are created." />
+              ) : (
+                <div className="h-[170px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={statusDistribution}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius={44}
+                        outerRadius={70}
+                        stroke="transparent"
+                        paddingAngle={2}
+                      >
+                        {statusDistribution.map((entry) => (
+                          <Cell key={entry.name} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{
+                          borderRadius: 12,
+                          border: "1px solid var(--border)",
+                          background: "var(--card)",
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+              <div className="space-y-2 text-xs">
+                {statusDistribution.map((entry) => (
+                  <div key={entry.name} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
+                      <span className="capitalize text-muted-foreground">{entry.name}</span>
+                    </div>
+                    <span className="font-semibold">{entry.value}</span>
+                  </div>
+                ))}
               </div>
               <div className="space-y-2 text-sm">
                 <div className="flex items-center justify-between">
@@ -193,10 +328,9 @@ export default function GbpPage() {
   );
 }
 
-function aggregateMetric(posts: Array<Record<string, unknown>>, key: string) {
+function aggregateMetric(posts: Post[], key: "views" | "clicks") {
   return posts.reduce((sum, post) => {
-    const metrics = post.metrics as Record<string, unknown> | undefined;
-    const value = metrics && typeof metrics[key] === "number" ? (metrics[key] as number) : 0;
+    const value = post.metrics && typeof post.metrics[key] === "number" ? (post.metrics[key] as number) : 0;
     return sum + value;
   }, 0);
 }

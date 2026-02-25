@@ -16,6 +16,7 @@ from backend.app.models.user import User
 from backend.app.services.audit import log_audit
 from backend.app.services.notifications import NotificationService
 from backend.app.services.passwords import PasswordService
+from backend.app.services.tenant_bridge import ensure_tenant_row
 
 
 class InviteService:
@@ -98,6 +99,16 @@ class InviteService:
         if invite.accepted_at:
             raise ValueError("Invite already accepted")
         user = self._get_or_create_user(invite.email, full_name, password)
+        organization = self.db.get(Organization, invite.organization_id)
+        if organization:
+            ensure_tenant_row(
+                self.db,
+                tenant_id=organization.id,
+                business_name=organization.name,
+                tenant_type=organization.org_type,
+                slug=organization.slug,
+                plan_tier=organization.plan_tier or "starter",
+            )
         membership = (
             self.db.query(Membership)
             .filter(Membership.user_id == user.id, Membership.organization_id == invite.organization_id)
