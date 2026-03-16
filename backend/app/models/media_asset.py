@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,6 +25,8 @@ class MediaAsset(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("media_albums.id")
     )
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), default="upload", nullable=False)
+    source_external_id: Mapped[str | None] = mapped_column(String(255))
     media_type: Mapped[MediaType] = mapped_column(
         Enum(MediaType, name="media_type"), nullable=False, default=MediaType.IMAGE
     )
@@ -33,6 +35,7 @@ class MediaAsset(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     storage_url: Mapped[str] = mapped_column(String, nullable=False)
     metadata_json: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    usage_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     auto_caption: Mapped[str | None] = mapped_column(String(512))
     status: Mapped[MediaStatus] = mapped_column(
         Enum(MediaStatus, name="media_status"), default=MediaStatus.PENDING, nullable=False

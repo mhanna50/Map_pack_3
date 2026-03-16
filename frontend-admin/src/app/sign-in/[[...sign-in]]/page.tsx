@@ -1,10 +1,12 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/client";
+
+const INVALID_ROLE_MESSAGE = "Invalid role. This account does not have admin access.";
 
 export default function Page() {
   const router = useRouter();
@@ -13,6 +15,14 @@ export default function Page() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const hasInvalidRole = searchParams?.get("error") === "invalid_role";
+
+  useEffect(() => {
+    if (!hasInvalidRole) return;
+    setError(INVALID_ROLE_MESSAGE);
+    const supabase = createClient();
+    void supabase.auth.signOut();
+  }, [hasInvalidRole]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

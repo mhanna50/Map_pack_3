@@ -25,7 +25,7 @@ export default function AuditPage() {
       try {
         const data = await adminApi.audit({ page: 1, pageSize: 50 });
         if (!active) return;
-        setRows(data.rows ?? []);
+        setRows((data.rows ?? []) as AuditRow[]);
       } catch (err: unknown) {
         if (!active) return;
         const message = err instanceof Error ? err.message : "Failed to load audit log";

@@ -61,6 +61,8 @@ class PostCandidateService:
         if not location:
             raise ValueError("Location not found")
         settings = self.settings.merged(organization_id, location_id)
+        verified_offers = self.settings.verified_offers(organization_id, location_id)
+        verified_events = self.settings.verified_events(organization_id, location_id)
         best: tuple[dict[str, Any], float] | None = None
         as_of = datetime.combine(target_date, datetime.min.time(), tzinfo=timezone.utc)
         reasons: dict[str, Any] = {
@@ -69,6 +71,8 @@ class PostCandidateService:
             "rank_delta_7d": signal.rank_delta_7d,
             "new_media_count": (signal.extra_metrics or {}).get("new_media_14d"),
             "posts_last_7d": (signal.extra_metrics or {}).get("posts_last_7d"),
+            "verified_offer_count": len(verified_offers),
+            "verified_event_count": len(verified_events),
         }
         seasonal_bucket = self.seasonal.pick_bucket(
             month=target_date.month,
@@ -96,6 +100,8 @@ class PostCandidateService:
         mix = settings.get("content_mix", {})
         total_weight = sum(v for v in mix.values() if isinstance(v, (int, float)) and v > 0)
         for bucket in BUCKETS:
+            if bucket["id"] == "offer" and not verified_offers:
+                continue
             raw_weight = mix.get(bucket["id"], 0.0)
             if raw_weight <= 0:
                 continue
@@ -122,7 +128,6 @@ class PostCandidateService:
         if not best or best[1] < threshold:
             return None
         selected_bucket = best[0]["id"]
-        selected_bucket = best[0]["id"]
         performance_score = self.bucket_perf.get_score(
             organization_id=organization_id,
             location_id=location_id,
@@ -132,6 +137,15 @@ class PostCandidateService:
         )
         reasons["selected_bucket"] = selected_bucket
         reasons["bucket_performance_score"] = performance_score
+        reasons["post_type_hint"] = self._post_type_hint(
+            selected_bucket=selected_bucket,
+            verified_offers=verified_offers,
+            verified_events=verified_events,
+        )
+        if verified_offers:
+            reasons["offer_context"] = verified_offers[0]
+        if verified_events:
+            reasons["event_context"] = verified_events[0]
         # trigger photo request if media is stale and bucket prefers visuals
         photo_gap = self.settings.merged(organization_id, location_id).get("photo_cadence_days", 14)
         if (signal.extra_metrics or {}).get("new_media_14d", 0) == 0 and selected_bucket in {
@@ -231,6 +245,19 @@ class PostCandidateService:
             .count()
         )
         return 10.0 if used == 0 else 0.0
+
+    @staticmethod
+    def _post_type_hint(
+        *,
+        selected_bucket: str,
+        verified_offers: list[dict[str, Any]],
+        verified_events: list[dict[str, Any]],
+    ) -> str:
+        if selected_bucket == "offer" and verified_offers:
+            return "offer"
+        if selected_bucket == "local_highlight" and verified_events:
+            return "event"
+        return "update"
 
 
     @staticmethod

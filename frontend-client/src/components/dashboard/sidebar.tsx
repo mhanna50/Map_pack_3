@@ -57,7 +57,7 @@ export function Sidebar() {
           <div className="h-full w-2/3 rounded-full bg-primary" />
         </div>
         <Button variant="outline" size="sm" className="w-full">
-          Upgrade plan
+          Open billing
         </Button>
       </div>
     </aside>

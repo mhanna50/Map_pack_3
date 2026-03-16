@@ -19,6 +19,7 @@ from backend.app.models.user import User
 from backend.app.services.audit import log_audit
 from backend.app.services.impersonation import ImpersonationService
 from backend.app.services.invites import InviteService
+from backend.app.services.tenant_bridge import ensure_tenant_row
 
 router = APIRouter(prefix="/admin/orgs", tags=["admin_orgs"])
 
@@ -106,6 +107,15 @@ def admin_create_org(
         usage_limits_json=payload.usage_limits or {},
     )
     db.add(organization)
+    db.flush()
+    ensure_tenant_row(
+        db,
+        tenant_id=organization.id,
+        business_name=organization.name,
+        tenant_type=organization.org_type,
+        slug=organization.slug,
+        plan_tier=organization.plan_tier or "starter",
+    )
     db.commit()
     db.refresh(organization)
     log_audit(

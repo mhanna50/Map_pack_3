@@ -212,20 +212,15 @@ Set these in `.env`:
 - `SUPABASE_URL`
 
 ### 3) Admin access (manual only)
-Admins must be created manually in Supabase, then promoted via SQL:
+Admins must be created manually in Supabase, then promoted in your app database:
 
 1. In the Supabase Dashboard, go to **Auth → Users → Invite user** (or **Create user**) and add the admin email. You do **not** need to set a password; they will set one via reset.
-2. In the SQL editor (or psql), mark the account as staff in your app database:
-   ```sql
-   update users set is_staff = true where email = 'admin@example.com';
+2. Mark the account as staff in your app database:
+   ```bash
+   python3 scripts/set_staff_user.py admin@example.com true
    ```
-   (Run this against the same Postgres instance your backend uses.)
-3. In the Supabase database, set their profile role to admin so the admin UI gate passes:
-   ```sql
-   update profiles
-   set role = 'admin'
-   where user_id = '<supabase_user_id_from_auth_users>';
-   ```
+   (This script now links the row to `auth.users.id` when possible.)
+3. Optional: set Supabase `app_metadata` (`is_staff=true` or `role=admin`) for the same user. On next login, `/auth/me` syncs those trusted claims into `public.users.is_staff`.
 4. The admin can obtain a password by visiting the admin login screen and clicking **Forgot password?**; Supabase will send the reset email to that address.
 
 Self-serve admin sign-up is intentionally disabled; only the manual flow above should be used.

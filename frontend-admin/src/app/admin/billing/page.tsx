@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog } from "@/components/ui/dialog";
-import { Select } from "@/components/ui/select";
 import { adminApi } from "@/lib/adminApiClient";
 import { formatDate } from "@/lib/date-utils";
 
@@ -28,8 +27,6 @@ export default function BillingPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updateId, setUpdateId] = useState<string | null>(null);
-  const [newPlan, setNewPlan] = useState("pro");
-  const [locationLimit, setLocationLimit] = useState(3);
 
   useEffect(() => {
     let active = true;
@@ -68,7 +65,7 @@ export default function BillingPage() {
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
               <CardTitle>Subscriptions</CardTitle>
-              <CardDescription>Change plan, update location limit, cancel</CardDescription>
+              <CardDescription>Track status and renewal dates</CardDescription>
             </div>
           </CardHeader>
           <CardContent>
@@ -149,37 +146,17 @@ export default function BillingPage() {
         open={Boolean(updateId)}
         onOpenChange={(open) => !open && setUpdateId(null)}
         title="Update subscription"
-        description="Change plan and location amount selection (placeholder)"
+        description="Plan and location-limit controls have been retired. Use Stripe for account-level changes."
       >
-        <div className="space-y-3">
-          <Select
-            value={newPlan}
-            onChange={(e) => setNewPlan(e.target.value)}
-            options={[
-              { label: "Starter", value: "starter" },
-              { label: "Pro", value: "pro" },
-              { label: "Agency", value: "agency" },
-            ]}
-          />
-          <div>
-            <p className="text-sm font-semibold">Location limit</p>
-            <div className="mt-2 flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => setLocationLimit((n) => Math.max(1, n - 1))}>
-                -
-              </Button>
-              <span className="w-10 text-center text-sm font-semibold">{locationLimit}</span>
-              <Button variant="outline" size="sm" onClick={() => setLocationLimit((n) => n + 1)}>
-                +
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">Location amount selection UI only.</p>
-          </div>
+        <div className="space-y-3 text-sm text-muted-foreground">
+          <p>Manual plan selection is no longer available in the admin dashboard.</p>
+          <p>If a subscription needs to be changed or canceled, perform the update directly in Stripe.</p>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-border px-6 py-3">
           <Button variant="ghost" onClick={() => setUpdateId(null)}>
             Cancel
           </Button>
-          <Button onClick={() => setUpdateId(null)}>Save (placeholder)</Button>
+          <Button onClick={() => setUpdateId(null)}>Close</Button>
         </div>
       </Dialog>
     </AdminShell>

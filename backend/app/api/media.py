@@ -90,8 +90,12 @@ class MediaAssetResponse(BaseModel):
     file_name: str
     storage_url: str
     media_type: str
+    source: str
+    source_external_id: str | None = None
     status: str
     categories: list[str] | None = None
+    usage_count: int = 0
+    last_used_at: datetime | None = None
     job_type: str | None = None
     season: str | None = None
     shot_stage: str | None = None

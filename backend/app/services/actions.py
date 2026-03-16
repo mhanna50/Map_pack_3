@@ -34,10 +34,12 @@ from .post_jobs import PostJobService
 from ..models.location import Location
 from ..models.post_job import PostJob
 from ..models.gbp_connection import GbpConnection
+from ..models.organization import Organization
 from ..services.gbp_connections import GbpConnectionService
 from ..services.alerts import AlertService
 from ..services.google import GoogleOAuthService
 from ..models.media_upload_request import MediaUploadRequest
+from .tenant_bridge import ensure_tenant_row
 from .validators import assert_location_in_org, assert_connected_account_in_org
 
 logger = logging.getLogger(__name__)
@@ -222,6 +224,7 @@ class ActionService:
         dedupe_key: str | None,
         priority: int,
     ) -> Action:
+        self._ensure_legacy_tenant_row(organization_id)
         action_id = uuid.uuid4()
         self.db.execute(
             text(
@@ -284,6 +287,24 @@ class ActionService:
         if not action:
             raise RuntimeError("Scheduled action was not persisted")
         return action
+
+    def _ensure_legacy_tenant_row(self, organization_id: uuid.UUID) -> None:
+        organization = self.db.get(Organization, organization_id)
+        if organization:
+            ensure_tenant_row(
+                self.db,
+                tenant_id=organization.id,
+                business_name=organization.name,
+                tenant_type=organization.org_type,
+                slug=organization.slug,
+                plan_tier=organization.plan_tier or "starter",
+            )
+            return
+        ensure_tenant_row(
+            self.db,
+            tenant_id=organization_id,
+            business_name=f"Organization {organization_id}",
+        )
 
     def fetch_due_actions(self, limit: int) -> list[Action]:
         now = datetime.now(timezone.utc)
@@ -603,7 +624,8 @@ class ActionExecutor:
         if not location_id:
             return {"status": "missing_location"}
         count = self.gbp_sync.sync_posts(action.organization_id, uuid.UUID(location_id))
-        return {"status": "posts_synced", "count": count}
+        media_count = self.gbp_sync.sync_media(action.organization_id, uuid.UUID(location_id))
+        return {"status": "posts_synced", "count": count, "media_count": media_count}
 
     def _handle_compute_daily_signals(self, action: Action) -> dict[str, Any]:
         location_id = action.payload.get("location_id") if action.payload else None

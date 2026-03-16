@@ -1,18 +1,10 @@
 "use client";
 
-import { FormEvent, Suspense, useEffect, useState } from "react";
+import { FormEvent, Suspense, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
-const planOptions = ["starter", "pro", "agency"] as const;
-type Plan = (typeof planOptions)[number];
-
-const normalizePlan = (value: string | null): Plan | null => {
-  if (!value) return null;
-  const normalized = value.trim().toLowerCase();
-  return planOptions.includes(normalized as Plan) ? (normalized as Plan) : null;
-};
+const SINGLE_PLAN = "starter";
 
 export default function CheckoutPage() {
   return (
@@ -23,19 +15,10 @@ export default function CheckoutPage() {
 }
 
 function CheckoutContent() {
-  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [companyName, setCompanyName] = useState("");
-  const [plan, setPlan] = useState<Plan>("starter");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    const nextPlan = normalizePlan(searchParams.get("plan"));
-    if (nextPlan) {
-      setPlan(nextPlan);
-    }
-  }, [searchParams]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -51,7 +34,7 @@ function CheckoutContent() {
         body: JSON.stringify({
           email: email.trim(),
           company_name: companyName.trim(),
-          plan,
+          plan: SINGLE_PLAN,
         }),
       });
       if (!response.ok) {
@@ -107,20 +90,9 @@ function CheckoutContent() {
               required
             />
           </label>
-          <label className="block text-sm">
-            <span className="text-slate-600">Plan</span>
-            <select
-              className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2"
-              value={plan}
-              onChange={(event) => setPlan(event.target.value as Plan)}
-            >
-              {planOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            Service plan: <span className="font-semibold capitalize">{SINGLE_PLAN}</span>
+          </div>
           <button
             type="submit"
             className="w-full rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"

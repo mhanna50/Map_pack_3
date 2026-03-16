@@ -1,14 +1,28 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
+import { normalizePostLoginResolution, type PostLoginRole } from "@/lib/post-login-routing";
+
+const shouldLogAuthRouting =
+  process.env.LOG_AUTH_ROUTING === "true" || process.env.NODE_ENV !== "production";
+
+const logAuthRouting = (event: string, payload: Record<string, unknown>) => {
+  if (!shouldLogAuthRouting) return;
+  console.info(`[auth-routing] ${event}`, payload);
+};
 
 type OnboardingAccessState = {
   signedIn: boolean;
+  eligible: boolean;
   completed: boolean;
+  role: PostLoginRole | null;
+  destination: string | null;
+  nextStep: string | null;
+  tenantId: string | null;
 };
 
-// Google connection is optional during onboarding; users can continue from the dashboard later.
-const COMPLETED_PENDING_STATUSES = new Set(["google_pending", "google_connected", "completed", "activated"]);
+// Legacy google_* statuses are treated as complete for backward compatibility.
+const COMPLETED_PENDING_STATUSES = new Set(["google_connected", "completed", "activated"]);
 const ACTIVE_BILLING_STATUSES = new Set(["active", "trialing", "past_due"]);
 
 const ONBOARDING_STATUS_RANK: Record<string, number> = {
@@ -70,8 +84,17 @@ export async function getOnboardingAccessState(): Promise<OnboardingAccessState>
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  const allowAuthOnly = process.env.NEXT_PUBLIC_ALLOW_AUTH_ONLY_ACCESS === "true";
   if (!url || !anonKey) {
-    return { signedIn: false, completed: false };
+    return {
+      signedIn: false,
+      eligible: false,
+      completed: false,
+      role: null,
+      destination: null,
+      nextStep: null,
+      tenantId: null,
+    };
   }
 
   const cookieStore = await cookies();
@@ -90,11 +113,68 @@ export async function getOnboardingAccessState(): Promise<OnboardingAccessState>
   } = await supabase.auth.getUser();
 
   if (!user?.id || !user.email) {
-    return { signedIn: false, completed: false };
+    return {
+      signedIn: false,
+      eligible: false,
+      completed: false,
+      role: null,
+      destination: null,
+      nextStep: null,
+      tenantId: null,
+    };
   }
+
+  const { data: routeData, error: routeErr } = await supabase.rpc("resolve_post_login_destination");
+  if (!routeErr) {
+    const route = normalizePostLoginResolution(routeData);
+    const eligible = route.role === "client";
+    logAuthRouting("client_guard.rpc_resolution", {
+      userId: user.id,
+      email: user.email.toLowerCase(),
+      role: route.role,
+      destination: route.destination,
+      onboardingComplete: route.onboardingComplete,
+      nextStep: route.nextStep,
+      tenantId: route.tenantId,
+    });
+    return {
+      signedIn: true,
+      eligible,
+      completed: eligible && route.onboardingComplete,
+      role: route.role,
+      destination: route.destination,
+      nextStep: route.nextStep,
+      tenantId: route.tenantId,
+    };
+  }
+  console.warn("resolve_post_login_destination RPC failed in onboarding guard, falling back", {
+    userId: user.id,
+    routeErr,
+  });
+
   if (!serviceKey) {
-    // If service role key is unavailable, only gate by auth.
-    return { signedIn: true, completed: true };
+    if (allowAuthOnly) {
+      // Explicit opt-in for local development where service-role checks are unavailable.
+      return {
+        signedIn: true,
+        eligible: true,
+        completed: true,
+        role: "client",
+        destination: "/dashboard",
+        nextStep: "done",
+        tenantId: null,
+      };
+    }
+    // Fail closed unless auth-only mode is explicitly enabled.
+    return {
+      signedIn: true,
+      eligible: false,
+      completed: false,
+      role: "invalid",
+        destination: "/sign-in?error=invalid_role",
+        nextStep: "google_profile",
+        tenantId: null,
+      };
   }
 
   const svc = createServiceClient(url, serviceKey, {
@@ -120,6 +200,7 @@ export async function getOnboardingAccessState(): Promise<OnboardingAccessState>
   ]);
   const preferredPending = pickPreferredPendingRow(pendingRows ?? [], tenantHints);
   const preferredPendingStatus = normalizeStatus(preferredPending?.status);
+  const hasActiveInvite = Boolean(preferredPending) && preferredPendingStatus !== "canceled";
   const tenantId =
     pickTenantIdFromProfiles(profileRows ?? []) ??
     pickTenantIdFromProfiles(membershipRows ?? []) ??
@@ -170,6 +251,29 @@ export async function getOnboardingAccessState(): Promise<OnboardingAccessState>
   const completedFromPending = COMPLETED_PENDING_STATUSES.has(preferredPendingStatus);
   // Active billing is enough to unlock dashboard access; GBP can be connected later.
   const completedFromInfra = tenantActive || hasActiveBilling;
-  const completed = completedFromPending || completedFromInfra;
-  return { signedIn: true, completed };
+  const eligible = hasActiveInvite || Boolean(tenantId);
+  const completed = eligible && (completedFromPending || completedFromInfra);
+  logAuthRouting("client_guard.fallback_resolution", {
+    userId: user.id,
+    email: user.email.toLowerCase(),
+    role: eligible ? "client" : "invalid",
+    destination: eligible ? (completed ? "/dashboard" : "/onboarding") : "/sign-in?error=invalid_role",
+    onboardingComplete: completed,
+    nextStep: completed ? "done" : "google_profile",
+    tenantId,
+    source: "fallback_pending_onboarding",
+  });
+  return {
+    signedIn: true,
+    eligible,
+    completed,
+    role: eligible ? "client" : "invalid",
+    destination: eligible
+      ? completed
+        ? "/dashboard"
+        : "/onboarding"
+      : "/sign-in?error=invalid_role",
+    nextStep: completed ? "done" : "google_profile",
+    tenantId,
+  };
 }

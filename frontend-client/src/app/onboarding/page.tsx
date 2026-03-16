@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getAccessToken } from "@/lib/supabase/session";
 
-const steps = ["Create account", "Business setup", "Stripe signup", "Connect Google", "Finish"];
+const steps = ["Google login + profile", "Business info + brand voice", "Services", "Stripe signup"];
 
 const toneOptions = ["Friendly", "Professional", "Bold", "Concise"];
 const toneSentenceSamples: Record<string, string> = {
@@ -19,13 +19,13 @@ const toneSentenceSamples: Record<string, string> = {
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000").trim().replace(/\/+$/, "");
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "");
 const ONBOARDING_DRAFT_KEY = "onboarding:draft:v1";
-const ONBOARDING_STEP_KEY = "onboarding:step:v1";
 const ONBOARDING_ORG_ID_KEY = "onboarding:orgId:v1";
 const ONBOARDING_GOOGLE_CONNECTED_KEY = "onboarding:googleConnected:v1";
 const ONBOARDING_STRIPE_STARTED_KEY = "onboarding:stripeStarted:v1";
 const DEFAULT_LIST_ROWS = 3;
 const MAX_SECONDARY_LOCATIONS = 10;
 const MAX_SERVICE_ROWS = 10;
+const MAX_ONBOARDING_STEP = steps.length - 1;
 
 const ONBOARDING_STATUS_RANK: Record<string, number> = {
   in_progress: 0,
@@ -49,30 +49,64 @@ type OrgInfoState = {
   name: string;
   firstName: string;
   lastName: string;
+  primaryCategory: string;
   primaryLocationCity: string;
   primaryLocationState: string;
   secondaryLocations: LocationInput[];
 };
 type BrandVoiceState = {
   tone: string;
-  services: string[];
   websiteText: string;
+};
+type ServiceEntry = {
+  name: string;
+  description: string;
+  source: "imported" | "manual" | "ai";
+};
+type GoogleAccountOption = {
+  id: string;
+  displayName: string;
+  externalAccountId: string | null;
+};
+type GoogleLocationOption = {
+  name: string;
+  title: string | null;
+  storeCode: string | null;
+  metadata: Record<string, unknown> | null;
+};
+type SelectedGoogleLocation = {
+  accountId: string | null;
+  accountName: string | null;
+  locationName: string | null;
+  locationTitle: string | null;
+  connectedLocationId: string | null;
+  metadata: Record<string, unknown> | null;
 };
 type OnboardingDraftState = {
   organizationId?: string;
   orgInfo?: Partial<OrgInfoState>;
   brandVoice?: Partial<BrandVoiceState>;
+  services?: ServiceEntry[];
+  importedBusinessFields?: string[];
+  selectedGoogleAccountId?: string | null;
+  selectedGoogleLocationName?: string | null;
+  selectedGoogleLocation?: Partial<SelectedGoogleLocation> | null;
   googleConnected?: boolean;
   stripeStarted?: boolean;
   agreementAccepted?: boolean;
   agreementSignature?: string;
   passwordSetAt?: string | null;
 };
+type InviteMismatchState = {
+  signedInEmail: string | null;
+  inviteEmail: string | null;
+};
 
 const defaultOrgInfo: OrgInfoState = {
   name: "",
   firstName: "",
   lastName: "",
+  primaryCategory: "",
   primaryLocationCity: "",
   primaryLocationState: "",
   secondaryLocations: Array.from({ length: DEFAULT_LIST_ROWS }, () => ({ city: "", state: "" })),
@@ -80,7 +114,6 @@ const defaultOrgInfo: OrgInfoState = {
 
 const defaultBrandVoice: BrandVoiceState = {
   tone: toneOptions[0],
-  services: Array.from({ length: DEFAULT_LIST_ROWS }, () => ""),
   websiteText: "",
 };
 
@@ -149,22 +182,59 @@ const normalizeServiceList = (value: unknown): string[] => {
   return Array.from({ length: DEFAULT_LIST_ROWS }, () => "");
 };
 
-const statusToStep = (status?: string | null) => {
+const normalizeServiceEntries = (value: unknown): ServiceEntry[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .slice(0, MAX_SERVICE_ROWS)
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      const name = typeof item.name === "string" ? item.name : "";
+      const description = typeof item.description === "string" ? item.description : "";
+      const sourceRaw = typeof item.source === "string" ? item.source : "";
+      const source: ServiceEntry["source"] =
+        sourceRaw === "imported" || sourceRaw === "ai" || sourceRaw === "manual"
+          ? sourceRaw
+          : "manual";
+      return { name, description, source };
+    })
+    .filter((entry): entry is ServiceEntry => Boolean(entry));
+};
+
+const createServiceEntriesFromNames = (services: string[]): ServiceEntry[] =>
+  services
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .slice(0, MAX_SERVICE_ROWS)
+    .map((name) => ({ name, description: "", source: "imported" }));
+
+const statusToResumeStep = (status?: string | null) => {
   switch (status) {
-    case "completed":
-    case "activated":
-      return 4;
-    case "google_connected":
-    case "google_pending":
-      return 3;
-    case "stripe_started":
-    case "stripe_pending":
-      return 2;
     case "business_setup":
       return 1;
+    case "stripe_pending":
+      return 2;
+    case "stripe_started":
+    case "google_pending":
+    case "google_connected":
+    case "completed":
+    case "activated":
+      return 3;
     default:
       return 0;
   }
+};
+
+const normalizeStepIndex = (value: unknown): number | null => {
+  const numeric = typeof value === "number"
+    ? value
+    : typeof value === "string" && value.trim()
+      ? Number(value.trim())
+      : Number.NaN;
+  if (!Number.isInteger(numeric)) return null;
+  if (numeric < 0 || numeric > MAX_ONBOARDING_STEP) return null;
+  return numeric;
 };
 
 const normalizeClientError = (error: unknown, fallback: string) => {
@@ -219,6 +289,24 @@ const readErrorMessage = async (response: Response, fallback: string) => {
   }
 
   return body.length <= 300 ? body : fallback;
+};
+
+const shouldIgnoreBackendDraftPersistError = (status: number, message: string) => {
+  if (status !== 403 && status !== 404) {
+    return false;
+  }
+  const normalized = message.trim().toLowerCase();
+  return normalized.includes("not a member of this organization") || normalized.includes("organization not found");
+};
+
+const SUPABASE_PASSWORD_SET_METADATA_KEY = "onboarding_password_set_at";
+
+const readSupabasePasswordSetAt = (value: unknown): string | null => {
+  if (!isRecord(value) || !isRecord(value.user_metadata)) {
+    return null;
+  }
+  const raw = value.user_metadata[SUPABASE_PASSWORD_SET_METADATA_KEY];
+  return typeof raw === "string" && raw.trim() ? raw.trim() : null;
 };
 
 type StripePaymentProps = {
@@ -309,10 +397,6 @@ function OnboardingContent() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userStorageScope, setUserStorageScope] = useState<string | null>(null);
   const [resolvedInviteEmail, setResolvedInviteEmail] = useState<string | null>(inviteEmailFromQuery);
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [settingPassword, setSettingPassword] = useState(false);
   const [passwordSetAt, setPasswordSetAt] = useState<string | null>(null);
   const [stripeStarted, setStripeStarted] = useState(false);
   const [stripeClientSecret, setStripeClientSecret] = useState<string | null>(null);
@@ -335,14 +419,36 @@ function OnboardingContent() {
   const [connectingGoogle, setConnectingGoogle] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [tokenError, setTokenError] = useState<string | null>(null);
+  const [claimErrorCode, setClaimErrorCode] = useState<string | null>(null);
+  const [inviteMismatch, setInviteMismatch] = useState<InviteMismatchState | null>(null);
+  const [switchingAccount, setSwitchingAccount] = useState(false);
   const [brandVoice, setBrandVoice] = useState<BrandVoiceState>(defaultBrandVoice);
+  const [services, setServices] = useState<ServiceEntry[]>([]);
+  const [importedBusinessFields, setImportedBusinessFields] = useState<string[]>([]);
+  const [googleAccounts, setGoogleAccounts] = useState<GoogleAccountOption[]>([]);
+  const [loadingGoogleAccounts, setLoadingGoogleAccounts] = useState(false);
+  const [selectedGoogleAccountId, setSelectedGoogleAccountId] = useState<string | null>(null);
+  const [googleLocations, setGoogleLocations] = useState<GoogleLocationOption[]>([]);
+  const [loadingGoogleLocations, setLoadingGoogleLocations] = useState(false);
+  const [selectedGoogleLocationName, setSelectedGoogleLocationName] = useState<string | null>(null);
+  const [connectingGoogleLocation, setConnectingGoogleLocation] = useState(false);
+  const [selectedGoogleLocation, setSelectedGoogleLocation] = useState<SelectedGoogleLocation | null>(null);
+  const [serviceError, setServiceError] = useState<string | null>(null);
+  const [serviceGenerationError, setServiceGenerationError] = useState<string | null>(null);
+  const [generatingServiceIndex, setGeneratingServiceIndex] = useState<number | null>(null);
   const inviteToken = searchParams?.get("token") ?? null;
+  const oauthStatusFromQuery = searchParams?.get("oauth");
 
   const buildOnboardingDraft = useCallback(
     (overrides?: { stripeStarted?: boolean; googleConnected?: boolean }): OnboardingDraftState => ({
       organizationId: organizationId ?? undefined,
       orgInfo,
       brandVoice,
+      services,
+      importedBusinessFields,
+      selectedGoogleAccountId,
+      selectedGoogleLocationName,
+      selectedGoogleLocation,
       googleConnected: overrides?.googleConnected ?? googleConnected,
       stripeStarted: overrides?.stripeStarted ?? stripeStarted,
       agreementAccepted,
@@ -353,10 +459,15 @@ function OnboardingContent() {
       agreementAccepted,
       agreementSignature,
       brandVoice,
+      importedBusinessFields,
       googleConnected,
       orgInfo,
       organizationId,
       passwordSetAt,
+      selectedGoogleAccountId,
+      selectedGoogleLocation,
+      selectedGoogleLocationName,
+      services,
       stripeStarted,
     ],
   );
@@ -388,6 +499,7 @@ function OnboardingContent() {
         name: typeof orgInfoDraft.name === "string" ? orgInfoDraft.name : prev.name,
         firstName: typeof orgInfoDraft.firstName === "string" ? orgInfoDraft.firstName : prev.firstName,
         lastName: typeof orgInfoDraft.lastName === "string" ? orgInfoDraft.lastName : prev.lastName,
+        primaryCategory: typeof orgInfoDraft.primaryCategory === "string" ? orgInfoDraft.primaryCategory : prev.primaryCategory,
         primaryLocationCity: normalizedPrimary ? normalizedPrimary.city : prev.primaryLocationCity,
         primaryLocationState: normalizedPrimary ? normalizedPrimary.state : prev.primaryLocationState,
         secondaryLocations:
@@ -400,12 +512,54 @@ function OnboardingContent() {
       setBrandVoice((prev) => ({
         ...prev,
         tone: typeof brandVoiceDraft.tone === "string" ? brandVoiceDraft.tone : prev.tone,
-        services:
-          brandVoiceDraft.services !== undefined
-            ? normalizeServiceList(brandVoiceDraft.services)
-            : prev.services,
         websiteText: typeof brandVoiceDraft.websiteText === "string" ? brandVoiceDraft.websiteText : prev.websiteText,
       }));
+    }
+    const serviceDraft = rawDraft.services;
+    if (serviceDraft !== undefined) {
+      const normalizedServices = normalizeServiceEntries(serviceDraft);
+      if (normalizedServices.length > 0) {
+        setServices(normalizedServices);
+      }
+    } else if (brandVoiceDraft?.services !== undefined) {
+      const legacyServices = normalizeServiceList(brandVoiceDraft.services);
+      setServices(createServiceEntriesFromNames(legacyServices));
+    }
+    if (Array.isArray(rawDraft.importedBusinessFields)) {
+      setImportedBusinessFields(
+        rawDraft.importedBusinessFields.filter((item): item is string => typeof item === "string"),
+      );
+    }
+    if (typeof rawDraft.selectedGoogleAccountId === "string" && rawDraft.selectedGoogleAccountId.trim()) {
+      setSelectedGoogleAccountId(rawDraft.selectedGoogleAccountId.trim());
+    }
+    if (typeof rawDraft.selectedGoogleLocationName === "string" && rawDraft.selectedGoogleLocationName.trim()) {
+      setSelectedGoogleLocationName(rawDraft.selectedGoogleLocationName.trim());
+    }
+    if (isRecord(rawDraft.selectedGoogleLocation)) {
+      setSelectedGoogleLocation({
+        accountId:
+          typeof rawDraft.selectedGoogleLocation.accountId === "string"
+            ? rawDraft.selectedGoogleLocation.accountId
+            : null,
+        accountName:
+          typeof rawDraft.selectedGoogleLocation.accountName === "string"
+            ? rawDraft.selectedGoogleLocation.accountName
+            : null,
+        locationName:
+          typeof rawDraft.selectedGoogleLocation.locationName === "string"
+            ? rawDraft.selectedGoogleLocation.locationName
+            : null,
+        locationTitle:
+          typeof rawDraft.selectedGoogleLocation.locationTitle === "string"
+            ? rawDraft.selectedGoogleLocation.locationTitle
+            : null,
+        connectedLocationId:
+          typeof rawDraft.selectedGoogleLocation.connectedLocationId === "string"
+            ? rawDraft.selectedGoogleLocation.connectedLocationId
+            : null,
+        metadata: isRecord(rawDraft.selectedGoogleLocation.metadata) ? rawDraft.selectedGoogleLocation.metadata : null,
+      });
     }
     if (typeof rawDraft.googleConnected === "boolean") {
       setGoogleConnected(rawDraft.googleConnected);
@@ -442,9 +596,13 @@ function OnboardingContent() {
         const supabase = createClient();
         const { data } = await supabase.auth.getUser();
         const user = data.user;
+        const verifiedPasswordSetAt = readSupabasePasswordSetAt(user);
         setHasSession(Boolean(token && user?.id));
         setUserEmail(user?.email ?? null);
         setUserStorageScope(user?.id ?? null);
+        if (verifiedPasswordSetAt) {
+          setPasswordSetAt((prev) => prev ?? verifiedPasswordSetAt);
+        }
       } finally {
         if (active) {
           setCheckingSession(false);
@@ -461,16 +619,6 @@ function OnboardingContent() {
     if (typeof window === "undefined" || !userStorageScope) {
       return;
     }
-    const storedStep =
-      localStorage.getItem(buildScopedKey(ONBOARDING_STEP_KEY, userStorageScope)) ??
-      sessionStorage.getItem(buildScopedKey(ONBOARDING_STEP_KEY, userStorageScope));
-    if (storedStep) {
-      const stepNum = Number(storedStep);
-      if (!Number.isNaN(stepNum) && stepNum >= 0 && stepNum < steps.length) {
-        setCurrentStep(stepNum);
-      }
-    }
-
     const draftRaw = localStorage.getItem(buildScopedKey(ONBOARDING_DRAFT_KEY, userStorageScope));
     if (draftRaw) {
       try {
@@ -576,7 +724,7 @@ function OnboardingContent() {
   }, [orgInfo.name, userEmail]);
 
   useEffect(() => {
-    if (currentStep !== 2) {
+    if (currentStep !== 3) {
       stripeInitAttemptedRef.current = false;
       return;
     }
@@ -628,6 +776,8 @@ function OnboardingContent() {
     const run = async () => {
       try {
         setTokenError(null);
+        setClaimErrorCode(null);
+        setInviteMismatch(null);
         let expectedEmailForClaim = inviteEmailFromQuery;
         // First, if token-based flow exists, redeem it.
         if (inviteToken) {
@@ -667,13 +817,51 @@ function OnboardingContent() {
           body: JSON.stringify({ expected_email: expectedEmailForClaim ?? undefined }),
         });
         if (!claimRes.ok) {
-          const message = await readErrorMessage(claimRes, "Unable to load onboarding status");
+          let message = "Unable to load onboarding status";
+          const bodyText = await claimRes.text();
+          if (bodyText) {
+            try {
+              const payload = JSON.parse(bodyText) as {
+                error?: unknown;
+                code?: unknown;
+                message?: unknown;
+                signed_in_email?: unknown;
+                invite_email?: unknown;
+              };
+              if (typeof payload.error === "string" && payload.error.trim()) {
+                message = payload.error.trim();
+              } else if (typeof payload.message === "string" && payload.message.trim()) {
+                message = payload.message.trim();
+              } else {
+                message = bodyText;
+              }
+              if (typeof payload.code === "string" && payload.code.trim()) {
+                const code = payload.code.trim().toLowerCase();
+                setClaimErrorCode(code);
+                if (code === "invite_email_mismatch") {
+                  setInviteMismatch({
+                    signedInEmail:
+                      typeof payload.signed_in_email === "string" && payload.signed_in_email.trim()
+                        ? payload.signed_in_email.trim().toLowerCase()
+                        : null,
+                    inviteEmail:
+                      typeof payload.invite_email === "string" && payload.invite_email.trim()
+                        ? payload.invite_email.trim().toLowerCase()
+                        : expectedEmailForClaim,
+                  });
+                }
+              }
+            } catch {
+              message = bodyText;
+            }
+          }
           throw new Error(message);
         }
         const claim = await claimRes.json();
         if (cancelled) {
           return;
         }
+        setInviteMismatch(null);
         const tenantIdFromClaim = typeof claim.tenant_id === "string" ? claim.tenant_id : null;
         // Claim response is the source of truth for Supabase tenant linkage.
         setOrganizationId((prev) => tenantIdFromClaim ?? prev);
@@ -686,10 +874,13 @@ function OnboardingContent() {
 
         const claimStatus = typeof claim.status === "string" ? claim.status : "in_progress";
         setOnboardingStatus(claimStatus);
-        const stepFromStatus = statusToStep(claimStatus);
+        const claimPasswordSetAt = typeof claim.password_set_at === "string" && claim.password_set_at.trim()
+          ? claim.password_set_at
+          : null;
+        const stepFromStatus = normalizeStepIndex(claim.resume_step) ?? statusToResumeStep(claimStatus);
         setCurrentStep(stepFromStatus);
 
-        if (["stripe_started", "google_pending", "google_connected", "completed", "activated"].includes(claimStatus)) {
+        if (["google_pending", "google_connected", "completed", "activated"].includes(claimStatus)) {
           setStripeStarted(true);
           setStripeClientSecret(null);
         }
@@ -703,10 +894,8 @@ function OnboardingContent() {
         if (typeof claim.agreement_accepted === "boolean") {
           setAgreementAccepted(claim.agreement_accepted);
         }
-        if (typeof claim.password_set_at === "string" && claim.password_set_at.trim()) {
-          setPasswordSetAt(claim.password_set_at);
-        } else if (stepFromStatus >= 1) {
-          setPasswordSetAt((prev) => prev ?? new Date(0).toISOString());
+        if (claimPasswordSetAt) {
+          setPasswordSetAt(claimPasswordSetAt);
         }
         if (isRecord(claim.onboarding_draft)) {
           applyOnboardingDraft(claim.onboarding_draft);
@@ -728,48 +917,65 @@ function OnboardingContent() {
     };
   }, [applyOnboardingDraft, inviteEmailFromQuery, inviteToken, loadOrganizationDraftFromDb]);
 
-  const completed = currentStep === steps.length - 1;
+  const hasInviteContext = Boolean(inviteToken || inviteEmailFromQuery);
   const onboardingFullyCompleted =
     (ONBOARDING_STATUS_RANK[onboardingStatus] ?? -1) >= ONBOARDING_STATUS_RANK.completed;
   const businessSetupSaved =
     Boolean(organizationId) && (ONBOARDING_STATUS_RANK[onboardingStatus] ?? -1) >= ONBOARDING_STATUS_RANK.business_setup;
-  const passwordReady = password.length >= 8 && password === confirmPassword;
-  const hasPasswordInput = password.length > 0 || confirmPassword.length > 0;
-  const passwordAlreadySet = Boolean(passwordSetAt);
+
+  const hasConnectedGbpLocation =
+    googleConnected &&
+    Boolean(selectedGoogleLocation?.locationName) &&
+    Boolean(selectedGoogleAccountId);
+  const missingBusinessFields = useMemo(() => {
+    const missing: string[] = [];
+    if (!orgInfo.name.trim()) missing.push("Company name");
+    if (!orgInfo.primaryCategory.trim()) missing.push("Primary category");
+    if (!orgInfo.primaryLocationCity.trim()) missing.push("Primary location city");
+    if (!orgInfo.primaryLocationState.trim()) missing.push("Primary location state");
+    return missing;
+  }, [
+    orgInfo.name,
+    orgInfo.primaryCategory,
+    orgInfo.primaryLocationCity,
+    orgInfo.primaryLocationState,
+  ]);
+  const namedServicesCount = useMemo(
+    () => services.filter((service) => service.name.trim()).length,
+    [services],
+  );
+  const servicesMissingDescriptions = useMemo(
+    () =>
+      services.filter(
+        (service) => service.name.trim() && !service.description.trim(),
+      ),
+    [services],
+  );
+
   const nextDisabled = useMemo(() => {
     if (currentStep === 0) {
-      if (passwordAlreadySet && !hasPasswordInput) {
-        return checkingSession || !hasSession || settingPassword;
-      }
-      return checkingSession || !hasSession || !passwordReady || settingPassword;
+      return checkingSession || !hasSession || !orgInfo.firstName.trim() || !orgInfo.lastName.trim() || !hasConnectedGbpLocation;
     }
     if (currentStep === 1) {
-      return !orgInfo.name.trim();
+      return missingBusinessFields.length > 0;
     }
     if (currentStep === 2) {
-      return false;
-    }
-    if (currentStep === 3) {
-      return false;
+      return namedServicesCount === 0 || servicesMissingDescriptions.length > 0;
     }
     return false;
   }, [
     checkingSession,
     currentStep,
+    hasConnectedGbpLocation,
     hasSession,
-    hasPasswordInput,
-    orgInfo.name,
-    passwordAlreadySet,
-    passwordReady,
-    settingPassword,
+    missingBusinessFields.length,
+    namedServicesCount,
+    orgInfo.firstName,
+    orgInfo.lastName,
+    servicesMissingDescriptions.length,
   ]);
 
   const progress = useMemo(() => ((currentStep + 1) / steps.length) * 100, [currentStep]);
-  const scheduledDate = useMemo(() => {
-    const date = new Date();
-    date.setDate(date.getDate() + 2);
-    return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  }, []);
 
   type SavePayload = {
     business_name?: string;
@@ -777,12 +983,19 @@ function OnboardingContent() {
     last_name?: string;
     status?: string;
     tenant_id?: string;
+    client_step?: number;
     onboarding_draft?: OnboardingDraftState;
     agreement_signature?: string;
     agreement_accepted?: boolean;
     agreement_signed_at?: string;
     password_set?: boolean;
     password_set_at?: string | null;
+  };
+
+  type SaveResponse = {
+    status?: unknown;
+    resume_step?: unknown;
+    pending?: unknown;
   };
 
   const persistOrganizationDraft = useCallback(
@@ -807,6 +1020,14 @@ function OnboardingContent() {
       });
       if (!res.ok) {
         const message = await readErrorMessage(res, "Failed to persist onboarding draft");
+        if (shouldIgnoreBackendDraftPersistError(res.status, message)) {
+          console.info("Skipping backend onboarding draft persistence during onboarding", {
+            tenantId,
+            status: res.status,
+            message,
+          });
+          return;
+        }
         throw new Error(message);
       }
     },
@@ -829,12 +1050,51 @@ function OnboardingContent() {
         },
         body: JSON.stringify({
           ...payload,
+          client_step: payload.client_step ?? currentStep,
           expected_email: resolvedInviteEmail ?? undefined,
         }),
       });
       if (!res.ok) {
         const message = await readErrorMessage(res, "Failed to save progress");
         throw new Error(message);
+      }
+      const saveResponse = (await res.json()) as SaveResponse;
+      const pendingRecord = isRecord(saveResponse.pending) ? saveResponse.pending : null;
+      const persistedStatus =
+        typeof saveResponse.status === "string"
+          ? saveResponse.status
+          : typeof pendingRecord?.status === "string"
+            ? pendingRecord.status
+            : null;
+      if (persistedStatus) {
+        setOnboardingStatus((prev) =>
+          (ONBOARDING_STATUS_RANK[persistedStatus] ?? -1) > (ONBOARDING_STATUS_RANK[prev] ?? -1)
+            ? persistedStatus
+            : prev,
+        );
+      }
+      const pendingDraft = pendingRecord && isRecord(pendingRecord.onboarding_draft) ? pendingRecord.onboarding_draft : null;
+      const persistedPasswordSetAt =
+        typeof pendingRecord?.password_set_at === "string" && pendingRecord.password_set_at.trim()
+          ? pendingRecord.password_set_at
+          : typeof pendingDraft?.passwordSetAt === "string" && pendingDraft.passwordSetAt.trim()
+            ? pendingDraft.passwordSetAt
+            : null;
+      if (persistedPasswordSetAt) {
+        setPasswordSetAt(persistedPasswordSetAt);
+      }
+      const persistedResumeStep =
+        normalizeStepIndex(saveResponse.resume_step)
+        ?? (persistedStatus ? statusToResumeStep(persistedStatus) : null);
+      if (persistedResumeStep !== null) {
+        setCurrentStep((prev) => (persistedResumeStep > prev ? persistedResumeStep : prev));
+      }
+      const pendingTenantId =
+        typeof pendingRecord?.tenant_id === "string" && pendingRecord.tenant_id.trim()
+          ? pendingRecord.tenant_id.trim()
+          : null;
+      if (pendingTenantId) {
+        setOrganizationId((prev) => pendingTenantId || prev);
       }
       const draft = payload.onboarding_draft ?? buildOnboardingDraft();
       const tenantId = payload.tenant_id ?? organizationId;
@@ -846,7 +1106,7 @@ function OnboardingContent() {
     } finally {
       setSavingProgress(false);
     }
-  }, [buildOnboardingDraft, hasSession, orgInfo.name, organizationId, persistOrganizationDraft, resolvedInviteEmail]);
+  }, [buildOnboardingDraft, currentStep, hasSession, orgInfo.name, organizationId, passwordSetAt, persistOrganizationDraft, resolvedInviteEmail]);
 
   const refreshSession = useCallback(async () => {
     setCheckingSession(true);
@@ -854,11 +1114,31 @@ function OnboardingContent() {
     const supabase = createClient();
     const { data } = await supabase.auth.getUser();
     const user = data.user;
+    const verifiedPasswordSetAt = readSupabasePasswordSetAt(user);
     setHasSession(Boolean(token && user?.id));
     setUserEmail(user?.email ?? null);
     setUserStorageScope(user?.id ?? null);
+    if (verifiedPasswordSetAt) {
+      setPasswordSetAt((prev) => prev ?? verifiedPasswordSetAt);
+    }
     setCheckingSession(false);
   }, []);
+
+  const handleSwitchAccount = useCallback(async () => {
+    setSwitchingAccount(true);
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+      setHasSession(false);
+      setUserEmail(null);
+      setUserStorageScope(null);
+      setPasswordSetAt(null);
+      router.replace("/sign-in");
+      router.refresh();
+    } finally {
+      setSwitchingAccount(false);
+    }
+  }, [router]);
 
   // When landing from a Supabase invite/magic link, exchange the token in the URL for a session
   // so we can read the user's email immediately.
@@ -893,47 +1173,6 @@ function OnboardingContent() {
     void bootstrapSession();
   }, [refreshSession]);
 
-  const handleSetPassword = async () => {
-    setPasswordError(null);
-    if (!hasSession) {
-      setPasswordError("Open the invite link again so we can verify your session.");
-      return;
-    }
-    if (!passwordReady) {
-      setPasswordError("Passwords must match and be at least 8 characters.");
-      return;
-    }
-    setSettingPassword(true);
-    try {
-      const supabase = createClient();
-      const { error } = await supabase.auth.updateUser({ password });
-      if (error) {
-        throw error;
-      }
-      await refreshSession();
-      const nowIso = new Date().toISOString();
-      setPasswordSetAt(nowIso);
-      setPassword("");
-      setConfirmPassword("");
-      const passwordDraft: OnboardingDraftState = {
-        ...buildOnboardingDraft(),
-        passwordSetAt: nowIso,
-      };
-      await saveProgress({
-        status: "in_progress",
-        tenant_id: organizationId ?? undefined,
-        onboarding_draft: passwordDraft,
-        password_set: true,
-        password_set_at: nowIso,
-      });
-      await goNext();
-    } catch (error) {
-      setPasswordError(error instanceof Error ? error.message : "Failed to set password");
-    } finally {
-      setSettingPassword(false);
-    }
-  };
-
   const createOrganization = async (): Promise<string> => {
     if (organizationId) {
       return organizationId;
@@ -955,7 +1194,7 @@ function OnboardingContent() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          name: orgInfo.name.trim(),
+          name: orgInfo.name.trim() || userEmail?.split("@")[0] || "New client",
           org_type: "agency",
           slug: undefined,
         }),
@@ -976,11 +1215,17 @@ function OnboardingContent() {
   };
 
   const handleConnectGoogle = async () => {
-    if (!organizationId || connectingGoogle) {
-      if (!organizationId) {
-        setConnectError("Create the organization first.");
-      }
+    if (connectingGoogle) {
       return;
+    }
+    let resolvedOrganizationId = organizationId;
+    if (!resolvedOrganizationId) {
+      try {
+        resolvedOrganizationId = await createOrganization();
+      } catch {
+        setConnectError("Create the organization first.");
+        return;
+      }
     }
     setConnectError(null);
     setConnectingGoogle(true);
@@ -997,7 +1242,7 @@ function OnboardingContent() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          organization_id: organizationId,
+          organization_id: resolvedOrganizationId,
           redirect_uri: redirectUri,
           scopes: ["https://www.googleapis.com/auth/business.manage"],
         }),
@@ -1017,20 +1262,357 @@ function OnboardingContent() {
     }
   };
 
+  const applyImportedBusinessFromGoogleLocation = useCallback((location: GoogleLocationOption) => {
+    const metadata = location.metadata;
+    if (!metadata) {
+      return;
+    }
+    const importedKeys = new Set<string>();
+    const title = typeof metadata.title === "string" ? metadata.title.trim() : "";
+    const website =
+      typeof metadata.websiteUri === "string"
+        ? metadata.websiteUri.trim()
+        : typeof metadata.website === "string"
+          ? metadata.website.trim()
+          : "";
+    const categories = isRecord(metadata.categories) ? metadata.categories : null;
+    const primaryCategoryRaw = categories && isRecord(categories.primaryCategory)
+      ? categories.primaryCategory
+      : null;
+    const primaryCategory =
+      primaryCategoryRaw && typeof primaryCategoryRaw.displayName === "string"
+        ? primaryCategoryRaw.displayName.trim()
+        : "";
+
+    const storefrontAddress = isRecord(metadata.storefrontAddress)
+      ? metadata.storefrontAddress
+      : isRecord(metadata.address)
+        ? metadata.address
+        : null;
+    const city =
+      storefrontAddress && typeof storefrontAddress.locality === "string"
+        ? storefrontAddress.locality.trim()
+        : storefrontAddress && typeof storefrontAddress.city === "string"
+          ? storefrontAddress.city.trim()
+          : "";
+    const state =
+      storefrontAddress && typeof storefrontAddress.administrativeArea === "string"
+        ? storefrontAddress.administrativeArea.trim()
+        : storefrontAddress && typeof storefrontAddress.regionCode === "string"
+          ? storefrontAddress.regionCode.trim()
+          : "";
+
+    const secondaryLocations: LocationInput[] = [];
+    const serviceArea = isRecord(metadata.serviceArea) ? metadata.serviceArea : null;
+    const placeInfos = serviceArea && isRecord(serviceArea.places) && Array.isArray(serviceArea.places.placeInfos)
+      ? serviceArea.places.placeInfos
+      : [];
+    for (const place of placeInfos) {
+      if (!isRecord(place) || typeof place.placeName !== "string") continue;
+      const parsed = parseLocationText(place.placeName);
+      if (parsed.city || parsed.state) secondaryLocations.push(parsed);
+    }
+
+    if (title) importedKeys.add("name");
+    if (website) importedKeys.add("websiteText");
+    if (primaryCategory) importedKeys.add("primaryCategory");
+    if (city) importedKeys.add("primaryLocationCity");
+    if (state) importedKeys.add("primaryLocationState");
+    if (secondaryLocations.length > 0) importedKeys.add("secondaryLocations");
+
+    setImportedBusinessFields((prev) => Array.from(new Set([...prev, ...importedKeys])));
+    setOrgInfo((prev) => ({
+      ...prev,
+      name: title || prev.name,
+      primaryCategory: primaryCategory || prev.primaryCategory,
+      primaryLocationCity: city || prev.primaryLocationCity,
+      primaryLocationState: state || prev.primaryLocationState,
+      secondaryLocations:
+        secondaryLocations.length > 0
+          ? normalizeSecondaryLocations(secondaryLocations)
+          : prev.secondaryLocations,
+    }));
+    if (website) {
+      setBrandVoice((prev) => ({ ...prev, websiteText: website }));
+    }
+
+    const serviceNames = new Set<string>();
+    if (primaryCategory) {
+      serviceNames.add(primaryCategory);
+    }
+    const additionalCategories = categories && Array.isArray(categories.additionalCategories)
+      ? categories.additionalCategories
+      : [];
+    for (const category of additionalCategories) {
+      if (!isRecord(category) || typeof category.displayName !== "string") continue;
+      const normalized = category.displayName.trim();
+      if (normalized) serviceNames.add(normalized);
+    }
+    if (Array.isArray(metadata.serviceItems)) {
+      for (const item of metadata.serviceItems) {
+        if (!isRecord(item)) continue;
+        if (typeof item.name === "string" && item.name.trim()) {
+          serviceNames.add(item.name.trim());
+        }
+      }
+    }
+    if (serviceNames.size > 0) {
+      setServices((prev) => {
+        const seen = new Set(prev.map((service) => service.name.trim().toLowerCase()).filter(Boolean));
+        const next = [...prev];
+        for (const serviceName of serviceNames) {
+          const key = serviceName.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          next.push({ name: serviceName, description: "", source: "imported" });
+        }
+        return next;
+      });
+    }
+  }, []);
+
+  const loadGoogleAccounts = useCallback(async () => {
+    if (!organizationId) return;
+    const token = await getAccessToken();
+    if (!token) return;
+    setLoadingGoogleAccounts(true);
+    setConnectError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/google/accounts?organization_id=${organizationId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) {
+        const message = await readErrorMessage(response, "Unable to load Google accounts");
+        throw new Error(message);
+      }
+      const payload = (await response.json()) as Array<Record<string, unknown>>;
+      const accounts: GoogleAccountOption[] = payload
+        .map((account) => {
+          const id = typeof account.id === "string" ? account.id : "";
+          if (!id) return null;
+          return {
+            id,
+            displayName:
+              typeof account.display_name === "string" && account.display_name.trim()
+                ? account.display_name.trim()
+                : typeof account.external_account_id === "string"
+                  ? account.external_account_id
+                  : "Google account",
+            externalAccountId:
+              typeof account.external_account_id === "string" ? account.external_account_id : null,
+          };
+        })
+        .filter((entry): entry is GoogleAccountOption => Boolean(entry));
+      setGoogleAccounts(accounts);
+      if (accounts.length > 0) {
+        setSelectedGoogleAccountId((prev) => prev && accounts.some((account) => account.id === prev) ? prev : accounts[0].id);
+      }
+    } catch (error) {
+      setConnectError(normalizeClientError(error, "Unable to load Google accounts"));
+    } finally {
+      setLoadingGoogleAccounts(false);
+    }
+  }, [organizationId]);
+
+  const loadGoogleLocations = useCallback(async (accountId: string) => {
+    if (!accountId) return;
+    const token = await getAccessToken();
+    if (!token) return;
+    setLoadingGoogleLocations(true);
+    setConnectError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/google/accounts/${accountId}/locations`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) {
+        const message = await readErrorMessage(response, "Unable to load Google Business Profile locations");
+        throw new Error(message);
+      }
+      const payload = (await response.json()) as Array<Record<string, unknown>>;
+      const locations: GoogleLocationOption[] = payload
+        .map((location) => {
+          const name = typeof location.name === "string" ? location.name : "";
+          if (!name) return null;
+          return {
+            name,
+            title: typeof location.title === "string" ? location.title : null,
+            storeCode: typeof location.store_code === "string" ? location.store_code : null,
+            metadata: isRecord(location.metadata) ? location.metadata : null,
+          };
+        })
+        .filter((entry): entry is GoogleLocationOption => Boolean(entry));
+      setGoogleLocations(locations);
+      if (locations.length > 0) {
+        setSelectedGoogleLocationName((prev) => prev && locations.some((location) => location.name === prev) ? prev : locations[0].name);
+      }
+    } catch (error) {
+      setConnectError(normalizeClientError(error, "Unable to load Google locations"));
+    } finally {
+      setLoadingGoogleLocations(false);
+    }
+  }, []);
+
+  const handleSelectGoogleLocation = useCallback(async () => {
+    if (!organizationId || !selectedGoogleAccountId || !selectedGoogleLocationName) {
+      setConnectError("Select a Google account and location first.");
+      return;
+    }
+    const token = await getAccessToken();
+    if (!token) {
+      setConnectError("Sign in to continue.");
+      return;
+    }
+    setConnectingGoogleLocation(true);
+    setConnectError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/google/accounts/${selectedGoogleAccountId}/locations/connect`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          organization_id: organizationId,
+          location_name: selectedGoogleLocationName,
+        }),
+      });
+      if (!response.ok) {
+        const message = await readErrorMessage(response, "Unable to connect selected Google Business Profile");
+        throw new Error(message);
+      }
+      const connected = (await response.json()) as { id?: string };
+      const account = googleAccounts.find((entry) => entry.id === selectedGoogleAccountId) ?? null;
+      const location = googleLocations.find((entry) => entry.name === selectedGoogleLocationName) ?? null;
+      const selected: SelectedGoogleLocation = {
+        accountId: selectedGoogleAccountId,
+        accountName: account?.displayName ?? null,
+        locationName: selectedGoogleLocationName,
+        locationTitle: location?.title ?? null,
+        connectedLocationId: typeof connected.id === "string" ? connected.id : null,
+        metadata: location?.metadata ?? null,
+      };
+      setSelectedGoogleLocation(selected);
+      setGoogleConnected(true);
+      if (location) {
+        applyImportedBusinessFromGoogleLocation(location);
+      }
+      await saveProgress({
+        first_name: orgInfo.firstName.trim(),
+        last_name: orgInfo.lastName.trim(),
+        tenant_id: organizationId,
+        status: "in_progress",
+        onboarding_draft: buildOnboardingDraft({ googleConnected: true }),
+      });
+    } catch (error) {
+      setConnectError(normalizeClientError(error, "Unable to connect selected Google location"));
+    } finally {
+      setConnectingGoogleLocation(false);
+    }
+  }, [
+    applyImportedBusinessFromGoogleLocation,
+    buildOnboardingDraft,
+    googleAccounts,
+    googleLocations,
+    orgInfo.firstName,
+    orgInfo.lastName,
+    organizationId,
+    saveProgress,
+    selectedGoogleAccountId,
+    selectedGoogleLocationName,
+  ]);
+
+  const generateServiceDescription = useCallback(async (serviceName: string) => {
+    const response = await fetch("/api/onboarding/services/generate-description", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        service_name: serviceName,
+        business_name: orgInfo.name,
+        primary_category: orgInfo.primaryCategory,
+        city: orgInfo.primaryLocationCity,
+        state: orgInfo.primaryLocationState,
+        tone: brandVoice.tone,
+      }),
+    });
+    if (!response.ok) {
+      const message = await readErrorMessage(response, "Unable to generate description");
+      throw new Error(message);
+    }
+    const payload = (await response.json()) as { description?: unknown };
+    if (typeof payload.description !== "string" || !payload.description.trim()) {
+      throw new Error("AI returned an empty description");
+    }
+    return payload.description.trim();
+  }, [
+    brandVoice.tone,
+    orgInfo.name,
+    orgInfo.primaryCategory,
+    orgInfo.primaryLocationCity,
+    orgInfo.primaryLocationState,
+  ]);
+
+  const handleGenerateServiceDescription = useCallback(async (index: number) => {
+    const target = services[index];
+    if (!target || !target.name.trim()) {
+      setServiceGenerationError("Enter a service name before generating a description.");
+      return;
+    }
+    setGeneratingServiceIndex(index);
+    setServiceGenerationError(null);
+    try {
+      const generated = await generateServiceDescription(target.name.trim());
+      setServices((prev) => {
+        const next = [...prev];
+        next[index] = { ...next[index], description: generated, source: "ai" };
+        return next;
+      });
+    } catch (error) {
+      setServiceGenerationError(normalizeClientError(error, "Unable to generate service description"));
+    } finally {
+      setGeneratingServiceIndex(null);
+    }
+  }, [generateServiceDescription, services]);
+
+  useEffect(() => {
+    if (!organizationId || !hasSession || currentStep !== 0) {
+      return;
+    }
+    void loadGoogleAccounts();
+  }, [currentStep, hasSession, loadGoogleAccounts, organizationId]);
+
+  useEffect(() => {
+    if (!organizationId || !hasSession || oauthStatusFromQuery !== "google_connected") {
+      return;
+    }
+    void loadGoogleAccounts();
+  }, [hasSession, loadGoogleAccounts, oauthStatusFromQuery, organizationId]);
+
+  useEffect(() => {
+    if (!selectedGoogleAccountId) {
+      setGoogleLocations([]);
+      setSelectedGoogleLocationName(null);
+      return;
+    }
+    void loadGoogleLocations(selectedGoogleAccountId);
+  }, [loadGoogleLocations, selectedGoogleAccountId]);
+
   const statusForStep = (
     step: number,
     overrides?: { stripeStarted?: boolean; googleConnected?: boolean },
   ) => {
-    const effectiveStripeStarted = overrides?.stripeStarted ?? stripeStarted;
-    const effectiveGoogleConnected = overrides?.googleConnected ?? googleConnected;
-
     switch (step) {
-      case 1:
+      case 0:
         return "business_setup";
+      case 1:
+        return "stripe_pending";
       case 2:
-        return effectiveStripeStarted ? "stripe_started" : "stripe_pending";
-      case 3:
-        return effectiveGoogleConnected ? "completed" : "google_pending";
+        return "stripe_started";
       default:
         return "in_progress";
     }
@@ -1041,7 +1623,7 @@ function OnboardingContent() {
   ) => {
     let resolvedTenantId = organizationId;
     const nextStatus = statusForStep(currentStep, overrides);
-    if (currentStep === 1 && !resolvedTenantId) {
+    if (!resolvedTenantId) {
       try {
         resolvedTenantId = await createOrganization();
       } catch {
@@ -1050,41 +1632,28 @@ function OnboardingContent() {
     }
 
     try {
-      if (currentStep === 1) {
-        await saveProgress({
-          business_name: orgInfo.name.trim(),
-          first_name: orgInfo.firstName.trim(),
-          last_name: orgInfo.lastName.trim(),
-          status: nextStatus,
-          tenant_id: resolvedTenantId ?? undefined,
-          onboarding_draft: buildOnboardingDraft(overrides),
-          password_set: Boolean(passwordSetAt),
-          password_set_at: passwordSetAt,
-        });
-      } else if (currentStep > 1 && currentStep < steps.length) {
-        await saveProgress({
-          status: nextStatus,
-          tenant_id: resolvedTenantId ?? undefined,
-          onboarding_draft: buildOnboardingDraft(overrides),
-          agreement_signature: agreementSignature.trim() || undefined,
-          agreement_accepted: agreementAccepted,
-          agreement_signed_at: agreementAccepted && agreementSignature.trim() ? new Date().toISOString() : undefined,
-          password_set: Boolean(passwordSetAt),
-          password_set_at: passwordSetAt,
-        });
-      }
+      await saveProgress({
+        business_name: orgInfo.name.trim(),
+        first_name: orgInfo.firstName.trim(),
+        last_name: orgInfo.lastName.trim(),
+        status: nextStatus,
+        tenant_id: resolvedTenantId ?? undefined,
+        onboarding_draft: buildOnboardingDraft(overrides),
+        password_set: Boolean(passwordSetAt),
+        password_set_at: passwordSetAt,
+      });
     } catch {
       return;
     }
 
-    if (currentStep >= 1 && currentStep < steps.length) {
+    if (currentStep < steps.length) {
       setOnboardingStatus((prev) =>
         (ONBOARDING_STATUS_RANK[nextStatus] ?? -1) > (ONBOARDING_STATUS_RANK[prev] ?? -1) ? nextStatus : prev,
       );
     }
 
     if (currentStep < steps.length - 1) {
-      setCurrentStep((step) => step + 1);
+      setCurrentStep((step) => (step > currentStep ? step : step + 1));
     }
   };
 
@@ -1094,23 +1663,8 @@ function OnboardingContent() {
     }
   };
 
-  useEffect(() => {
-    if (typeof window === "undefined" || !userStorageScope) return;
-    const key = buildScopedKey(ONBOARDING_STEP_KEY, userStorageScope);
-    localStorage.setItem(key, String(currentStep));
-    sessionStorage.setItem(key, String(currentStep));
-  }, [currentStep, userStorageScope]);
-
   const handleContinue = async () => {
-    if (currentStep === 0) {
-      if (passwordAlreadySet && !hasPasswordInput) {
-        await goNext();
-        return;
-      }
-      await handleSetPassword();
-      return;
-    }
-    if (currentStep === 2) {
+    if (currentStep === 3) {
       setAgreementError(null);
       if (!agreementSignature.trim()) {
         setAgreementError("Type your full name to sign the agreement.");
@@ -1129,37 +1683,139 @@ function OnboardingContent() {
           return;
         }
       }
-      await goNext({ stripeStarted: true });
+      setFinalizingOnboarding(true);
+      try {
+        await saveProgress({
+          business_name: orgInfo.name.trim(),
+          first_name: orgInfo.firstName.trim(),
+          last_name: orgInfo.lastName.trim(),
+          status: "completed",
+          tenant_id: organizationId ?? undefined,
+          onboarding_draft: buildOnboardingDraft({ stripeStarted: true, googleConnected: true }),
+          agreement_signature: agreementSignature.trim() || undefined,
+          agreement_accepted: agreementAccepted,
+          agreement_signed_at: agreementAccepted && agreementSignature.trim() ? new Date().toISOString() : undefined,
+          password_set: Boolean(passwordSetAt),
+          password_set_at: passwordSetAt,
+        });
+        setOnboardingStatus("completed");
+        router.replace("/dashboard");
+        router.refresh();
+      } catch (error) {
+        setProgressError(normalizeClientError(error, "Unable to finalize onboarding"));
+      } finally {
+        setFinalizingOnboarding(false);
+      }
       return;
     }
     await goNext();
   };
 
-  const handleFinishOnboarding = async () => {
-    setFinalizingOnboarding(true);
-    try {
-      await saveProgress({
-        status: "completed",
-        tenant_id: organizationId ?? undefined,
-        onboarding_draft: buildOnboardingDraft({ stripeStarted: true, googleConnected }),
-        agreement_signature: agreementSignature.trim() || undefined,
-        agreement_accepted: agreementAccepted,
-        agreement_signed_at: agreementAccepted && agreementSignature.trim() ? new Date().toISOString() : undefined,
-        password_set: Boolean(passwordSetAt),
-        password_set_at: passwordSetAt,
-      });
-      setOnboardingStatus("completed");
-      router.replace("/dashboard");
-      router.refresh();
-    } catch (error) {
-      setProgressError(normalizeClientError(error, "Unable to finalize onboarding"));
-    } finally {
-      setFinalizingOnboarding(false);
+  const fieldOriginMeta = (fieldKey: string, value: string) => {
+    if (!value.trim()) {
+      return {
+        label: "Missing",
+        className: "bg-rose-50 text-rose-700",
+      };
     }
+    if (importedBusinessFields.includes(fieldKey)) {
+      return {
+        label: "Imported from GBP",
+        className: "bg-emerald-50 text-emerald-700",
+      };
+    }
+    return {
+      label: "Added manually",
+      className: "bg-slate-100 text-slate-700",
+    };
   };
 
   if (loadingClaimStatus) {
     return <div className="min-h-screen px-6 py-12 text-center text-slate-600">Checking onboarding status…</div>;
+  }
+
+  if (claimErrorCode === "invite_email_mismatch") {
+    const signedInEmail = inviteMismatch?.signedInEmail ?? userEmail ?? "another account";
+    const inviteEmail = inviteMismatch?.inviteEmail ?? resolvedInviteEmail ?? "the invited account";
+
+    return (
+      <div className="min-h-screen bg-slate-50 px-6 py-12">
+        <div className="mx-auto max-w-2xl space-y-6 rounded-3xl bg-white p-8 text-center shadow-sm">
+          <p className="text-xs uppercase tracking-[0.3em] text-primary">Wrong Account</p>
+          <h1 className="text-3xl font-semibold">This invite belongs to a different email</h1>
+          <p className="text-sm text-slate-600">
+            Signed in as <span className="font-semibold text-slate-800">{signedInEmail}</span>, but this invite is for{" "}
+            <span className="font-semibold text-slate-800">{inviteEmail}</span>.
+          </p>
+          <p className="text-sm text-slate-600">
+            Sign out, then open the invite link again from the correct inbox.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <button
+              className="rounded-full bg-primary px-6 py-3 text-sm font-semibold text-white disabled:opacity-60"
+              onClick={() => void handleSwitchAccount()}
+              disabled={switchingAccount}
+            >
+              {switchingAccount ? "Signing out..." : "Sign out and switch account"}
+            </button>
+            <button
+              className="rounded-full border border-slate-200 px-6 py-3 text-sm font-semibold text-slate-700"
+              onClick={() => {
+                void refreshSession();
+              }}
+            >
+              Refresh session
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (claimErrorCode === "invite_required" || claimErrorCode === "invite_canceled") {
+    return (
+      <div className="min-h-screen bg-slate-50 px-6 py-12">
+        <div className="mx-auto max-w-2xl space-y-6 rounded-3xl bg-white p-8 text-center shadow-sm">
+          <p className="text-xs uppercase tracking-[0.3em] text-primary">Invite Required</p>
+          <h1 className="text-3xl font-semibold">This onboarding link is not active</h1>
+          <p className="text-sm text-slate-600">
+            {tokenError ?? "Ask an admin to send you a valid onboarding invite, then open that invite link."}
+          </p>
+          <button
+            className="inline-block rounded-full bg-primary px-6 py-3 text-sm font-semibold text-white"
+            onClick={() => {
+              router.replace("/sign-in");
+              router.refresh();
+            }}
+          >
+            Go to sign in
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!hasSession && !checkingSession && !hasInviteContext) {
+    return (
+      <div className="min-h-screen bg-slate-50 px-6 py-12">
+        <div className="mx-auto max-w-2xl space-y-6 rounded-3xl bg-white p-8 text-center shadow-sm">
+          <p className="text-xs uppercase tracking-[0.3em] text-primary">Sign In Required</p>
+          <h1 className="text-3xl font-semibold">Open onboarding from your invite link</h1>
+          <p className="text-sm text-slate-600">
+            Onboarding is invite-only. Sign in first, or use the onboarding invite email sent by your admin.
+          </p>
+          <button
+            className="inline-block rounded-full bg-primary px-6 py-3 text-sm font-semibold text-white"
+            onClick={() => {
+              router.replace("/sign-in");
+              router.refresh();
+            }}
+          >
+            Go to sign in
+          </button>
+        </div>
+      </div>
+    );
   }
 
   if (onboardingFullyCompleted) {
@@ -1215,97 +1871,163 @@ function OnboardingContent() {
 
         <section className="space-y-6 rounded-3xl bg-white p-6 shadow-sm">
           {currentStep === 0 && (
-            <div className="space-y-4">
-              <h2 className="text-xl font-semibold">Set your password</h2>
-              <p className="text-sm text-slate-600">
-                We already have your email from the invite. Choose a password to finish signing in and continue setup.
-              </p>
-              <p className="text-sm font-semibold text-slate-800">
-                Email: <span className="text-primary">{userEmail ?? "Loading email…"}</span>
-              </p>
-              <div className="flex flex-wrap items-center gap-3 text-sm">
-                <button
-                  className="rounded-full border border-slate-200 px-4 py-2 font-semibold text-slate-700 disabled:opacity-60"
-                  onClick={() => {
-                    void refreshSession();
-                  }}
-                  disabled={checkingSession}
-                >
-                  {checkingSession ? "Refreshing…" : "Refresh session"}
-                </button>
+            <div className="space-y-5">
+              <div>
+                <h2 className="text-xl font-semibold">Google login + profile</h2>
+                <p className="text-sm text-slate-600">
+                  Confirm your name, connect Google, and choose the exact Business Profile location to use.
+                </p>
               </div>
+              <p className="text-sm font-semibold text-slate-800">
+                Signed in as <span className="text-primary">{userEmail ?? "Loading…"}</span>
+              </p>
               <div className="grid gap-3 md:grid-cols-2">
                 <label className="block">
-                  <span className="text-slate-600">Password</span>
+                  <span className="text-slate-600">First name</span>
                   <input
-                    type="password"
                     className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
-                    placeholder="At least 8 characters"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="Alex"
+                    value={orgInfo.firstName}
+                    onChange={(event) => setOrgInfo((prev) => ({ ...prev, firstName: event.target.value }))}
                   />
                 </label>
                 <label className="block">
-                  <span className="text-slate-600">Confirm password</span>
+                  <span className="text-slate-600">Last name</span>
                   <input
-                    type="password"
                     className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
-                    placeholder="Re-enter password"
-                    value={confirmPassword}
-                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    placeholder="Reyes"
+                    value={orgInfo.lastName}
+                    onChange={(event) => setOrgInfo((prev) => ({ ...prev, lastName: event.target.value }))}
                   />
                 </label>
               </div>
-              {passwordError && <p className="text-sm text-rose-600">{passwordError}</p>}
-              {passwordAlreadySet && (
-                <p className="text-sm text-emerald-700">
-                  Password already set. For security, your password cannot be displayed.
-                </p>
-              )}
+              <div className="rounded-2xl border border-slate-200 p-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                    onClick={() => {
+                      void handleConnectGoogle();
+                    }}
+                    disabled={connectingGoogle || creatingOrg || !hasSession}
+                  >
+                    {connectingGoogle ? "Redirecting to Google…" : "Connect Google Business Profile"}
+                  </button>
+                  <button
+                    className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60"
+                    onClick={() => {
+                      void loadGoogleAccounts();
+                    }}
+                    disabled={loadingGoogleAccounts || !organizationId}
+                  >
+                    {loadingGoogleAccounts ? "Refreshing accounts…" : "Refresh Google accounts"}
+                  </button>
+                </div>
+
+                {googleAccounts.length > 0 && (
+                  <label className="mt-4 block text-sm">
+                    <span className="text-slate-600">Google account</span>
+                    <select
+                      className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
+                      value={selectedGoogleAccountId ?? ""}
+                      onChange={(event) => setSelectedGoogleAccountId(event.target.value || null)}
+                    >
+                      {googleAccounts.map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {account.displayName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
+                {loadingGoogleLocations && (
+                  <p className="mt-3 text-sm text-slate-600">Loading Business Profile locations…</p>
+                )}
+
+                {googleLocations.length > 0 && (
+                  <div className="mt-4 space-y-2">
+                    <p className="text-sm font-medium text-slate-700">Choose your primary GBP location</p>
+                    {googleLocations.map((location) => (
+                      <label
+                        key={location.name}
+                        className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 ${
+                          selectedGoogleLocationName === location.name ? "border-primary bg-primary/5" : "border-slate-200"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="selected-google-location"
+                          className="mt-1"
+                          checked={selectedGoogleLocationName === location.name}
+                          onChange={() => setSelectedGoogleLocationName(location.name)}
+                        />
+                        <span className="text-sm text-slate-700">
+                          <span className="block font-semibold">{location.title ?? location.name}</span>
+                          {location.storeCode && (
+                            <span className="text-xs text-slate-500">Store code: {location.storeCode}</span>
+                          )}
+                        </span>
+                      </label>
+                    ))}
+                    <button
+                      className="mt-3 rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60"
+                      onClick={() => {
+                        void handleSelectGoogleLocation();
+                      }}
+                      disabled={
+                        connectingGoogleLocation ||
+                        !selectedGoogleAccountId ||
+                        !selectedGoogleLocationName
+                      }
+                    >
+                      {connectingGoogleLocation ? "Connecting selected location…" : "Use selected location"}
+                    </button>
+                  </div>
+                )}
+
+                {googleConnected && selectedGoogleLocation && (
+                  <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                    Connected: <span className="font-semibold">{selectedGoogleLocation.locationTitle ?? selectedGoogleLocation.locationName}</span>
+                    {selectedGoogleLocation.accountName ? ` (${selectedGoogleLocation.accountName})` : ""}
+                  </div>
+                )}
+              </div>
               <div className="flex items-center gap-2 text-sm text-slate-600">
                 <span className={`h-2 w-2 rounded-full ${hasSession ? "bg-emerald-500" : "bg-amber-500"}`} />
                 <span>
                   {checkingSession
-                    ? "Looking for an active session..."
+                    ? "Checking session..."
                     : hasSession
-                      ? passwordAlreadySet
-                        ? "Session verified. Continue, or enter a new password to replace the current one."
-                        : "Session verified. Set your password to continue."
-                      : "No active session found. Open the latest invite email and try again."}
+                      ? "Session ready."
+                      : "No active session found. Open the invite link and sign in again."}
                 </span>
               </div>
+              {connectError && <p className="text-sm text-rose-600">{connectError}</p>}
+              {createOrgError && <p className="text-sm text-rose-600">{createOrgError}</p>}
             </div>
           )}
 
           {currentStep === 1 && (
-            <div className="space-y-6">
-              <h2 className="text-xl font-semibold">Business setup</h2>
-              <p className="text-sm text-slate-600">
-                Save this step when finished. You can edit all business details later from your dashboard settings.
-              </p>
-              <div className="space-y-5 text-sm">
-                <div className="grid gap-3 md:grid-cols-2">
-                  <label className="block">
-                    <span className="text-slate-600">Your first name</span>
-                    <input
-                      className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
-                      placeholder="Alex"
-                      value={orgInfo.firstName}
-                      onChange={(event) => setOrgInfo((prev) => ({ ...prev, firstName: event.target.value }))}
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="text-slate-600">Your last name</span>
-                    <input
-                      className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
-                      placeholder="Reyes"
-                      value={orgInfo.lastName}
-                      onChange={(event) => setOrgInfo((prev) => ({ ...prev, lastName: event.target.value }))}
-                    />
-                  </label>
+            <div className="space-y-5">
+              <div>
+                <h2 className="text-xl font-semibold">Confirm business info + brand voice</h2>
+                <p className="text-sm text-slate-600">
+                  We imported what we could from Google Business Profile. Fill any missing required fields before continuing.
+                </p>
+              </div>
+              {missingBusinessFields.length > 0 && (
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  Missing required fields: {missingBusinessFields.join(", ")}
                 </div>
+              )}
+              <div className="grid gap-3 md:grid-cols-2">
                 <label className="block">
-                  <span className="text-slate-600">Company name</span>
+                  <span className="flex items-center justify-between text-slate-600">
+                    <span>Company name</span>
+                    <span className={`rounded-full px-2 py-0.5 text-xs ${fieldOriginMeta("name", orgInfo.name).className}`}>
+                      {fieldOriginMeta("name", orgInfo.name).label}
+                    </span>
+                  </span>
                   <input
                     className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
                     placeholder="Acme HVAC"
@@ -1313,178 +2035,276 @@ function OnboardingContent() {
                     onChange={(event) => setOrgInfo((prev) => ({ ...prev, name: event.target.value }))}
                   />
                 </label>
-                <div className="space-y-3 rounded-2xl border border-slate-200 p-4">
-                  <p className="text-slate-700">
-                    Primary location is where the business is located. Secondary locations are additional areas where the business provides services.
-                  </p>
-                  <div className="space-y-2">
-                    <p className="font-medium text-slate-700">Primary location (optional)</p>
-                    <div className="grid gap-2 md:grid-cols-2">
-                      <input
-                        className="w-full rounded-2xl border border-slate-200 px-3 py-2"
-                        placeholder="Enter: City"
-                        value={orgInfo.primaryLocationCity}
-                        onChange={(event) => setOrgInfo((prev) => ({ ...prev, primaryLocationCity: event.target.value }))}
-                      />
-                      <input
-                        className="w-full rounded-2xl border border-slate-200 px-3 py-2"
-                        placeholder="Enter: State"
-                        value={orgInfo.primaryLocationState}
-                        onChange={(event) => setOrgInfo((prev) => ({ ...prev, primaryLocationState: event.target.value }))}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-slate-700">
-                        Secondary locations ({orgInfo.secondaryLocations.length}/{MAX_SECONDARY_LOCATIONS})
-                      </span>
-                      <button
-                        type="button"
-                        className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 disabled:opacity-50"
-                        onClick={() =>
-                          setOrgInfo((prev) => {
-                            if (prev.secondaryLocations.length >= MAX_SECONDARY_LOCATIONS) {
-                              return prev;
-                            }
-                            return { ...prev, secondaryLocations: [...prev.secondaryLocations, emptyLocationInput()] };
-                          })
+                <label className="block">
+                  <span className="flex items-center justify-between text-slate-600">
+                    <span>Primary category / business type</span>
+                    <span className={`rounded-full px-2 py-0.5 text-xs ${fieldOriginMeta("primaryCategory", orgInfo.primaryCategory).className}`}>
+                      {fieldOriginMeta("primaryCategory", orgInfo.primaryCategory).label}
+                    </span>
+                  </span>
+                  <input
+                    className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
+                    placeholder="HVAC contractor"
+                    value={orgInfo.primaryCategory}
+                    onChange={(event) => setOrgInfo((prev) => ({ ...prev, primaryCategory: event.target.value }))}
+                  />
+                </label>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="block">
+                  <span className="flex items-center justify-between text-slate-600">
+                    <span>Primary location city</span>
+                    <span className={`rounded-full px-2 py-0.5 text-xs ${fieldOriginMeta("primaryLocationCity", orgInfo.primaryLocationCity).className}`}>
+                      {fieldOriginMeta("primaryLocationCity", orgInfo.primaryLocationCity).label}
+                    </span>
+                  </span>
+                  <input
+                    className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
+                    placeholder="Austin"
+                    value={orgInfo.primaryLocationCity}
+                    onChange={(event) => setOrgInfo((prev) => ({ ...prev, primaryLocationCity: event.target.value }))}
+                  />
+                </label>
+                <label className="block">
+                  <span className="flex items-center justify-between text-slate-600">
+                    <span>Primary location state</span>
+                    <span className={`rounded-full px-2 py-0.5 text-xs ${fieldOriginMeta("primaryLocationState", orgInfo.primaryLocationState).className}`}>
+                      {fieldOriginMeta("primaryLocationState", orgInfo.primaryLocationState).label}
+                    </span>
+                  </span>
+                  <input
+                    className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
+                    placeholder="TX"
+                    value={orgInfo.primaryLocationState}
+                    onChange={(event) => setOrgInfo((prev) => ({ ...prev, primaryLocationState: event.target.value }))}
+                  />
+                </label>
+              </div>
+
+              <div className="space-y-2 rounded-2xl border border-slate-200 p-4">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-slate-700">
+                    Service locations ({orgInfo.secondaryLocations.length}/{MAX_SECONDARY_LOCATIONS})
+                  </span>
+                  <button
+                    type="button"
+                    className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 disabled:opacity-50"
+                    onClick={() =>
+                      setOrgInfo((prev) => {
+                        if (prev.secondaryLocations.length >= MAX_SECONDARY_LOCATIONS) {
+                          return prev;
                         }
-                        disabled={orgInfo.secondaryLocations.length >= MAX_SECONDARY_LOCATIONS}
-                      >
-                        + Add location
-                      </button>
-                    </div>
-                    <div className="space-y-2">
-                      {orgInfo.secondaryLocations.map((value, index) => (
-                        <div key={`secondary-${index}`} className="grid gap-2 md:grid-cols-2">
-                          <input
-                            className="w-full rounded-2xl border border-slate-200 px-3 py-2"
-                            placeholder={`Enter: City ${index + 1}`}
-                            value={value.city}
-                            onChange={(event) =>
-                              setOrgInfo((prev) => {
-                                const next = [...prev.secondaryLocations];
-                                next[index] = { ...next[index], city: event.target.value };
-                                return { ...prev, secondaryLocations: next };
-                              })
-                            }
-                          />
-                          <input
-                            className="w-full rounded-2xl border border-slate-200 px-3 py-2"
-                            placeholder={`Enter: State ${index + 1}`}
-                            value={value.state}
-                            onChange={(event) =>
-                              setOrgInfo((prev) => {
-                                const next = [...prev.secondaryLocations];
-                                next[index] = { ...next[index], state: event.target.value };
-                                return { ...prev, secondaryLocations: next };
-                              })
-                            }
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                        return { ...prev, secondaryLocations: [...prev.secondaryLocations, emptyLocationInput()] };
+                      })
+                    }
+                    disabled={orgInfo.secondaryLocations.length >= MAX_SECONDARY_LOCATIONS}
+                  >
+                    + Add location
+                  </button>
                 </div>
-                <div className="space-y-3">
-                  <p className="text-sm font-semibold text-slate-800">Brand voice</p>
-                  <label className="block">
-                    <span className="text-slate-600">Tone</span>
-                    <select
-                      className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
-                      value={brandVoice.tone}
-                      onChange={(event) => setBrandVoice((prev) => ({ ...prev, tone: event.target.value }))}
-                    >
-                      {toneOptions.map((tone) => (
-                        <option key={tone}>{tone}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-xs font-semibold text-slate-500">Tone examples</p>
-                    <div className="mt-2 space-y-2">
-                      {toneOptions.map((tone) => (
-                        <div
-                          key={`tone-example-${tone}`}
-                          className={`rounded-xl border px-3 py-2 text-xs ${
-                            brandVoice.tone === tone ? "border-primary/40 bg-white text-slate-900" : "border-slate-200 text-slate-700"
-                          }`}
-                        >
-                          <p className="font-semibold">{tone}</p>
-                          <p>{toneSentenceSamples[tone]}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-600">Services ({brandVoice.services.length}/{MAX_SERVICE_ROWS})</span>
-                      <button
-                        type="button"
-                        className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 disabled:opacity-50"
-                        onClick={() =>
-                          setBrandVoice((prev) => {
-                            if (prev.services.length >= MAX_SERVICE_ROWS) {
-                              return prev;
-                            }
-                            return { ...prev, services: [...prev.services, ""] };
-                          })
-                        }
-                        disabled={brandVoice.services.length >= MAX_SERVICE_ROWS}
-                      >
-                        + Add service
-                      </button>
-                    </div>
-                    <div className="space-y-2">
-                      {brandVoice.services.map((service, index) => (
-                        <input
-                          key={`service-${index}`}
-                          className="w-full rounded-2xl border border-slate-200 px-3 py-2"
-                          placeholder={`Service ${index + 1}`}
-                          value={service}
-                          onChange={(event) =>
-                            setBrandVoice((prev) => {
-                              const next = [...prev.services];
-                              next[index] = event.target.value;
-                              return { ...prev, services: next };
-                            })
-                          }
-                        />
-                      ))}
-                    </div>
-                  </div>
-                  <label className="block">
-                    <span className="text-slate-600">Optional: Paste a link to your current website (if any)</span>
+                {orgInfo.secondaryLocations.map((value, index) => (
+                  <div key={`secondary-${index}`} className="grid gap-2 md:grid-cols-2">
                     <input
-                      type="url"
-                      className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
-                      placeholder="https://www.yourbusiness.com"
-                      value={brandVoice.websiteText}
-                      onChange={(event) => setBrandVoice((prev) => ({ ...prev, websiteText: event.target.value }))}
+                      className="w-full rounded-2xl border border-slate-200 px-3 py-2"
+                      placeholder={`City ${index + 1}`}
+                      value={value.city}
+                      onChange={(event) =>
+                        setOrgInfo((prev) => {
+                          const next = [...prev.secondaryLocations];
+                          next[index] = { ...next[index], city: event.target.value };
+                          return { ...prev, secondaryLocations: next };
+                        })
+                      }
                     />
-                  </label>
-                  <div className="rounded-2xl bg-slate-50 p-4 text-sm">
-                    <p className="text-xs font-semibold text-slate-500">Preview</p>
-                    <p className="text-slate-700">
-                      {brandVoice.tone} tone with services{" "}
-                      {brandVoice.services.map((service) => service.trim()).filter(Boolean).join(", ") || "—"}.
-                    </p>
+                    <input
+                      className="w-full rounded-2xl border border-slate-200 px-3 py-2"
+                      placeholder={`State ${index + 1}`}
+                      value={value.state}
+                      onChange={(event) =>
+                        setOrgInfo((prev) => {
+                          const next = [...prev.secondaryLocations];
+                          next[index] = { ...next[index], state: event.target.value };
+                          return { ...prev, secondaryLocations: next };
+                        })
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <label className="block">
+                <span className="flex items-center justify-between text-slate-600">
+                  <span>Website</span>
+                  <span className={`rounded-full px-2 py-0.5 text-xs ${fieldOriginMeta("websiteText", brandVoice.websiteText).className}`}>
+                    {fieldOriginMeta("websiteText", brandVoice.websiteText).label}
+                  </span>
+                </span>
+                <input
+                  type="url"
+                  className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
+                  placeholder="https://www.yourbusiness.com"
+                  value={brandVoice.websiteText}
+                  onChange={(event) => setBrandVoice((prev) => ({ ...prev, websiteText: event.target.value }))}
+                />
+              </label>
+
+              <div className="space-y-3">
+                <p className="text-sm font-semibold text-slate-800">Brand voice</p>
+                <label className="block">
+                  <span className="text-slate-600">Tone</span>
+                  <select
+                    className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
+                    value={brandVoice.tone}
+                    onChange={(event) => setBrandVoice((prev) => ({ ...prev, tone: event.target.value }))}
+                  >
+                    {toneOptions.map((tone) => (
+                      <option key={tone}>{tone}</option>
+                    ))}
+                  </select>
+                </label>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs font-semibold text-slate-500">Tone examples</p>
+                  <div className="mt-2 space-y-2">
+                    {toneOptions.map((tone) => (
+                      <div
+                        key={`tone-example-${tone}`}
+                        className={`rounded-xl border px-3 py-2 text-xs ${
+                          brandVoice.tone === tone ? "border-primary/40 bg-white text-slate-900" : "border-slate-200 text-slate-700"
+                        }`}
+                      >
+                        <p className="font-semibold">{tone}</p>
+                        <p>{toneSentenceSamples[tone]}</p>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
-              {createOrgError && <p className="text-sm text-rose-600">{createOrgError}</p>}
               {businessSetupSaved && (
                 <p className="text-xs text-emerald-600">
-                  Business setup is saved for this account. Organization ID <span className="font-mono">{organizationId}</span>
+                  Saved for organization <span className="font-mono">{organizationId}</span>
                 </p>
               )}
             </div>
           )}
 
           {currentStep === 2 && (
+            <div className="space-y-5">
+              <div>
+                <h2 className="text-xl font-semibold">Confirm services + descriptions</h2>
+                <p className="text-sm text-slate-600">
+                  Imported services are editable. Add, remove, or update anything before final checkout.
+                </p>
+              </div>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-slate-600">Services with names: {namedServicesCount}</p>
+                <button
+                  type="button"
+                  className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700"
+                  onClick={() => {
+                    setServices((prev) =>
+                      prev.length >= MAX_SERVICE_ROWS
+                        ? prev
+                        : [...prev, { name: "", description: "", source: "manual" }],
+                    );
+                    setServiceError(null);
+                  }}
+                  disabled={services.length >= MAX_SERVICE_ROWS}
+                >
+                  + Add service
+                </button>
+              </div>
+              {services.length === 0 && (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  No services imported from GBP. Add at least one service to continue.
+                </div>
+              )}
+              {serviceError && <p className="text-sm text-rose-600">{serviceError}</p>}
+              {serviceGenerationError && <p className="text-sm text-rose-600">{serviceGenerationError}</p>}
+              <div className="space-y-3">
+                {services.map((service, index) => {
+                  const missingDescription = service.name.trim() && !service.description.trim();
+                  return (
+                    <div key={`service-${index}`} className="rounded-2xl border border-slate-200 p-4">
+                      <div className="grid gap-3 md:grid-cols-[1fr,auto]">
+                        <label className="block">
+                          <span className="text-sm text-slate-600">Service name</span>
+                          <input
+                            className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
+                            placeholder={`Service ${index + 1}`}
+                            value={service.name}
+                            onChange={(event) => {
+                              const nextName = event.target.value;
+                              setServices((prev) => {
+                                const next = [...prev];
+                                next[index] = { ...next[index], name: nextName };
+                                return next;
+                              });
+                            }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="self-end rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700"
+                          onClick={() => {
+                            setServices((prev) => prev.filter((_, rowIndex) => rowIndex !== index));
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <label className="mt-3 block">
+                        <span className="text-sm text-slate-600">Description</span>
+                        <textarea
+                          className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
+                          rows={3}
+                          placeholder="Add a concise, professional description for this service."
+                          value={service.description}
+                          onChange={(event) => {
+                            const nextDescription = event.target.value;
+                            setServices((prev) => {
+                              const next = [...prev];
+                              next[index] = {
+                                ...next[index],
+                                description: nextDescription,
+                                source: next[index].source === "imported" ? "manual" : next[index].source,
+                              };
+                              return next;
+                            });
+                          }}
+                        />
+                      </label>
+                      {missingDescription && (
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <span className="text-xs text-amber-700">Description missing.</span>
+                          <button
+                            type="button"
+                            className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 disabled:opacity-60"
+                            onClick={() => {
+                              void handleGenerateServiceDescription(index);
+                            }}
+                            disabled={generatingServiceIndex === index || !service.name.trim()}
+                          >
+                            {generatingServiceIndex === index ? "Generating…" : "AI generate"}
+                          </button>
+                          <span className="text-xs text-slate-500">Or write manually in the field above.</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {servicesMissingDescriptions.length > 0 && (
+                <p className="text-sm text-amber-700">
+                  {servicesMissingDescriptions.length} service description
+                  {servicesMissingDescriptions.length === 1 ? "" : "s"} still missing.
+                </p>
+              )}
+            </div>
+          )}
+
+          {currentStep === 3 && (
             <div className="space-y-4">
-              <h2 className="text-xl font-semibold">Sign up for Stripe</h2>
+              <h2 className="text-xl font-semibold">Stripe signup (final step)</h2>
               <p className="text-sm text-slate-600">
                 You are signing up for the Map Pack 3 service plan at <span className="font-semibold">$5/month</span>.
               </p>
@@ -1514,10 +2334,10 @@ function OnboardingContent() {
                 </Elements>
               ) : stripeStarted ? (
                 <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                  Payment received. Your subscription is active and you can continue onboarding.
+                  Payment received. Your subscription is active and you can finish onboarding.
                 </div>
               ) : (
-                <p className="text-sm text-amber-600">Add business info first so the payment form can load.</p>
+                <p className="text-sm text-amber-600">Complete prior steps first so checkout can initialize.</p>
               )}
               <div className="space-y-3 rounded-2xl border border-slate-200 p-4">
                 <p className="text-sm text-slate-700">
@@ -1555,55 +2375,6 @@ function OnboardingContent() {
               </div>
             </div>
           )}
-
-          {currentStep === 3 && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-xl font-semibold">Connect Google Business Profile</h2>
-                <p className="text-sm text-slate-600">Authorize Map Pack 3 so we can read listings and post on your behalf.</p>
-              </div>
-              <button
-                className="flex items-center justify-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
-                onClick={handleConnectGoogle}
-                disabled={googleConnected || connectingGoogle || !organizationId}
-              >
-                {googleConnected ? "Google Connected ✓" : connectingGoogle ? "Redirecting…" : "Connect Google"}
-              </button>
-              {!googleConnected && (
-                <p className="text-xs text-slate-500">
-                  No GBP account yet? You can continue now and connect Google later from the dashboard.
-                </p>
-              )}
-              {!organizationId && (
-                <p className="text-xs text-amber-600">Create the organization first to unlock the Google connect button.</p>
-              )}
-              {googleConnected && (
-                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-600">
-                  Success! We can now fetch your GBP locations.
-                </div>
-              )}
-              {connectError && <p className="text-sm text-rose-600">{connectError}</p>}
-            </div>
-          )}
-
-          {currentStep === 4 && (
-            <div className="space-y-4 text-center">
-              <h2 className="text-2xl font-semibold">All set!</h2>
-              <p className="text-sm text-slate-600">Your next automated post is scheduled for {scheduledDate}.</p>
-              <p className="text-sm text-slate-600">
-                After setup, all onboarding information can still be edited later from your dashboard settings.
-              </p>
-              <button
-                className="inline-block rounded-full bg-primary px-6 py-3 text-sm font-semibold text-white disabled:opacity-50"
-                onClick={() => {
-                  void handleFinishOnboarding();
-                }}
-                disabled={finalizingOnboarding || savingProgress}
-              >
-                {finalizingOnboarding || savingProgress ? "Finalizing..." : "Go to dashboard"}
-              </button>
-            </div>
-          )}
         </section>
 
         {progressError && <p className="text-sm text-rose-600">{progressError}</p>}
@@ -1616,38 +2387,34 @@ function OnboardingContent() {
           >
             Back
           </button>
-          {!completed && (
-            <button
-              className="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
-              onClick={() => {
-                void handleContinue();
-              }}
-              disabled={
-                nextDisabled ||
-                creatingOrg ||
-                savingProgress ||
-                (currentStep === 2 && (stripeLoading || stripeSubmitting || (!stripeStarted && !stripeClientSecret)))
-              }
-            >
-              {currentStep === 2
-                ? stripeStarted
-                  ? "Continue"
+          <button
+            className="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            onClick={() => {
+              void handleContinue();
+            }}
+            disabled={
+              nextDisabled ||
+              creatingOrg ||
+              savingProgress ||
+              finalizingOnboarding ||
+              connectingGoogleLocation ||
+              (currentStep === 3 && (stripeLoading || stripeSubmitting || (!stripeStarted && !stripeClientSecret)))
+            }
+          >
+            {currentStep === 3
+              ? finalizingOnboarding
+                ? "Finishing…"
+                : stripeStarted
+                  ? "Finish onboarding"
                   : stripeSubmitting
-                  ? "Processing…"
-                  : "Pay & continue"
-                : currentStep === 0
-                  ? settingPassword
-                    ? "Saving…"
-                    : passwordAlreadySet && !hasPasswordInput
-                      ? "Continue"
-                      : "Save password"
-                  : savingProgress
-                  ? "Saving…"
-                  : creatingOrg && currentStep === 1
-                    ? "Creating…"
-                    : "Continue"}
-            </button>
-          )}
+                    ? "Processing…"
+                    : "Pay & finish"
+              : savingProgress
+                ? "Saving…"
+                : creatingOrg && currentStep === 0
+                  ? "Preparing…"
+                  : "Continue"}
+          </button>
         </div>
       </div>
     </div>

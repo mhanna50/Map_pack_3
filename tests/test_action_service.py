@@ -67,5 +67,33 @@ def test_mark_success_records_results(db_session):
     assert due_action.status == ActionStatus.SUCCEEDED
     assert due_action.result == result_payload
     assert due_action.error is None
+
+
+def test_legacy_action_path_ensures_tenant_row(db_session, monkeypatch):
+    org = Organization(name="Legacy Tenant Org", org_type=OrganizationType.BUSINESS)
+    db_session.add(org)
+    db_session.commit()
+
+    service = ActionService(db_session)
+    captured = {}
+
+    def _spy_ensure_tenant_row(db, *, tenant_id, business_name, tenant_type, slug=None, plan_tier="starter"):
+        captured["tenant_id"] = tenant_id
+        captured["business_name"] = business_name
+        captured["tenant_type"] = tenant_type
+        captured["slug"] = slug
+        captured["plan_tier"] = plan_tier
+
+    monkeypatch.setattr("backend.app.services.actions.ensure_tenant_row", _spy_ensure_tenant_row)
+
+    service._ensure_legacy_tenant_row(org.id)
+
+    assert captured["tenant_id"] == org.id
+    assert captured["business_name"] == org.name
+    assert captured["tenant_type"] == org.org_type
+    assert captured["slug"] == org.slug
+    assert captured["plan_tier"] == org.plan_tier
+
+
 def _ensure_aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)

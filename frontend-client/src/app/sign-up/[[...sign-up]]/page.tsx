@@ -27,7 +27,7 @@ export default function Page() {
       if (authError) {
         throw authError;
       }
-      const redirect = searchParams?.get("redirect") || "/onboarding";
+      const redirect = searchParams?.get("redirect") || "/dashboard";
       router.push(redirect);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign up");

@@ -29,3 +29,4 @@ class ClientUpload(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     organization = relationship("Organization")
     location = relationship("Location")
     media_asset = relationship("MediaAsset")
+ 

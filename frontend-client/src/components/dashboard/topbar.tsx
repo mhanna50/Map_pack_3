@@ -25,7 +25,7 @@ export function Topbar({ onRefresh }: { onRefresh?: () => void }) {
   return (
     <header className="sticky top-4 z-30 flex items-center justify-between rounded-2xl border border-border bg-white/90 px-4 py-3 shadow-sm backdrop-blur">
       <div className="flex items-center gap-3">
-        <div className="rounded-xl bg-primary/10 px-3 py-2 text-xs font-semibold text-primary">{tenant?.plan ?? "Workspace"}</div>
+        <div className="rounded-xl bg-primary/10 px-3 py-2 text-xs font-semibold text-primary">Map Pack 3</div>
         <div>
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Client</p>
           <p className="text-sm font-semibold">{tenant?.business_name ?? "Loading..."}</p>

@@ -7,6 +7,7 @@ import uuid
 from sqlalchemy.orm import Session
 
 from backend.app.models.enums import ActionType, PostStatus, PostType, ApprovalCategory
+from backend.app.models.location import Location
 from backend.app.models.post import Post
 from backend.app.models.post_media_attachment import PostMediaAttachment
 from backend.app.models.post_variant import PostVariant
@@ -112,6 +113,7 @@ class PostService:
             asset = self.db.get(MediaAsset, media_asset_id)
             if asset:
                 asset.last_used_at = datetime.now(timezone.utc)
+                asset.usage_count = int(asset.usage_count or 0) + 1
                 self.db.add(asset)
 
         brand_voice = brand_voice or {"tone": merged_settings.get("tone_of_voice")}
@@ -165,6 +167,7 @@ class PostService:
         attachment = PostMediaAttachment(post_id=post.id, media_asset_id=asset.id)
         self.db.add(attachment)
         asset.last_used_at = datetime.now(timezone.utc)
+        asset.usage_count = int(asset.usage_count or 0) + 1
         self.db.add(asset)
         self.db.commit()
 
@@ -200,10 +203,30 @@ class PostService:
         }
 
     def auto_select_media(
-        self, *, location_id: uuid.UUID, theme: str | None = None
+        self,
+        *,
+        location_id: uuid.UUID,
+        theme: str | None = None,
+        service: str | None = None,
+        organization_id: uuid.UUID | None = None,
     ) -> MediaAsset | None:
-        selector = MediaSelector(self.db)
-        return selector.pick_asset(location_id=location_id, theme=theme)
+        org_id = organization_id
+        if org_id is None:
+            location = self.db.get(Location, location_id)
+            org_id = location.organization_id if location else None
+        reuse_days = 14
+        if org_id:
+            merged_settings = self.settings.merged(org_id, location_id)
+            reuse_days = int(merged_settings.get("photo_reuse_gap_days", 14))
+        selector = MediaSelector(self.db, freshness_days=reuse_days)
+        return selector.pick_asset(
+            location_id=location_id,
+            theme=theme,
+            service=service,
+            prefer_upload=True,
+            min_reuse_gap_days=reuse_days,
+            mark_used=False,
+        )
 
     def _schedule_publish_action(self, post: Post) -> None:
         if not post.scheduled_at:

@@ -25,12 +25,11 @@ const tabItems = [
 ];
 
 export default function SettingsPage() {
-  const { tenant, tenantId, locations } = useTenant();
+  const { tenantId } = useTenant();
   const [tab, setTab] = useState("account");
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [loadingSub, setLoadingSub] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
-  const [pricingOpen, setPricingOpen] = useState(false);
 
   useEffect(() => {
     if (!tenantId) return;
@@ -49,9 +48,6 @@ export default function SettingsPage() {
     };
   }, [tenantId]);
 
-  const includedLocations = subscription?.seats_or_locations ?? 3;
-  const usedLocations = locations.length;
-
   return (
     <DashboardShell>
       <div className="space-y-5">
@@ -60,7 +56,7 @@ export default function SettingsPage() {
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Settings</p>
             <h1 className="text-2xl font-semibold">Account, billing, and preferences</h1>
           </div>
-          <Badge variant="muted">{tenant?.plan ?? "Plan"}</Badge>
+          <Badge variant="muted">Map Pack 3</Badge>
         </header>
 
         <Tabs tabs={tabItems} value={tab} onValueChange={setTab} />
@@ -71,9 +67,6 @@ export default function SettingsPage() {
           <BillingTab
             subscription={subscription}
             loading={loadingSub}
-            included={includedLocations}
-            used={usedLocations}
-            onAddLocation={() => setPricingOpen(true)}
             onCancel={() => setCancelOpen(true)}
           />
         )}
@@ -89,21 +82,6 @@ export default function SettingsPage() {
           <Button variant="destructive" onClick={() => setCancelOpen(false)}>
             Confirm cancel
           </Button>
-        </div>
-      </Dialog>
-
-      <Dialog open={pricingOpen} onOpenChange={setPricingOpen} title="Add locations" description="Upgrade to add more locations.">
-        <div className="space-y-2 text-sm">
-          <p>Each additional location adds scheduling and review automation.</p>
-          <div className="rounded-lg border border-dashed border-border bg-muted/40 p-3">
-            Pricing modal placeholder — connect to your billing portal.
-          </div>
-        </div>
-        <div className="flex items-center justify-end gap-2 border-t border-border px-6 py-3">
-          <Button variant="ghost" onClick={() => setPricingOpen(false)}>
-            Close
-          </Button>
-          <Button onClick={() => setPricingOpen(false)}>Proceed</Button>
         </div>
       </Dialog>
     </DashboardShell>
@@ -186,20 +164,14 @@ function AccessibilityTab() {
 function BillingTab({
   subscription,
   loading,
-  included,
-  used,
-  onAddLocation,
   onCancel,
 }: {
   subscription: Subscription | null;
   loading: boolean;
-  included: number;
-  used: number;
-  onAddLocation: () => void;
   onCancel: () => void;
 }) {
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid gap-4">
       <Card>
         <CardHeader>
           <CardTitle>Current plan</CardTitle>
@@ -208,7 +180,7 @@ function BillingTab({
         <CardContent className="space-y-2 text-sm">
           <div className="flex items-center justify-between">
             <span>Plan</span>
-            <span className="font-semibold">{subscription?.plan ?? "Not set"}</span>
+            <span className="font-semibold">Map Pack 3</span>
           </div>
           <div className="flex items-center justify-between">
             <span>Status</span>
@@ -222,36 +194,9 @@ function BillingTab({
               {subscription?.current_period_end ? new Date(subscription.current_period_end).toLocaleDateString() : "—"}
             </span>
           </div>
-          <div className="flex items-center justify-between">
-            <span>Included locations</span>
-            <span className="font-semibold">{included}</span>
-          </div>
           <Button variant="destructive" onClick={onCancel}>
             Cancel subscription
           </Button>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Add locations</CardTitle>
-          <CardDescription>Usage vs included seats</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <div className="flex items-center justify-between">
-            <span>Used</span>
-            <span className="font-semibold">
-              {used} / {included}
-            </span>
-          </div>
-          <div className="h-2 w-full overflow-hidden rounded-full bg-border">
-            <div
-              className="h-full rounded-full bg-primary"
-              style={{ width: `${Math.min(100, (used / included) * 100 || 0)}%` }}
-            />
-          </div>
-          <Button onClick={onAddLocation}>Add another location</Button>
-          <p className="text-xs text-muted-foreground">Opens pricing modal placeholder. Connect to Stripe/Braintree portal.</p>
         </CardContent>
       </Card>
     </div>

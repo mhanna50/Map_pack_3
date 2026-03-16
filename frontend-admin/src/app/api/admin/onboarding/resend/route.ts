@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminUser, upsertPendingOnboarding } from "@/lib/adminDb";
+import { isOnboardingInviteResendReady, requireAdminUser, upsertPendingOnboarding } from "@/lib/adminDb";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
 
 export async function POST(request: NextRequest) {
@@ -9,6 +9,17 @@ export async function POST(request: NextRequest) {
     const normalizedEmail = String(email ?? "").trim().toLowerCase();
     if (!normalizedEmail) {
       return NextResponse.json({ error: "email is required" }, { status: 400 });
+    }
+
+    const resendGate = await isOnboardingInviteResendReady(normalizedEmail);
+    if (!resendGate.ready) {
+      return NextResponse.json(
+        {
+          error: resendGate.reason ?? "Resend is only available after invite cancel cleanup is complete.",
+          status: "resend_blocked",
+        },
+        { status: 409 },
+      );
     }
 
     const guard = emailRateGuard(normalizedEmail);

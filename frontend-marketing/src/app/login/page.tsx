@@ -6,128 +6,57 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
 const calendlyUrl = "https://calendly.com";
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 const CLIENT_APP_URL = process.env.NEXT_PUBLIC_CLIENT_APP_URL ?? "http://localhost:3000";
 const ADMIN_APP_URL = process.env.NEXT_PUBLIC_ADMIN_APP_URL ?? "http://localhost:3002";
-const ADMIN_ROLE_VALUES = new Set(["admin", "staff", "owner", "super_admin", "superadmin"]);
-const COMPLETED_PENDING_STATUSES = new Set(["google_pending", "google_connected", "completed", "activated"]);
-const ACTIVE_BILLING_STATUSES = new Set(["active", "trialing", "past_due"]);
-const ONBOARDING_STATUS_RANK: Record<string, number> = {
-  in_progress: 0,
-  business_setup: 1,
-  stripe_pending: 2,
-  stripe_started: 3,
-  google_pending: 4,
-  google_connected: 5,
-  completed: 6,
-  activated: 6,
-  canceled: -1,
+const INVALID_ROLE_MESSAGE =
+  "Invalid role. This account is not assigned to owner/admin or client access.";
+
+type PostLoginRole = "owner_admin" | "client" | "invalid";
+type PostLoginResolution = {
+  role: PostLoginRole;
+  destination: string;
 };
 
-const inferIsAdmin = (role?: string | null, isStaff?: boolean | null) => {
-  if (isStaff) return true;
-  if (!role || typeof role !== "string") return false;
-  return ADMIN_ROLE_VALUES.has(role.toLowerCase());
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const asString = (value: unknown): string | null =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+
+const firstRpcRow = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+  return value;
 };
 
-const normalizeStatus = (value: unknown): string => String(value ?? "").trim().toLowerCase();
-
-const extractTenantIds = (rows: Array<{ tenant_id?: unknown }> | null | undefined): string[] =>
-  (rows ?? [])
-    .map((row) => (typeof row.tenant_id === "string" && row.tenant_id.trim() ? row.tenant_id.trim() : null))
-    .filter((value): value is string => Boolean(value));
-
-const sortPendingRows = <T extends { status?: unknown; invited_at?: string | null }>(rows: T[]): T[] =>
-  [...rows].sort((a, b) => {
-    const leftTime = a.invited_at ? Date.parse(a.invited_at) : 0;
-    const rightTime = b.invited_at ? Date.parse(b.invited_at) : 0;
-    if (rightTime !== leftTime) return rightTime - leftTime;
-    const left = ONBOARDING_STATUS_RANK[normalizeStatus(a.status)] ?? -999;
-    const right = ONBOARDING_STATUS_RANK[normalizeStatus(b.status)] ?? -999;
-    return right - left;
-  });
-
-const pickPreferredPendingRow = <T extends { status?: unknown; invited_at?: string | null; tenant_id?: unknown }>(
-  rows: T[] | null | undefined,
-  tenantHints?: Set<string>,
-): T | null => {
-  if (!rows?.length) return null;
-
-  if (tenantHints && tenantHints.size > 0) {
-    const tenantMatched = rows.filter(
-      (row) => typeof row.tenant_id === "string" && tenantHints.has(row.tenant_id),
-    );
-    if (tenantMatched.length > 0) {
-      return sortPendingRows(tenantMatched)[0];
-    }
+const normalizePostLoginResolution = (rpcData: unknown): PostLoginResolution => {
+  const row = asRecord(firstRpcRow(rpcData));
+  if (!row) {
+    return { role: "invalid", destination: "/sign-in?error=invalid_role" };
   }
 
-  const unclaimedRows = rows.filter((row) => row.tenant_id === null || row.tenant_id === undefined || row.tenant_id === "");
-  if (unclaimedRows.length > 0) {
-    return sortPendingRows(unclaimedRows)[0];
-  }
+  const roleRaw = asString(row.role)?.toLowerCase();
+  const role: PostLoginRole =
+    roleRaw === "owner_admin" || roleRaw === "client" ? roleRaw : "invalid";
 
-  return sortPendingRows(rows)[0];
+  const destinationRaw = asString(row.destination);
+  const destination =
+    destinationRaw && destinationRaw.startsWith("/")
+      ? destinationRaw
+      : role === "owner_admin"
+      ? "/admin"
+      : role === "client"
+      ? "/dashboard"
+      : "/sign-in?error=invalid_role";
+
+  return {
+    role,
+    destination,
+  };
 };
-
-const pickTenantId = (
-  rows: Array<{ tenant_id?: string | null }> | null | undefined,
-): string | null => {
-  return extractTenantIds(rows)[0] ?? null;
-};
-
-async function isClientOnboardingCompleted(
-  supabase: ReturnType<typeof createClient>,
-  userId: string,
-  email: string,
-): Promise<boolean> {
-  const normalizedEmail = email.trim().toLowerCase();
-  const [pendingResult, profileResult, membershipResult] = await Promise.all([
-    supabase
-      .from("pending_onboarding")
-      .select("status, tenant_id, invited_at")
-      .ilike("email", normalizedEmail)
-      .limit(50),
-    supabase.from("profiles").select("tenant_id").eq("user_id", userId).limit(50),
-    supabase.from("memberships").select("tenant_id").eq("user_id", userId).limit(50),
-  ]);
-
-  if (pendingResult.error) throw pendingResult.error;
-  if (profileResult.error) throw profileResult.error;
-  if (membershipResult.error) throw membershipResult.error;
-
-  const pendingRows = pendingResult.data ?? [];
-  const tenantHints = new Set([
-    ...extractTenantIds(profileResult.data ?? []),
-    ...extractTenantIds(membershipResult.data ?? []),
-  ]);
-  const preferredPending = pickPreferredPendingRow(pendingRows, tenantHints);
-  const pendingCompleted = COMPLETED_PENDING_STATUSES.has(normalizeStatus(preferredPending?.status));
-  const tenantId =
-    pickTenantId(profileResult.data ?? []) ??
-    pickTenantId(membershipResult.data ?? []) ??
-    preferredPending?.tenant_id ??
-    null;
-
-  if (!tenantId) {
-    return pendingCompleted;
-  }
-
-  const [tenantResult, billingResult] = await Promise.all([
-    supabase.from("tenants").select("status").eq("tenant_id", tenantId).limit(1),
-    supabase.from("billing_subscriptions").select("status").eq("tenant_id", tenantId).limit(50),
-  ]);
-
-  if (tenantResult.error) throw tenantResult.error;
-  if (billingResult.error) throw billingResult.error;
-
-  const tenantActive = normalizeStatus(tenantResult.data?.[0]?.status) === "active";
-  const hasActiveBilling = (billingResult.data ?? []).some((row) =>
-    ACTIVE_BILLING_STATUSES.has(normalizeStatus(row.status)),
-  );
-
-  return pendingCompleted || tenantActive || hasActiveBilling;
-}
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -150,48 +79,29 @@ export default function LoginPage() {
       }
 
       const session = data.session ?? (await supabase.auth.getSession()).data.session;
-      const token = session?.access_token;
-      if (!token) {
+      if (!session?.user?.id) {
         throw new Error("Session missing after sign-in.");
       }
 
-      let isAdmin = false;
-      try {
-        const response = await fetch(`${API_BASE_URL}/auth/me`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        if (response.ok) {
-          const profile = await response.json();
-          isAdmin = Boolean(profile?.is_staff);
-        }
-      } catch {
-        // fall back to Supabase metadata checks below
+      const { data: routeData, error: routeError } = await supabase.rpc(
+        "resolve_post_login_destination",
+      );
+      if (routeError) {
+        throw routeError;
       }
 
-      if (!isAdmin) {
-        const user = session?.user;
-        const role = user?.app_metadata?.role ?? user?.user_metadata?.role;
-        const isStaff = user?.app_metadata?.is_staff ?? user?.user_metadata?.is_staff;
-        isAdmin = inferIsAdmin(role ?? null, isStaff ?? null);
+      const route = normalizePostLoginResolution(routeData);
+      if (route.role === "invalid") {
+        await supabase.auth.signOut();
+        throw new Error(INVALID_ROLE_MESSAGE);
       }
 
-      let targetUrl = ADMIN_APP_URL;
-      if (!isAdmin) {
-        const userId = session?.user?.id;
-        const userEmail = session?.user?.email ?? email.trim().toLowerCase();
-        if (!userId || !userEmail) {
-          throw new Error("Unable to verify account onboarding status.");
-        }
+      const adminBase = ADMIN_APP_URL.replace(/\/$/, "");
+      const clientBase = CLIENT_APP_URL.replace(/\/$/, "");
+      const targetUrl = route.role === "owner_admin"
+        ? `${adminBase}/admin`
+        : `${clientBase}${route.destination.startsWith("/") ? route.destination : "/dashboard"}`;
 
-        const onboardingCompleted = await isClientOnboardingCompleted(supabase, userId, userEmail);
-        const clientBase = CLIENT_APP_URL.replace(/\/$/, "");
-        targetUrl = onboardingCompleted ? `${clientBase}/dashboard` : `${clientBase}/onboarding`;
-      }
-      if (!targetUrl) {
-        throw new Error("Dashboard URL configuration is missing.");
-      }
       window.location.assign(targetUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign in");

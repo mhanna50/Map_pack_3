@@ -20,6 +20,13 @@ const ONBOARDING_STATUS_RANK = {
 } as const;
 
 type OnboardingStatus = keyof typeof ONBOARDING_STATUS_RANK;
+const MAX_ONBOARDING_STEP_INDEX = 3;
+const ONBOARDING_STEP_LABELS = ["google_profile", "business_info", "services", "stripe"] as const;
+
+const describeOnboardingStep = (step: number | null): string => {
+  if (step === null) return "unknown";
+  return ONBOARDING_STEP_LABELS[step] ?? `step_${step}`;
+};
 
 const normalizeOnboardingStatus = (value: unknown): OnboardingStatus => {
   if (typeof value === "string" && value in ONBOARDING_STATUS_RANK) {
@@ -113,6 +120,54 @@ const getDraftFromPendingRow = (row: Record<string, unknown> | null): Record<str
     return row.metadata.onboarding_draft;
   }
   return null;
+};
+
+const getPasswordSetAtFromPendingRow = (row: Record<string, unknown> | null): string | null => {
+  if (!row) return null;
+  const direct = asString(row.password_set_at);
+  if (direct) return direct;
+  const draft = getDraftFromPendingRow(row);
+  return asString(draft?.passwordSetAt);
+};
+
+const statusToResumeStep = (status: unknown, passwordSetAt: string | null): number => {
+  const normalized = normalizeOnboardingStatus(status);
+  switch (normalized) {
+    case "business_setup":
+      return 1;
+    case "stripe_pending":
+      return 2;
+    case "stripe_started":
+      return 3;
+    case "google_pending":
+    case "google_connected":
+    case "completed":
+    case "activated":
+      return 3;
+    default:
+      return 0;
+  }
+};
+
+const deriveResumeStepFromPendingRow = (
+  row: Record<string, unknown> | null,
+  statusOverride?: unknown,
+  passwordSetAtOverride?: string | null,
+): number => {
+  const status = statusOverride ?? row?.status ?? "in_progress";
+  const passwordSetAt = passwordSetAtOverride ?? getPasswordSetAtFromPendingRow(row);
+  return statusToResumeStep(status, passwordSetAt);
+};
+
+const normalizeStepIndex = (value: unknown): number | null => {
+  const numeric = typeof value === "number"
+    ? value
+    : typeof value === "string" && value.trim()
+      ? Number(value.trim())
+      : Number.NaN;
+  if (!Number.isInteger(numeric)) return null;
+  if (numeric < 0 || numeric > MAX_ONBOARDING_STEP_INDEX) return null;
+  return numeric;
 };
 
 const applyPendingRowMatch = <T>(query: T, row: Record<string, unknown> | null, email: string): T => {
@@ -235,19 +290,48 @@ export async function POST(request: NextRequest) {
   recent.push(now);
   store.set(key, recent);
   if (recent.length > limit) {
+    console.warn("[onboarding/save] rate_limited", {
+      userId: user.id,
+      email: user.email,
+      recentCount: recent.length,
+    });
     return NextResponse.json({ error: "Too many requests" }, { status: 429 });
   }
 
   const body = (await request.json()) as Record<string, unknown>;
   const svc = createServiceClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
   const email = user.email.trim().toLowerCase();
+  const clientStep = normalizeStepIndex(body.client_step);
+  const clientStepLabel = describeOnboardingStep(clientStep);
+  const requestedStatus = body.status ?? "in_progress";
+  const requestedTenantId = asString(body.tenant_id);
+  console.info("[onboarding/save] request", {
+    userId: user.id,
+    email,
+    step: clientStepLabel,
+    clientStep,
+    requestedStatus,
+    tenantId: requestedTenantId,
+  });
+
   const expectedInviteEmail =
     typeof body.expected_email === "string" && body.expected_email.trim()
       ? body.expected_email.trim().toLowerCase()
       : null;
   if (expectedInviteEmail && expectedInviteEmail !== email) {
+    console.warn("[onboarding/save] invite_email_mismatch", {
+      userId: user.id,
+      signedInEmail: email,
+      inviteEmail: expectedInviteEmail,
+      step: clientStepLabel,
+    });
     return NextResponse.json(
-      { error: `Invite email mismatch. Signed in as ${email}, invite is for ${expectedInviteEmail}.` },
+      {
+        error: `Invite email mismatch. Signed in as ${email}, invite is for ${expectedInviteEmail}.`,
+        code: "invite_email_mismatch",
+        signed_in_email: email,
+        invite_email: expectedInviteEmail,
+      },
       { status: 409 },
     );
   }
@@ -261,6 +345,7 @@ export async function POST(request: NextRequest) {
       .from("pending_onboarding")
       .select("*")
       .ilike("email", email)
+      .not("invited_by_admin_user_id", "is", "null")
       .limit(50),
     svc
       .from("profiles")
@@ -274,6 +359,12 @@ export async function POST(request: NextRequest) {
       .limit(50),
   ]);
   if (fetchErr) {
+    console.warn("[onboarding/save] pending_lookup_failed", {
+      userId: user.id,
+      email,
+      step: clientStepLabel,
+      error: fetchErr.message,
+    });
     return NextResponse.json({ error: fetchErr.message }, { status: 400 });
   }
   if (profileErr) {
@@ -296,9 +387,22 @@ export async function POST(request: NextRequest) {
   ]);
   const existing = pickPreferredPendingRow(existingRows, tenantHints);
   const existingRecord = (existing ?? null) as Record<string, unknown> | null;
+  const existingTenantId = asString(existingRecord?.tenant_id);
+  const profileTenantIds = extractTenantIds(profileRows);
+  const membershipTenantIds = extractTenantIds(membershipRows);
+  const knownTenantIds = new Set([
+    ...profileTenantIds,
+    ...membershipTenantIds,
+    ...(existingTenantId ? [existingTenantId] : []),
+  ]);
   if (!existing) {
     const exempt = await isStaffUser(svc, user.id);
     if (exempt) {
+      console.warn("[onboarding/save] blocked_staff_account", {
+        userId: user.id,
+        email,
+        step: clientStepLabel,
+      });
       return NextResponse.json(
         {
           error: `Staff account (${email}) cannot create onboarding records. Sign in with the invited client account.`,
@@ -306,12 +410,146 @@ export async function POST(request: NextRequest) {
         { status: 403 },
       );
     }
+    console.warn("[onboarding/save] invite_required", {
+      userId: user.id,
+      email,
+      step: clientStepLabel,
+    });
+    return NextResponse.json(
+      {
+        error: "Invite required. Ask an admin to send you an onboarding invite link.",
+        code: "invite_required",
+      },
+      { status: 403 },
+    );
+  }
+
+  if (normalizeOnboardingStatus(existing.status) === "canceled") {
+    console.warn("[onboarding/save] invite_canceled", {
+      userId: user.id,
+      email,
+      step: clientStepLabel,
+    });
+    return NextResponse.json(
+      {
+        error: "Invite canceled. Ask an admin for a new onboarding link.",
+        code: "invite_canceled",
+      },
+      { status: 410 },
+    );
   }
 
   const pendingColumns = await detectPendingColumns(svc, existingRecord);
-  const requestedStatus = body.status ?? existingRecord?.status ?? "in_progress";
+  const requestedStatusWithFallback = body.status ?? existingRecord?.status ?? "in_progress";
   const mergedStatus = mergeOnboardingStatus(existingRecord?.status, requestedStatus);
+  const existingPasswordSetAt = getPasswordSetAtFromPendingRow(existingRecord);
+  const resumeStepBeforeSave = deriveResumeStepFromPendingRow(existingRecord, existingRecord?.status, existingPasswordSetAt);
+  if (body.client_step !== undefined && clientStep === null) {
+    console.warn("[onboarding/save] invalid_client_step", {
+      userId: user.id,
+      email,
+      rawClientStep: body.client_step,
+      currentResumeStep: resumeStepBeforeSave,
+    });
+    return NextResponse.json(
+      { error: "Invalid client_step. Expected an integer from 0 to 3." },
+      { status: 400 },
+    );
+  }
+  if (clientStep !== null) {
+    if (clientStep < resumeStepBeforeSave) {
+      console.warn("[onboarding/save] step_already_completed", {
+        userId: user.id,
+        email,
+        step: clientStepLabel,
+        requestedStep: clientStep,
+        resumeStep: resumeStepBeforeSave,
+      });
+      return NextResponse.json(
+        {
+          error: `Step already completed for this account. Continue from step ${resumeStepBeforeSave + 1}.`,
+          code: "step_already_completed",
+          resume_step: resumeStepBeforeSave,
+        },
+        { status: 409 },
+      );
+    }
+    if (clientStep > resumeStepBeforeSave) {
+      console.warn("[onboarding/save] step_out_of_sequence", {
+        userId: user.id,
+        email,
+        step: clientStepLabel,
+        requestedStep: clientStep,
+        resumeStep: resumeStepBeforeSave,
+      });
+      return NextResponse.json(
+        {
+          error: `Step out of sequence. Complete step ${resumeStepBeforeSave + 1} first.`,
+          code: "step_out_of_sequence",
+          resume_step: resumeStepBeforeSave,
+        },
+        { status: 409 },
+      );
+    }
+  }
   const tenantIdFromPayload = typeof body.tenant_id === "string" && body.tenant_id.trim() ? body.tenant_id.trim() : null;
+  if (tenantIdFromPayload) {
+    if (existingTenantId && tenantIdFromPayload !== existingTenantId) {
+      console.warn("[onboarding/save] tenant_identity_mismatch_existing", {
+        userId: user.id,
+        email,
+        step: clientStepLabel,
+        existingTenantId,
+        tenantIdFromPayload,
+      });
+      return NextResponse.json(
+        {
+          error: `Tenant mismatch. This onboarding is linked to ${existingTenantId}, not ${tenantIdFromPayload}.`,
+          code: "tenant_identity_mismatch",
+        },
+        { status: 409 },
+      );
+    }
+    if (knownTenantIds.size > 0 && !knownTenantIds.has(tenantIdFromPayload)) {
+      console.warn("[onboarding/save] tenant_identity_mismatch_session", {
+        userId: user.id,
+        email,
+        step: clientStepLabel,
+        tenantIdFromPayload,
+        knownTenantIds: Array.from(knownTenantIds),
+      });
+      return NextResponse.json(
+        {
+          error: "Tenant mismatch for this user session. Refresh onboarding and try again.",
+          code: "tenant_identity_mismatch",
+        },
+        { status: 409 },
+      );
+    }
+  }
+  const passwordSetAt = asString(body.password_set_at);
+  const passwordSet = asBoolean(body.password_set);
+  const requestedPasswordSetAt = passwordSetAt ?? (passwordSet ? (existingPasswordSetAt ?? "__set__") : existingPasswordSetAt);
+  const requestedResumeStep = statusToResumeStep(mergedStatus, requestedPasswordSetAt);
+  const maxAllowedResumeStep = Math.min(MAX_ONBOARDING_STEP_INDEX, resumeStepBeforeSave + 1);
+  if (requestedResumeStep > maxAllowedResumeStep) {
+    console.warn("[onboarding/save] step_out_of_sequence_status", {
+      userId: user.id,
+      email,
+      step: clientStepLabel,
+      requestedStatus: requestedStatusWithFallback,
+      requestedResumeStep,
+      resumeStep: resumeStepBeforeSave,
+    });
+    return NextResponse.json(
+      {
+        error: `Step out of sequence. Complete step ${resumeStepBeforeSave + 1} first.`,
+        code: "step_out_of_sequence",
+        resume_step: resumeStepBeforeSave,
+      },
+      { status: 409 },
+    );
+  }
   const merged: Record<string, unknown> = {
     email,
     business_name: body.business_name ?? existingRecord?.business_name ?? "",
@@ -331,8 +569,6 @@ export async function POST(request: NextRequest) {
   const agreementSignature = asString(body.agreement_signature);
   const agreementAccepted = asBoolean(body.agreement_accepted);
   const agreementSignedAt = asString(body.agreement_signed_at);
-  const passwordSetAt = asString(body.password_set_at);
-  const passwordSet = asBoolean(body.password_set);
   Object.assign(
     merged,
     buildOptionalPendingFields(pendingColumns, existingRecord, {
@@ -396,6 +632,12 @@ export async function POST(request: NextRequest) {
   }
 
   if (upsertErr) {
+    console.warn("[onboarding/save] pending_upsert_failed", {
+      userId: user.id,
+      email,
+      step: clientStepLabel,
+      error: upsertErr.message,
+    });
     return NextResponse.json({ error: upsertErr.message }, { status: 400 });
   }
 
@@ -493,7 +735,26 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ saved: true, pending: saved ?? merged });
+  const savedRecord = (saved ?? merged) as Record<string, unknown>;
+  const persistedStatus = normalizeOnboardingStatus(savedRecord.status);
+  const persistedPasswordSetAt = getPasswordSetAtFromPendingRow(savedRecord);
+  const resumeStep = deriveResumeStepFromPendingRow(savedRecord, persistedStatus, persistedPasswordSetAt);
+  console.info("[onboarding/save] success", {
+    userId: user.id,
+    email,
+    step: clientStepLabel,
+    clientStep,
+    persistedStatus,
+    resumeStep,
+    resumeStepLabel: describeOnboardingStep(resumeStep),
+    tenantId: resolvedTenantId ?? asString(savedRecord.tenant_id),
+  });
+  return NextResponse.json({
+    saved: true,
+    status: persistedStatus,
+    resume_step: resumeStep,
+    pending: saved ?? merged,
+  });
 }
 
 async function resolveRequestUser(request: NextRequest): Promise<{ id: string; email: string } | null> {

@@ -1,24 +1,34 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import OnboardingPage from "@/app/onboarding/page";
 
 process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = "pk_test_dummy";
 
-const mockUpdateUser = vi.fn().mockResolvedValue({ error: null });
+const mockSupabaseUser: { id: string; email: string; user_metadata: Record<string, unknown> } = {
+  id: "u1",
+  email: "test@example.com",
+  user_metadata: {},
+};
+const mockGetUser = vi.fn().mockImplementation(() =>
+  Promise.resolve({ data: { user: mockSupabaseUser } }),
+);
+const mockSignOut = vi.fn().mockResolvedValue({ error: null });
 
 vi.mock("@stripe/react-stripe-js", () => ({
   Elements: ({ children }: { children: ReactNode }) => <>{children}</>,
   PaymentElement: () => <div>Payment form</div>,
   useStripe: () => ({ confirmPayment: vi.fn().mockResolvedValue({}) }),
-  useElements: () => ({}),
+  useElements: () => ({ submit: vi.fn().mockResolvedValue({}) }),
 }));
 
 const push = vi.fn();
 const replace = vi.fn();
 const refresh = vi.fn();
+const getSearchParam = vi.fn((_: string) => null as string | null);
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace, refresh }),
-  useSearchParams: () => ({ get: () => null }),
+  useSearchParams: () => ({ get: getSearchParam }),
 }));
 
 vi.mock("@/lib/supabase/session", () => ({
@@ -28,253 +38,451 @@ vi.mock("@/lib/supabase/session", () => ({
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
     auth: {
-      getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1", email: "test@example.com" } } }),
-      updateUser: mockUpdateUser,
+      getUser: mockGetUser,
+      signOut: mockSignOut,
       setSession: vi.fn().mockResolvedValue({ error: null }),
       exchangeCodeForSession: vi.fn().mockResolvedValue({ error: null }),
     },
   }),
 }));
 
-const fetchMock = vi.fn((url: string) => {
-  if (url.endsWith("/billing/subscribe")) {
+type MockConfig = {
+  claim: Record<string, unknown>;
+  billing: {
+    client_secret: string | null;
+    subscription_id: string;
+    requires_payment_method?: boolean;
+  };
+  serviceDescription: string;
+};
+
+const defaultClaim = (): Record<string, unknown> => ({
+  tenant_id: "tenant_1",
+  business_name: "Acme HVAC",
+  first_name: "",
+  last_name: "",
+  status: "in_progress",
+  onboarding_draft: null,
+});
+
+const makeFetchMock = (configOverrides?: Partial<MockConfig>) => {
+  const config: MockConfig = {
+    claim: defaultClaim(),
+    billing: {
+      client_secret: null,
+      subscription_id: "sub_trial",
+      requires_payment_method: false,
+    },
+    serviceDescription: "Professional duct cleaning that improves airflow and indoor comfort with clear scheduling and dependable service.",
+    ...configOverrides,
+  };
+
+  const saveCalls: Array<Record<string, unknown>> = [];
+
+  const mock = vi.fn((url: string, options?: RequestInit) => {
+    if (url.includes("/api/onboarding/claim")) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(config.claim),
+      });
+    }
+
+    if (url.includes("/orgs/tenant_1") && (options?.method === "GET" || !options?.method)) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ metadata_json: {} }),
+      });
+    }
+
+    if (url.includes("/google/oauth/start")) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ authorization_url: "https://example.test/google-auth" }),
+      });
+    }
+
+    if (url.includes("/google/accounts?organization_id=tenant_1")) {
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve([
+            {
+              id: "acc_1",
+              display_name: "Acme GBP",
+              external_account_id: "accounts/12345",
+            },
+          ]),
+      });
+    }
+
+    if (url.includes("/google/accounts/acc_1/locations/connect")) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ id: "loc_1" }),
+      });
+    }
+
+    if (url.includes("/google/accounts/acc_1/locations")) {
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve([
+            {
+              name: "accounts/12345/locations/abc",
+              title: "Acme HVAC - Austin",
+              store_code: "AUS-01",
+              metadata: {
+                title: "Acme HVAC",
+                websiteUri: "https://acmehvac.example",
+                storefrontAddress: {
+                  locality: "Austin",
+                  administrativeArea: "TX",
+                },
+                categories: {
+                  primaryCategory: { displayName: "HVAC contractor" },
+                  additionalCategories: [{ displayName: "Air duct cleaning service" }],
+                },
+              },
+            },
+            {
+              name: "accounts/12345/locations/xyz",
+              title: "Acme HVAC - Round Rock",
+              store_code: "RR-02",
+              metadata: {
+                title: "Acme HVAC",
+              },
+            },
+          ]),
+      });
+    }
+
+    if (url.includes("/api/onboarding/services/generate-description")) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ description: config.serviceDescription }),
+      });
+    }
+
+    if (url.endsWith("/billing/subscribe")) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(config.billing),
+      });
+    }
+
+    if (url.includes("/api/onboarding/save")) {
+      const body =
+        typeof options?.body === "string"
+          ? (JSON.parse(options.body) as Record<string, unknown>)
+          : {};
+      saveCalls.push(body);
+      const status = typeof body.status === "string" ? body.status : "in_progress";
+      const resumeStepByStatus: Record<string, number> = {
+        in_progress: 0,
+        business_setup: 1,
+        stripe_pending: 2,
+        stripe_started: 3,
+        completed: 3,
+        activated: 3,
+      };
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            saved: true,
+            status,
+            resume_step: resumeStepByStatus[status] ?? 0,
+            pending: {
+              status,
+              tenant_id: "tenant_1",
+              onboarding_draft: body.onboarding_draft ?? null,
+            },
+          }),
+      });
+    }
+
+    if (url.endsWith("/orgs/")) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ id: "tenant_1" }),
+      });
+    }
+
     return Promise.resolve({
       ok: true,
-      json: () => Promise.resolve({ client_secret: "secret", subscription_id: "sub_123" }),
+      json: () => Promise.resolve({}),
     });
-  }
-  if (url.includes("/api/onboarding/save")) {
-    return Promise.resolve({ ok: true, json: () => Promise.resolve({ saved: true }) });
-  }
-  if (url.includes("/api/onboarding/claim")) {
-    return Promise.resolve({ ok: true, json: () => Promise.resolve({ tenant_id: "tenant_1", business_name: "Acme HVAC" }) });
-  }
-  if (url.endsWith("/orgs/")) {
-    return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: "org_123" }) });
-  }
-  return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
-});
+  });
+
+  return { mock, saveCalls };
+};
 
 describe("Onboarding flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSupabaseUser.id = "u1";
+    mockSupabaseUser.email = "test@example.com";
+    mockSupabaseUser.user_metadata = {};
     sessionStorage.clear();
     localStorage.clear();
+    getSearchParam.mockImplementation(() => null);
+  });
+
+  it("collects first/last name, connects/selects GBP, and saves step 1", async () => {
+    const { mock: fetchMock, saveCalls } = makeFetchMock();
     global.fetch = fetchMock as unknown as typeof fetch;
-  });
 
-  const completeStepZero = async () => {
-    const savePasswordButton = await screen.findByRole("button", { name: /save password/i });
-    fireEvent.change(screen.getByPlaceholderText(/at least 8 characters/i), { target: { value: "password123" } });
-    fireEvent.change(screen.getByPlaceholderText(/re-enter password/i), { target: { value: "password123" } });
-    await waitFor(() => expect(savePasswordButton).toBeEnabled());
-    fireEvent.click(savePasswordButton);
-  };
-
-  it("lets invited users set a password and move to business setup", async () => {
     render(<OnboardingPage />);
 
-    await completeStepZero();
+    await screen.findByRole("heading", { name: /Google login \+ profile/i });
+    fireEvent.change(screen.getByPlaceholderText("Alex"), { target: { value: "Alex" } });
+    fireEvent.change(screen.getByPlaceholderText("Reyes"), { target: { value: "Reyes" } });
 
-    const businessSetup = await screen.findAllByText(/Business setup/i);
-    expect(businessSetup.length).toBeGreaterThan(0);
-    expect(mockUpdateUser).toHaveBeenCalledWith({ password: "password123" });
-    const passwordSaveCall = fetchMock.mock.calls.some((call: [string, RequestInit?]) => {
-      const [url, options] = call;
-      if (typeof url !== "string" || !url.includes("/api/onboarding/save")) return false;
-      const body = options?.body;
-      if (typeof body !== "string") return false;
-      try {
-        const parsed = JSON.parse(body) as { password_set?: boolean; status?: string };
-        return parsed.password_set === true && parsed.status === "in_progress";
-      } catch {
-        return false;
-      }
+    await screen.findByText(/Choose your primary GBP location/i);
+    fireEvent.click(screen.getByRole("button", { name: /Use selected location/i }));
+    await screen.findByText(/Connected:/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Continue$/i }));
+    await screen.findByText(/Confirm business info \+ brand voice/i);
+
+    const stepOneSave = saveCalls.find((call) => call.status === "business_setup");
+    expect(stepOneSave).toBeDefined();
+    expect(stepOneSave?.first_name).toBe("Alex");
+    expect(stepOneSave?.last_name).toBe("Reyes");
+
+    const connectedLocationCallSeen = fetchMock.mock.calls.some((call) => {
+      const [url] = call;
+      return typeof url === "string" && url.includes("/google/accounts/acc_1/locations/connect");
     });
-    expect(passwordSaveCall).toBe(true);
+    expect(connectedLocationCallSeen).toBe(true);
   });
 
-  it("moves from business setup to the Stripe step without errors", async () => {
+  it("shows missing business fields, then persists brand voice and continues", async () => {
+    const { mock: fetchMock, saveCalls } = makeFetchMock({
+      claim: {
+        ...defaultClaim(),
+        status: "business_setup",
+        onboarding_draft: {
+          orgInfo: {
+            name: "Acme HVAC",
+            primaryLocationCity: "",
+            primaryLocationState: "",
+            primaryCategory: "",
+          },
+          importedBusinessFields: ["name"],
+        },
+      },
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
     render(<OnboardingPage />);
 
-    await completeStepZero();
-    await screen.findAllByText(/Business setup/i);
-    expect(screen.queryByText(/Business setup is saved for this account/i)).not.toBeInTheDocument();
+    await screen.findByText(/Confirm business info \+ brand voice/i);
+    await screen.findByText(/^Missing required fields:/i);
 
-    fireEvent.change(screen.getByPlaceholderText(/Acme HVAC/i), { target: { value: "Acme HVAC LLC" } });
+    fireEvent.change(screen.getByPlaceholderText("HVAC contractor"), {
+      target: { value: "HVAC contractor" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Austin"), {
+      target: { value: "Austin" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("TX"), {
+      target: { value: "TX" },
+    });
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "Professional" },
+    });
 
-    const continueButton = await screen.findByRole("button", { name: /continue/i });
-    await waitFor(() => expect(continueButton).toBeEnabled());
-    fireEvent.click(continueButton);
+    fireEvent.click(screen.getByRole("button", { name: /^Continue$/i }));
+    await screen.findByText(/Confirm services \+ descriptions/i);
 
-    await screen.findByText(/Sign up for Stripe/i);
+    const stepTwoSave = saveCalls.find((call) => call.status === "stripe_pending");
+    expect(stepTwoSave).toBeDefined();
+    const stepTwoDraft = stepTwoSave?.onboarding_draft as Record<string, unknown>;
+    expect((stepTwoDraft?.brandVoice as Record<string, unknown>)?.tone).toBe("Professional");
+  });
+
+  it("supports AI generation plus manual service editing/add/remove", async () => {
+    const { mock: fetchMock, saveCalls } = makeFetchMock({
+      claim: {
+        ...defaultClaim(),
+        status: "stripe_pending",
+        onboarding_draft: {
+          orgInfo: {
+            name: "Acme HVAC",
+            primaryCategory: "HVAC contractor",
+            primaryLocationCity: "Austin",
+            primaryLocationState: "TX",
+          },
+          brandVoice: {
+            tone: "Professional",
+          },
+          services: [
+            {
+              name: "Duct Cleaning",
+              description: "",
+              source: "imported",
+            },
+          ],
+        },
+      },
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    render(<OnboardingPage />);
+
+    await screen.findByText(/Confirm services \+ descriptions/i);
+    await screen.findByText(/Description missing\./i);
+
+    fireEvent.click(screen.getByRole("button", { name: /AI generate/i }));
     await waitFor(() => {
-      const billingCallSeen = fetchMock.mock.calls.some(
-        ([url]) => typeof url === "string" && url.endsWith("/billing/subscribe"),
-      );
-      expect(billingCallSeen).toBe(true);
+      expect(
+        screen.getByDisplayValue(/Professional duct cleaning that improves airflow/i),
+      ).toBeInTheDocument();
     });
-    expect(screen.getByText(/Awaiting payment/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /\+ Add service/i }));
+    const serviceInputs = screen.getAllByPlaceholderText(/Service \d+/i);
+    const secondServiceInput = serviceInputs[serviceInputs.length - 1];
+    fireEvent.change(secondServiceInput, { target: { value: "Furnace Repair" } });
+
+    const descriptionBoxes = screen.getAllByPlaceholderText(
+      /Add a concise, professional description for this service\./i,
+    );
+    fireEvent.change(descriptionBoxes[descriptionBoxes.length - 1], {
+      target: { value: "Same-day furnace diagnostics and repair with clear estimates." },
+    });
+
+    const removeButtons = screen.getAllByRole("button", { name: /Remove/i });
+    fireEvent.click(removeButtons[removeButtons.length - 1]);
+    expect(screen.getAllByPlaceholderText(/Service \d+/i)).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Continue$/i }));
+    await screen.findByText(/Stripe signup \(final step\)/i);
+
+    const stepThreeSave = saveCalls.find((call) => call.status === "stripe_started");
+    expect(stepThreeSave).toBeDefined();
   });
 
-  it("shows payment received and waits for manual continue when no payment method is required", async () => {
-    const noPaymentFetch = vi.fn((url: string) => {
-      if (url.endsWith("/billing/subscribe")) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ client_secret: null, subscription_id: "sub_trial", requires_payment_method: false }),
-        });
-      }
-      if (url.includes("/api/onboarding/save")) {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ saved: true }) });
-      }
-      if (url.includes("/api/onboarding/claim")) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ tenant_id: "tenant_1", business_name: "Acme HVAC", status: "business_setup" }),
-        });
-      }
-      if (url.endsWith("/orgs/")) {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: "org_123" }) });
-      }
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+  it("keeps Stripe as final step and routes to dashboard when completed", async () => {
+    const { mock: fetchMock, saveCalls } = makeFetchMock({
+      claim: {
+        ...defaultClaim(),
+        status: "stripe_started",
+        onboarding_draft: {
+          orgInfo: {
+            name: "Acme HVAC",
+            firstName: "Alex",
+            lastName: "Reyes",
+            primaryCategory: "HVAC contractor",
+            primaryLocationCity: "Austin",
+            primaryLocationState: "TX",
+          },
+          services: [
+            {
+              name: "Duct Cleaning",
+              description: "Air duct cleaning for improved airflow and comfort.",
+              source: "manual",
+            },
+          ],
+          stripeStarted: true,
+        },
+      },
+      billing: {
+        client_secret: null,
+        subscription_id: "sub_trial",
+        requires_payment_method: false,
+      },
     });
-    global.fetch = noPaymentFetch as unknown as typeof fetch;
+    global.fetch = fetchMock as unknown as typeof fetch;
 
     render(<OnboardingPage />);
 
-    await screen.findAllByText(/Business setup/i);
-    fireEvent.change(screen.getByPlaceholderText(/Acme HVAC/i), { target: { value: "Acme HVAC LLC" } });
-
-    const continueButton = await screen.findByRole("button", { name: /continue/i });
-    await waitFor(() => expect(continueButton).toBeEnabled());
-    fireEvent.click(continueButton);
-
+    await screen.findByText(/Stripe signup \(final step\)/i);
     await screen.findByText(/Payment received\./i);
-    expect(screen.queryByText(/Payment form/i)).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText(/Your full legal name/i), {
-      target: { value: "Test User" },
+      target: { value: "Alex Reyes" },
     });
     fireEvent.click(screen.getByRole("checkbox", { name: /I agree to these billing terms/i }));
 
-    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }));
-    await screen.findByText(/Connect Google Business Profile/i);
-  });
-
-  it("locks completed users to a dashboard handoff screen without back navigation", async () => {
-    const activatedFetch = vi.fn((url: string) => {
-      if (url.endsWith("/billing/subscribe")) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ client_secret: "secret", subscription_id: "sub_123" }),
-        });
-      }
-      if (url.includes("/api/onboarding/save")) {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ saved: true }) });
-      }
-      if (url.includes("/api/onboarding/claim")) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ tenant_id: "tenant_1", business_name: "Acme HVAC", status: "activated" }),
-        });
-      }
-      if (url.endsWith("/orgs/")) {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: "org_123" }) });
-      }
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
-    });
-    global.fetch = activatedFetch as unknown as typeof fetch;
-
-    render(<OnboardingPage />);
-
-    await screen.findByText(/Your account setup is finished/i);
-    expect(screen.queryByRole("button", { name: /back/i })).not.toBeInTheDocument();
-    const finishButton = await screen.findByRole("button", { name: /go to dashboard/i });
-    fireEvent.click(finishButton);
+    fireEvent.click(screen.getByRole("button", { name: /Finish onboarding/i }));
 
     await waitFor(() => {
       expect(replace).toHaveBeenCalledWith("/dashboard");
       expect(refresh).toHaveBeenCalled();
     });
 
-    const completedSaveCall = activatedFetch.mock.calls.some((call: [string, RequestInit?]) => {
-      const [url, options] = call;
-      if (typeof url !== "string" || !url.includes("/api/onboarding/save")) return false;
-      const body = options?.body;
-      if (typeof body !== "string") return false;
-      try {
-        return JSON.parse(body).status === "completed";
-      } catch {
-        return false;
-      }
-    });
-    expect(completedSaveCall).toBe(false);
+    const completionSave = saveCalls.find((call) => call.status === "completed");
+    expect(completionSave).toBeDefined();
   });
 
-  it("rehydrates business and agreement fields from persisted draft data", async () => {
-    const hydratedFetch = vi.fn((url: string) => {
+  it("resumes onboarding at the correct next step", async () => {
+    const scenarios: Array<{ status: string; heading: RegExp }> = [
+      { status: "business_setup", heading: /Confirm business info \+ brand voice/i },
+      { status: "stripe_pending", heading: /Confirm services \+ descriptions/i },
+      { status: "stripe_started", heading: /Stripe signup \(final step\)/i },
+    ];
+
+    for (const scenario of scenarios) {
+      const { mock: fetchMock } = makeFetchMock({
+        claim: {
+          ...defaultClaim(),
+          status: scenario.status,
+          onboarding_draft: {
+            orgInfo: {
+              name: "Acme HVAC",
+              primaryCategory: "HVAC contractor",
+              primaryLocationCity: "Austin",
+              primaryLocationState: "TX",
+            },
+            services: [
+              {
+                name: "Duct Cleaning",
+                description: "Air duct cleaning for improved airflow and comfort.",
+                source: "manual",
+              },
+            ],
+          },
+        },
+      });
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      const view = render(<OnboardingPage />);
+      await screen.findByText(scenario.heading);
+      view.unmount();
+    }
+  });
+
+  it("shows account-switch guidance when invite and session emails differ", async () => {
+    getSearchParam.mockImplementation((key: string) => (key === "invite_email" ? "invite@example.com" : null));
+    const mismatchFetch = vi.fn((url: string) => {
       if (url.includes("/api/onboarding/claim")) {
         return Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              tenant_id: "tenant_1",
-              business_name: "Acme HVAC",
-              first_name: "Alex",
-              last_name: "Reyes",
-              status: "stripe_started",
-              onboarding_draft: {
-                industrySearch: "Plumber",
-                orgInfo: {
-                  industry: "Plumber",
-                  primaryLocation: "Austin, TX",
-                  secondaryLocations: ["Round Rock, TX", "", ""],
-                },
-                agreementAccepted: true,
-                agreementSignature: "Alex Reyes",
-                passwordSetAt: "2026-01-01T00:00:00.000Z",
-              },
-            }),
+          ok: false,
+          text: () =>
+            Promise.resolve(
+              JSON.stringify({
+                code: "invite_email_mismatch",
+                error: "Invite email mismatch. Signed in as session@example.com, invite is for invite@example.com.",
+                signed_in_email: "session@example.com",
+                invite_email: "invite@example.com",
+              }),
+            ),
         });
       }
-      if (url.endsWith("/billing/subscribe")) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ client_secret: null, subscription_id: "sub_trial", requires_payment_method: false }),
-        });
-      }
-      if (url.includes("/orgs/tenant_1")) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ metadata_json: { onboarding_draft: { agreementAccepted: true, agreementSignature: "Alex Reyes" } } }),
-        });
-      }
-      if (url.includes("/api/onboarding/save")) {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ saved: true }) });
-      }
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({}),
+      });
     });
-    global.fetch = hydratedFetch as unknown as typeof fetch;
+    global.fetch = mismatchFetch as unknown as typeof fetch;
 
     render(<OnboardingPage />);
 
-    await screen.findByText(/Sign up for Stripe/i);
-    const signatureInput = screen.getByPlaceholderText(/Your full legal name/i) as HTMLInputElement;
-    expect(signatureInput.value).toBe("Alex Reyes");
-    const termsCheckbox = screen.getByRole("checkbox", {
-      name: /I agree to these billing terms/i,
-    }) as HTMLInputElement;
-    expect(termsCheckbox.checked).toBe(true);
-
-    fireEvent.click(screen.getByRole("button", { name: /back/i }));
-    await screen.findAllByText(/Business setup/i);
-    expect((screen.getByPlaceholderText(/Acme HVAC/i) as HTMLInputElement).value).toBe("Acme HVAC");
-    expect((screen.getByPlaceholderText(/Alex/i) as HTMLInputElement).value).toBe("Alex");
-    expect((screen.getByPlaceholderText(/Reyes/i) as HTMLInputElement).value).toBe("Reyes");
-    expect((screen.getByPlaceholderText("Enter: City") as HTMLInputElement).value).toBe("Austin");
-    expect((screen.getByPlaceholderText("Enter: State") as HTMLInputElement).value).toBe("TX");
-    expect((screen.getByPlaceholderText(/Enter: City 1/i) as HTMLInputElement).value).toBe("Round Rock");
-    expect((screen.getByPlaceholderText(/Enter: State 1/i) as HTMLInputElement).value).toBe("TX");
+    await screen.findByText(/This invite belongs to a different email/i);
+    expect(screen.getByText(/session@example.com/i)).toBeInTheDocument();
+    expect(screen.getByText(/invite@example.com/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Sign out and switch account/i })).toBeInTheDocument();
   });
 });

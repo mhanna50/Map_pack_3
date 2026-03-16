@@ -58,16 +58,23 @@ class PostSchedulerService:
                 self.db.add(candidate)
                 self.db.commit()
                 return candidate
+        reason = candidate.reason_json or {}
+        requested_type = str(reason.get("post_type") or "update").lower()
+        try:
+            post_type = PostType(requested_type)
+        except Exception:  # noqa: BLE001
+            post_type = PostType.UPDATE
+        topic_tags = [value for value in [reason.get("service"), reason.get("angle")] if isinstance(value, str)]
         post = self.post_service.create_post(
             organization_id=candidate.organization_id,
             location_id=candidate.location_id,
             connected_account_id=None,
-            post_type=PostType.UPDATE,
+            post_type=post_type,
             base_prompt=candidate.proposed_caption,
             scheduled_at=scheduled_time,
-            context=candidate.reason_json or {},
+            context=reason,
             bucket=candidate.bucket,
-            topic_tags=[],
+            topic_tags=topic_tags,
             media_asset_id=candidate.media_asset_id,
             window_id=window["id"],
         )

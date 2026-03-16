@@ -5,9 +5,107 @@ import { createServerClient } from "@supabase/ssr";
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+const shouldLogAuthRouting =
+  process.env.LOG_AUTH_ROUTING === "true" || process.env.NODE_ENV !== "production";
+const shouldLogOnboardingOps =
+  process.env.LOG_ONBOARDING_OPS === "true" || process.env.NODE_ENV !== "production";
+
+const logAuthRouting = (event: string, payload: Record<string, unknown>) => {
+  if (!shouldLogAuthRouting) return;
+  console.info(`[auth-routing] ${event}`, payload);
+};
+
+const logOnboardingOps = (event: string, payload: Record<string, unknown>) => {
+  if (!shouldLogOnboardingOps) return;
+  console.info(`[onboarding-admin] ${event}`, payload);
+};
 
 export type AdminUser = { id: string; email?: string | null; role?: string | null; tenant_id?: string | null };
-type PostgrestErrorLike = { message?: string; details?: string | null; code?: string | null };
+type PostgrestErrorLike = {
+  message?: string;
+  details?: string | null;
+  hint?: string | null;
+  code?: string | null;
+  status?: number | string | null;
+};
+
+function normalizeStatusCode(status: number | string | null | undefined): number | undefined {
+  if (typeof status === "number") return status;
+  if (typeof status !== "string") return undefined;
+  const parsed = Number.parseInt(status, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function isErrorLike(value: unknown): value is PostgrestErrorLike {
+  return typeof value === "object" && value !== null;
+}
+
+function formatUnknownError(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+
+  if (isErrorLike(error)) {
+    const parts: string[] = [];
+    if (typeof error.message === "string" && error.message.trim()) parts.push(error.message.trim());
+    if (typeof error.details === "string" && error.details.trim()) parts.push(`details: ${error.details.trim()}`);
+    if (typeof error.hint === "string" && error.hint.trim()) parts.push(`hint: ${error.hint.trim()}`);
+    if (typeof error.code === "string" && error.code.trim()) parts.push(`code: ${error.code.trim()}`);
+    const status = normalizeStatusCode(error.status);
+    if (status !== undefined) parts.push(`status: ${status}`);
+    if (parts.length > 0) return parts.join(" | ");
+  }
+
+  return fallback;
+}
+
+function serializeUnknownError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    };
+  }
+
+  if (isErrorLike(error)) {
+    return {
+      message: error.message ?? null,
+      details: error.details ?? null,
+      hint: error.hint ?? null,
+      code: error.code ?? null,
+      status: normalizeStatusCode(error.status) ?? null,
+    };
+  }
+
+  return { value: String(error) };
+}
+
+function toOperationalError(error: unknown, fallback: string): Error {
+  if (error instanceof Error && error.message.trim()) {
+    return error;
+  }
+  return new Error(formatUnknownError(error, fallback));
+}
+
+function isRpcLookupError(error: unknown, functionName: string): boolean {
+  if (!isErrorLike(error)) return false;
+  const code = typeof error.code === "string" ? error.code.toUpperCase() : "";
+  if (code === "PGRST202" || code === "42883") {
+    return true;
+  }
+
+  const message = `${error.message ?? ""} ${error.details ?? ""} ${error.hint ?? ""}`.toLowerCase();
+  return (
+    message.includes("schema cache") ||
+    message.includes("could not find the function") ||
+    message.includes(`public.${functionName}`.toLowerCase())
+  );
+}
 
 export async function requireAdminUser(): Promise<AdminUser> {
   const cookieStore = await cookies();
@@ -27,6 +125,34 @@ export async function requireAdminUser(): Promise<AdminUser> {
   } = await supabase.auth.getUser();
   if (error || !user) {
     throw new Error("Not authenticated");
+  }
+
+  const { data: routeData, error: routeErr } = await supabase.rpc("resolve_post_login_destination");
+  if (!routeErr) {
+    const row = Array.isArray(routeData) ? routeData[0] : routeData;
+    const route = row && typeof row === "object" ? (row as { role?: unknown; tenant_id?: unknown }) : null;
+    const normalizedRole = typeof route?.role === "string" ? route.role.trim().toLowerCase() : "";
+    if (normalizedRole === "owner_admin") {
+      logAuthRouting("admin_guard.rpc_resolution", {
+        userId: user.id,
+        email: user.email,
+        role: "owner_admin",
+        source: "resolve_post_login_destination",
+      });
+      return {
+        id: user.id,
+        email: user.email,
+        role: "owner_admin",
+        tenant_id: typeof route?.tenant_id === "string" ? route.tenant_id : null,
+      };
+    }
+    logAuthRouting("admin_guard.rpc_denied", {
+      userId: user.id,
+      email: user.email,
+      role: normalizedRole || "invalid",
+      source: "resolve_post_login_destination",
+    });
+    throw new Error("Admin role required");
   }
 
   // Prefer the service client so we can verify is_staff and validate the profile role.
@@ -50,6 +176,12 @@ export async function requireAdminUser(): Promise<AdminUser> {
     const isStaff = staffUser?.is_staff === true;
 
     if (!(isAdminRole || isStaff)) {
+      logAuthRouting("admin_guard.legacy_denied", {
+        userId: user.id,
+        email: user.email,
+        profileRole: profile?.role ?? null,
+        isStaff: staffUser?.is_staff ?? null,
+      });
       console.warn(
         `Admin access denied: role=${profile?.role ?? "missing"} is_staff=${staffUser?.is_staff ?? "missing"} user=${user.id}`,
       );
@@ -62,14 +194,35 @@ export async function requireAdminUser(): Promise<AdminUser> {
       throw new Error("Admin role required");
     }
 
-    return { id: user.id, email, role: isAdminRole ? "admin" : "staff", tenant_id: profile?.tenant_id };
+    const resolvedRole = isAdminRole ? "admin" : "staff";
+    logAuthRouting("admin_guard.legacy_resolution", {
+      userId: user.id,
+      email,
+      role: resolvedRole,
+      tenantId: profile?.tenant_id ?? null,
+      source: "legacy_profiles_or_users",
+    });
+    return { id: user.id, email, role: resolvedRole, tenant_id: profile?.tenant_id };
   }
 
   // Fallback when service key is not configured.
   const { data: profile } = await supabase.from("profiles").select().eq("user_id", user.id).maybeSingle();
   if (profile?.role !== "admin") {
+    logAuthRouting("admin_guard.fallback_denied", {
+      userId: user.id,
+      email: user.email,
+      profileRole: profile?.role ?? null,
+      source: "fallback_no_service_role",
+    });
     throw new Error("Admin role required");
   }
+  logAuthRouting("admin_guard.fallback_resolution", {
+    userId: user.id,
+    email: user.email,
+    role: profile.role,
+    tenantId: profile.tenant_id ?? null,
+    source: "fallback_no_service_role",
+  });
   return { id: user.id, email: user.email, role: profile.role, tenant_id: profile.tenant_id };
 }
 
@@ -152,29 +305,116 @@ export async function listPendingOnboarding() {
   return data ?? [];
 }
 
-export async function cancelPendingOnboarding(email: string) {
+type CancelInviteAndPurgeRpcRow = {
+  canceled?: boolean | null;
+  resend_ready?: boolean | null;
+  message?: string | null;
+  deleted_auth_users?: number | null;
+  deleted_public_rows?: number | null;
+};
+
+type ResendReadyRpcRow = {
+  ready?: boolean | null;
+  reason?: string | null;
+};
+
+export async function cancelOnboardingInviteAndPurge(email: string) {
   const svc = requireService();
   const normalized = email.trim().toLowerCase();
-  const { error } = await svc.from("pending_onboarding").update({ status: "canceled" }).eq("email", normalized);
-  if (error) throw error;
-  return { canceled: true };
+  if (!normalized) {
+    throw new Error("email is required");
+  }
+
+  const operationId = `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+  logOnboardingOps("cancel_invite.start", {
+    operationId,
+    email: normalized,
+  });
+
+  let { data, error } = await svc.rpc("cancel_onboarding_invite_and_purge", {
+    p_email: normalized,
+  });
+  if (error && isRpcLookupError(error, "cancel_onboarding_invite_and_purge")) {
+    logOnboardingOps("cancel_invite.rpc_lookup_retry", {
+      operationId,
+      email: normalized,
+      error: serializeUnknownError(error),
+      retryWith: "email",
+    });
+    const retry = await svc.rpc("cancel_onboarding_invite_and_purge", {
+      email: normalized,
+    });
+    data = retry.data;
+    error = retry.error;
+  }
+
+  if (error) {
+    logOnboardingOps("cancel_invite.error", {
+      operationId,
+      email: normalized,
+      error: serializeUnknownError(error),
+    });
+    throw toOperationalError(error, "failed to cancel invite");
+  }
+
+  const row = (Array.isArray(data) ? data[0] : data) as CancelInviteAndPurgeRpcRow | null;
+  if (!row) {
+    logOnboardingOps("cancel_invite.empty_result", {
+      operationId,
+      email: normalized,
+    });
+    throw new Error("Cancel invite cleanup did not return a result");
+  }
+
+  const result = {
+    canceled: row.canceled === true,
+    resendReady: row.resend_ready === true,
+    message: row.message ?? null,
+    deletedAuthUsers: Number(row.deleted_auth_users ?? 0),
+    deletedPublicRows: Number(row.deleted_public_rows ?? 0),
+  };
+
+  logOnboardingOps("cancel_invite.success", {
+    operationId,
+    email: normalized,
+    canceled: result.canceled,
+    resendReady: result.resendReady,
+    deletedAuthUsers: result.deletedAuthUsers,
+    deletedPublicRows: result.deletedPublicRows,
+    message: result.message,
+  });
+
+  return result;
 }
 
-export async function revokeSupabaseInvite(email: string) {
+export async function isOnboardingInviteResendReady(email: string) {
   const svc = requireService();
-  // Supabase auth API does not expose invite revocation; disable by deleting any pending onboarding row and clearing tenant_id
-  const lower = email.trim().toLowerCase();
-  const { error } = await svc.from("pending_onboarding").update({ status: "canceled", tenant_id: null }).eq("email", lower);
-  if (error) throw error;
-  return { revoked: true };
-}
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) {
+    throw new Error("email is required");
+  }
 
-export async function deletePendingOnboarding(email: string) {
-  const svc = requireService();
-  const lower = email.trim().toLowerCase();
-  const { error } = await svc.from("pending_onboarding").delete().eq("email", lower);
-  if (error) throw error;
-  return { deleted: true };
+  let { data, error } = await svc.rpc("is_onboarding_invite_resend_ready", {
+    p_email: normalized,
+  });
+  if (error && isRpcLookupError(error, "is_onboarding_invite_resend_ready")) {
+    const retry = await svc.rpc("is_onboarding_invite_resend_ready", {
+      email: normalized,
+    });
+    data = retry.data;
+    error = retry.error;
+  }
+  if (error) throw toOperationalError(error, "failed to verify resend readiness");
+
+  const row = (Array.isArray(data) ? data[0] : data) as ResendReadyRpcRow | null;
+  if (!row) {
+    throw new Error("Resend readiness check did not return a result");
+  }
+
+  return {
+    ready: row.ready === true,
+    reason: row.reason ?? null,
+  };
 }
 
 async function sendMagicLink(email: string, redirectTo: string) {
@@ -242,25 +482,85 @@ export async function fetchKpis() {
   };
 }
 
-export async function fetchTenants(params: { page?: number; pageSize?: number; status?: string; plan?: string; q?: string }) {
-  const { page = 1, pageSize = 20, status, plan, q } = params;
-  const svc = requireService();
+const BILLING_TENANT_STATUSES = ["active", "canceled"] as const;
 
-  let query = svc.from("tenants").select("*", { count: "exact" });
-  if (status) query = query.eq("status", status);
-  if (plan) query = query.eq("plan", plan);
+function normalizeBillingStatus(status?: string | null): string | null {
+  const normalized = String(status ?? "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "cancelled") return "canceled";
+  return BILLING_TENANT_STATUSES.includes(normalized as (typeof BILLING_TENANT_STATUSES)[number]) ? normalized : null;
+}
+
+type BillingSubscriptionRow = {
+  tenant_id?: string | null;
+  status?: string | null;
+  plan?: string | null;
+  location_limit?: number | null;
+  created_at?: string | null;
+};
+
+export async function fetchTenants(params: { page?: number; pageSize?: number; status?: string; q?: string }) {
+  const { page = 1, pageSize = 20, status, q } = params;
+  const svc = requireService();
+  const requestedStatus = normalizeBillingStatus(status);
+  const statusFilterValues = requestedStatus
+    ? [requestedStatus]
+    : [...BILLING_TENANT_STATUSES];
+
+  const billing = await svc
+    .from("billing_subscriptions")
+    .select("tenant_id, status, plan, location_limit, created_at")
+    .in("status", statusFilterValues)
+    .order("created_at", { ascending: false });
+  if (billing.error) {
+    console.error("fetchTenants billing lookup failed", billing.error);
+    return { rows: [], total: 0 };
+  }
+
+  const latestByTenant = new Map<string, BillingSubscriptionRow>();
+  (billing.data ?? []).forEach((entry) => {
+    const tenantId = typeof entry.tenant_id === "string" ? entry.tenant_id : "";
+    if (!tenantId || latestByTenant.has(tenantId)) return;
+    const normalized = normalizeBillingStatus(entry.status);
+    if (!normalized) return;
+    latestByTenant.set(tenantId, { ...entry, status: normalized });
+  });
+
+  const subscribedTenantIds = Array.from(latestByTenant.keys());
+  if (subscribedTenantIds.length === 0) {
+    return { rows: [], total: 0 };
+  }
+
+  let query = svc.from("tenants").select("*").in("tenant_id", subscribedTenantIds);
   if (q) {
     query = query.ilike("business_name", `%${q}%`);
   }
-  query = query.order("created_at", { ascending: false }).range((page - 1) * pageSize, page * pageSize - 1);
-
-  const { data, error, count } = await query;
+  const { data, error } = await query;
   if (error) {
     // Gracefully return empty so UI can show “no data” instead of failing.
     console.error("fetchTenants failed", error);
     return { rows: [], total: 0 };
   }
-  return { rows: data ?? [], total: count ?? 0 };
+
+  const merged = (data ?? [])
+    .map((tenant) => {
+      const subscription = latestByTenant.get(String(tenant.tenant_id));
+      if (!subscription) return null;
+      return {
+        ...tenant,
+        status: normalizeBillingStatus(subscription.status) ?? "canceled",
+      };
+    })
+    .filter((tenant): tenant is Record<string, unknown> => Boolean(tenant))
+    .sort(
+      (a, b) =>
+        (b.created_at ? new Date(String(b.created_at)).getTime() : 0) - (a.created_at ? new Date(String(a.created_at)).getTime() : 0),
+    );
+
+  const total = merged.length;
+  const start = Math.max(0, (page - 1) * pageSize);
+  const rows = merged.slice(start, start + pageSize);
+  return { rows, total };
 }
 
 export async function fetchTenantDetail(id: string) {

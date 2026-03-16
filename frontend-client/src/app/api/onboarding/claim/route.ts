@@ -20,6 +20,10 @@ const ONBOARDING_STATUS_RANK = {
 } as const;
 
 type OnboardingStatus = keyof typeof ONBOARDING_STATUS_RANK;
+const ONBOARDING_STEP_LABELS = ["google_profile", "business_info", "services", "stripe"] as const;
+
+const describeOnboardingStep = (step: number): string =>
+  ONBOARDING_STEP_LABELS[step] ?? `step_${step}`;
 
 const normalizeOnboardingStatus = (value: unknown): OnboardingStatus => {
   if (typeof value === "string" && value in ONBOARDING_STATUS_RANK) {
@@ -104,6 +108,33 @@ const getDraftFromPendingRow = (row: Record<string, unknown> | null): Record<str
   return null;
 };
 
+const getPasswordSetAtFromPendingRow = (row: Record<string, unknown> | null): string | null => {
+  if (!row) return null;
+  const direct = asString(row.password_set_at);
+  if (direct) return direct;
+  const draft = getDraftFromPendingRow(row);
+  return asString(draft?.passwordSetAt);
+};
+
+const statusToResumeStep = (status: unknown, passwordSetAt: string | null): number => {
+  const normalized = normalizeOnboardingStatus(status);
+  switch (normalized) {
+    case "business_setup":
+      return 1;
+    case "stripe_pending":
+      return 2;
+    case "stripe_started":
+      return 3;
+    case "google_pending":
+    case "google_connected":
+    case "completed":
+    case "activated":
+      return 3;
+    default:
+      return 0;
+  }
+};
+
 const applyPendingRowMatch = <T>(query: T, row: Record<string, unknown> | null, email: string): T => {
   const builder = query as { eq: (column: string, value: string | number) => unknown; ilike: (column: string, value: string) => unknown };
   const rawId = row?.id;
@@ -136,10 +167,24 @@ export async function POST(request: NextRequest) {
 
   const svc = createServiceClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
   const normalizedEmail = user.email.trim().toLowerCase();
+  console.info("[onboarding/claim] request", {
+    userId: user.id,
+    email: normalizedEmail,
+  });
   const expectedInviteEmail = await readExpectedInviteEmail(request);
   if (expectedInviteEmail && expectedInviteEmail !== normalizedEmail) {
+    console.warn("[onboarding/claim] invite_email_mismatch", {
+      userId: user.id,
+      signedInEmail: normalizedEmail,
+      inviteEmail: expectedInviteEmail,
+    });
     return NextResponse.json(
-      { error: `Invite email mismatch. Signed in as ${normalizedEmail}, invite is for ${expectedInviteEmail}.` },
+      {
+        error: `Invite email mismatch. Signed in as ${normalizedEmail}, invite is for ${expectedInviteEmail}.`,
+        code: "invite_email_mismatch",
+        signed_in_email: normalizedEmail,
+        invite_email: expectedInviteEmail,
+      },
       { status: 409 },
     );
   }
@@ -153,6 +198,7 @@ export async function POST(request: NextRequest) {
       .from("pending_onboarding")
       .select("*")
       .ilike("email", normalizedEmail)
+      .not("invited_by_admin_user_id", "is", "null")
       .limit(50),
     svc
       .from("profiles")
@@ -167,6 +213,11 @@ export async function POST(request: NextRequest) {
   ]);
 
   if (pendingErr) {
+    console.warn("[onboarding/claim] pending_lookup_failed", {
+      userId: user.id,
+      email: normalizedEmail,
+      error: pendingErr.message,
+    });
     return NextResponse.json({ error: pendingErr.message }, { status: 400 });
   }
   if (profileLookupErr) {
@@ -193,6 +244,10 @@ export async function POST(request: NextRequest) {
   if (!pending) {
     const exempt = await isStaffUser(svc, user.id);
     if (exempt) {
+      console.info("[onboarding/claim] staff_exempt", {
+        userId: user.id,
+        email: normalizedEmail,
+      });
       return NextResponse.json({ status: "admin_exempt", email: normalizedEmail }, { status: 200 });
     }
 
@@ -220,37 +275,23 @@ export async function POST(request: NextRequest) {
         profileTenantId,
         tenant?.status === "active" ? "completed" : "in_progress",
       );
-
-      // Best effort: recreate pending row for consistency, but never block the response.
-      const recoveredPending = {
+      const recoveredResumeStep = statusToResumeStep(recoveredStatus, null);
+      console.info("[onboarding/claim] recovered_from_profile", {
+        userId: user.id,
         email: normalizedEmail,
-        business_name: tenant?.business_name ?? "",
-        first_name: "",
-        last_name: "",
-        plan: tenant?.plan_name ?? tenant?.plan_tier ?? "starter",
-        location_limit: tenant?.location_limit ?? 1,
+        tenantId: profileTenantId,
         status: recoveredStatus,
-        invited_at: new Date().toISOString(),
-        invited_by_admin_user_id: null,
-        tenant_id: profileTenantId,
-      };
-      const { error: recoveredInsertErr } = await svc.from("pending_onboarding").insert(recoveredPending);
-      if (recoveredInsertErr) {
-        console.warn("Unable to recreate pending onboarding row from existing tenant profile", {
-          userId: user.id,
-          email: normalizedEmail,
-          profileTenantId,
-          recoveredInsertErr,
-        });
-      }
+        resumeStep: recoveredResumeStep,
+        resumeStepLabel: describeOnboardingStep(recoveredResumeStep),
+      });
 
       return NextResponse.json({
         tenant_id: profileTenantId,
-        business_name: recoveredPending.business_name,
+        business_name: tenant?.business_name ?? "",
         first_name: "",
         last_name: "",
-        plan_name: recoveredPending.plan,
-        location_limit: recoveredPending.location_limit,
+        plan_name: tenant?.plan_name ?? tenant?.plan_tier ?? "starter",
+        location_limit: tenant?.location_limit ?? 1,
         status: recoveredStatus,
         onboarding_draft: null,
         agreement_signature: null,
@@ -260,41 +301,24 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // If no pending row exists, create a minimal one so the user can proceed.
-    const skeleton = {
+    console.warn("[onboarding/claim] invite_required", {
+      userId: user.id,
       email: normalizedEmail,
-      business_name: "",
-      first_name: "",
-      last_name: "",
-      plan: "starter",
-      location_limit: 1,
-      status: "in_progress",
-      invited_at: new Date().toISOString(),
-      invited_by_admin_user_id: null,
-      tenant_id: null,
-    };
-    const { error: createPendingErr, data: created } = await svc.from("pending_onboarding").insert(skeleton).select().maybeSingle();
-    if (createPendingErr) {
-      // Fallback: allow onboarding to continue even without a pending record.
-      return NextResponse.json({ status: "no_pending" }, { status: 200 });
-    }
-    return NextResponse.json({
-      tenant_id: created?.tenant_id,
-      business_name: created?.business_name,
-      first_name: created?.first_name,
-      last_name: created?.last_name,
-      plan_name: created?.plan,
-      location_limit: created?.location_limit,
-      status: created?.status ?? "in_progress",
-      onboarding_draft: null,
-      agreement_signature: null,
-      agreement_accepted: false,
-      agreement_signed_at: null,
-      password_set_at: null,
     });
+    return NextResponse.json(
+      {
+        error: "Invite required. Ask an admin to send you an onboarding invite link.",
+        code: "invite_required",
+      },
+      { status: 403 },
+    );
   }
 
   if (pending.status === "canceled") {
+    console.warn("[onboarding/claim] invite_canceled", {
+      userId: user.id,
+      email: normalizedEmail,
+    });
     return NextResponse.json({ error: "Invite canceled" }, { status: 410 });
   }
 
@@ -373,6 +397,16 @@ export async function POST(request: NextRequest) {
   }
 
   const responsePendingRecord = (responsePending ?? null) as Record<string, unknown> | null;
+  const passwordSetAt = getPasswordSetAtFromPendingRow(responsePendingRecord);
+  const resumeStep = statusToResumeStep(effectiveStatus, passwordSetAt);
+  console.info("[onboarding/claim] success", {
+    userId: user.id,
+    email: normalizedEmail,
+    tenantId,
+    status: effectiveStatus,
+    resumeStep,
+    resumeStepLabel: describeOnboardingStep(resumeStep),
+  });
   return NextResponse.json({
     tenant_id: tenantId,
     business_name: responsePending.business_name,
@@ -385,7 +419,7 @@ export async function POST(request: NextRequest) {
     agreement_signature: asString(responsePendingRecord?.agreement_signature),
     agreement_accepted: asBoolean(responsePendingRecord?.agreement_accepted) ?? false,
     agreement_signed_at: asString(responsePendingRecord?.agreement_signed_at),
-    password_set_at: asString(responsePendingRecord?.password_set_at),
+    password_set_at: passwordSetAt,
   });
 }
 

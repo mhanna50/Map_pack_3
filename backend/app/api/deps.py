@@ -17,6 +17,7 @@ from backend.app.services.supabase_auth import SupabaseTokenVerifier
 
 _token_verifier: SupabaseTokenVerifier | None = None
 logger = logging.getLogger("uvicorn.error")
+ADMIN_ROLE_VALUES = {"admin", "staff", "owner", "super_admin", "superadmin"}
 
 
 def _get_verifier() -> SupabaseTokenVerifier:
@@ -53,6 +54,7 @@ def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing email")
     normalized_email = email.lower()
     full_name = _extract_name(payload)
+    claimed_staff = _extract_staff_claim(payload)
 
     user = db.query(User).filter(User.id == auth_user_id).one_or_none()
     needs_commit = False
@@ -76,6 +78,11 @@ def get_current_user(
     if full_name and not user.full_name:
         user.full_name = full_name
         needs_commit = True
+    if claimed_staff is not None and user.is_staff != claimed_staff:
+        # Only trust app_metadata claims for privilege sync.
+        user.is_staff = claimed_staff
+        needs_commit = True
+        logger.info("Synced is_staff=%s for user %s from Supabase app_metadata", claimed_staff, user.id)
 
     if needs_commit:
         db.commit()
@@ -144,6 +151,46 @@ def _extract_email(payload: dict[str, Any]) -> str | None:
 def _extract_name(payload: dict[str, Any]) -> str | None:
     user_metadata = payload.get("user_metadata") or {}
     return user_metadata.get("full_name") or user_metadata.get("name")
+
+
+def _extract_staff_claim(payload: dict[str, Any]) -> bool | None:
+    app_metadata = payload.get("app_metadata")
+    if not isinstance(app_metadata, dict):
+        return None
+
+    explicit_staff = _coerce_bool(app_metadata.get("is_staff"))
+    if explicit_staff is not None:
+        return explicit_staff
+
+    role = app_metadata.get("role")
+    if isinstance(role, str):
+        return role.strip().lower() in ADMIN_ROLE_VALUES
+
+    roles = app_metadata.get("roles")
+    if isinstance(roles, (list, tuple)):
+        normalized = {str(item).strip().lower() for item in roles if isinstance(item, str)}
+        if normalized:
+            return any(item in ADMIN_ROLE_VALUES for item in normalized)
+
+    return None
+
+
+def _coerce_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+        return None
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y"}:
+            return True
+        if normalized in {"false", "0", "no", "n"}:
+            return False
+    return None
 
 
 def _extract_user_id(payload: dict[str, Any]) -> uuid.UUID | None:

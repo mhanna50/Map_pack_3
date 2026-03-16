@@ -170,6 +170,7 @@ services:
     volumes:
       - ..:/app
       - frontend_admin_node_modules:/app/frontend-admin/node_modules
+      - frontend_admin_next:/app/frontend-admin/.next
     ports:
       - "3002:3002"
     depends_on:
@@ -183,3 +184,4 @@ volumes:
   frontend_client_next:
   frontend_marketing_node_modules:
   frontend_admin_node_modules:
+  frontend_admin_next:

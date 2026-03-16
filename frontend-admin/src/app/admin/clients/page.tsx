@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Eye, Shield, Ban, MapPin, PauseCircle, PlayCircle } from "lucide-react";
+import { Eye, Shield, Ban, PauseCircle, PlayCircle } from "lucide-react";
 import { AdminShell } from "@/components/admin/shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -21,9 +21,7 @@ type Tenant = {
   tenant_id: string;
   business_name: string;
   status: string;
-  plan_name?: string;
   posting_paused?: boolean;
-  location_limit?: number;
   last_activity?: string;
   created_at?: string;
 };
@@ -49,7 +47,7 @@ export default function AdminClientsPage() {
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-  const [filters, setFilters] = useState<{ status?: string; plan?: string; q?: string }>({});
+  const [filters, setFilters] = useState<{ status?: string; q?: string }>({});
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detail, setDetail] = useState<TenantDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -148,7 +146,7 @@ export default function AdminClientsPage() {
           <div>
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Clients</p>
             <h1 className="text-2xl font-semibold">All tenants</h1>
-            <p className="text-sm text-muted-foreground">Active, churned, billing, and impersonation controls.</p>
+            <p className="text-sm text-muted-foreground">Subscribed clients only, including active and canceled accounts.</p>
           </div>
           <Badge variant="muted">Total {total}</Badge>
         </div>
@@ -157,7 +155,7 @@ export default function AdminClientsPage() {
           <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <CardTitle>Filters</CardTitle>
-              <CardDescription>Search by name/email/domain; filter by status and plan</CardDescription>
+              <CardDescription>Search by name/email/domain; filter by subscription status</CardDescription>
             </div>
             <div className="flex flex-wrap gap-2">
               <Input placeholder="Search" className="w-48" value={filters.q ?? ""} onChange={(e) => setFilters((f) => ({ ...f, q: e.target.value }))} />
@@ -168,20 +166,7 @@ export default function AdminClientsPage() {
                 options={[
                   { label: "All status", value: "" },
                   { label: "Active", value: "active" },
-                  { label: "Past due", value: "past_due" },
                   { label: "Canceled", value: "canceled" },
-                  { label: "Churned", value: "churned" },
-                ]}
-              />
-              <Select
-                className="w-32"
-                value={filters.plan ?? ""}
-                onChange={(e) => setFilters((f) => ({ ...f, plan: e.target.value || undefined }))}
-                options={[
-                  { label: "All plans", value: "" },
-                  { label: "Starter", value: "starter" },
-                  { label: "Pro", value: "pro" },
-                  { label: "Agency", value: "agency" },
                 ]}
               />
               <Button variant="outline" size="sm" onClick={() => setPage(1)}>
@@ -211,8 +196,6 @@ export default function AdminClientsPage() {
                   <TR>
                     <TH>Client</TH>
                     <TH>Status</TH>
-                    <TH>Plan</TH>
-                    <TH>Locations</TH>
                     <TH>Last activity</TH>
                     <TH>Created</TH>
                     <TH>Actions</TH>
@@ -229,13 +212,6 @@ export default function AdminClientsPage() {
                         <Badge variant={statusVariant(tenant.status)} className="capitalize">
                           {tenant.status}
                         </Badge>
-                      </TD>
-                      <TD className="capitalize">{tenant.plan_name ?? "—"}</TD>
-                      <TD>
-                        <div className="flex items-center gap-2">
-                          <MapPin className="h-4 w-4 text-primary" />
-                          <span>{tenant.location_limit ?? "—"}</span>
-                        </div>
                       </TD>
                       <TD>{timeAgo(tenant.last_activity)}</TD>
                       <TD>{formatDate(tenant.created_at)}</TD>
@@ -287,7 +263,7 @@ export default function AdminClientsPage() {
           }
         }}
         title="Tenant detail"
-        description="Plan, locations, connections, billing events"
+        description="Locations, connections, and billing events"
       >
         {detailLoading ? (
           <Skeleton className="h-32 w-full" />
@@ -304,7 +280,6 @@ export default function AdminClientsPage() {
                 <Badge variant={detail.tenant?.posting_paused ? "warning" : "success"}>
                   {detail.tenant?.posting_paused ? "Automations paused" : "Automations active"}
                 </Badge>
-                <Badge variant="muted">{detail.tenant?.plan_name ?? "—"}</Badge>
               </div>
             </div>
             <div className="rounded-lg border border-border bg-white/70 p-3">
@@ -391,6 +366,7 @@ function Section({ title, items }: { title: string; items?: unknown[] }) {
 function statusVariant(status?: string) {
   switch (status) {
     case "active":
+    case "trialing":
       return "success";
     case "past_due":
       return "warning";

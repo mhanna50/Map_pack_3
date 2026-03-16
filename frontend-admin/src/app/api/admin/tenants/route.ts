@@ -8,9 +8,8 @@ export async function GET(request: NextRequest) {
     const page = Number(searchParams.get("page") ?? "1");
     const pageSize = Number(searchParams.get("pageSize") ?? "20");
     const status = searchParams.get("status") ?? undefined;
-    const plan = searchParams.get("plan") ?? undefined;
     const q = searchParams.get("q") ?? undefined;
-    const data = await fetchTenants({ page, pageSize, status, plan, q });
+    const data = await fetchTenants({ page, pageSize, status, q });
     return NextResponse.json(data);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "failed to load tenants";

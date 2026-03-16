@@ -40,7 +40,8 @@ export default async function proxy(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  if (user && pathname.startsWith("/sign-in")) {
+  const authError = request.nextUrl.searchParams.get("error");
+  if (user && pathname.startsWith("/sign-in") && authError !== "invalid_role") {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/";
     return NextResponse.redirect(redirectUrl);

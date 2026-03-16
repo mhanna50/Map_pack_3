@@ -201,21 +201,33 @@ class PostJobService:
         caption = ""
         bucket = None
         media_asset_id = None
+        post_type = PostType.UPDATE
+        topic_tags: list[str] = []
         if plan:
             bucket = (plan.reason_json or {}).get("selected_bucket")
             caption = plan.reason_json.get("summary") if plan.reason_json else ""
             if plan.candidate and plan.candidate.media_asset_id:
                 media_asset_id = plan.candidate.media_asset_id
+            candidate_reason = plan.candidate.reason_json if plan.candidate and plan.candidate.reason_json else {}
+            requested_type = str(candidate_reason.get("post_type") or "update").lower()
+            try:
+                post_type = PostType(requested_type)
+            except Exception:  # noqa: BLE001
+                post_type = PostType.UPDATE
+            for field in ("service", "angle"):
+                value = candidate_reason.get(field)
+                if isinstance(value, str):
+                    topic_tags.append(value)
         post = self.post_service.create_post(
             organization_id=job.organization_id,
             location_id=job.location_id,
             connected_account_id=None,
-            post_type=PostType.UPDATE,
+            post_type=post_type,
             base_prompt=caption or "Automated GBP update",
             scheduled_at=datetime.now(timezone.utc),
             context=plan.reason_json if plan else {},
             bucket=bucket,
-            topic_tags=[],
+            topic_tags=topic_tags,
             media_asset_id=media_asset_id,
         )
         return post

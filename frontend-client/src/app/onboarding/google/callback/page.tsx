@@ -47,18 +47,8 @@ function GoogleCallbackContent() {
           throw new Error(payload.detail || "Google authorization failed");
         }
         await response.json();
-        await fetch("/api/onboarding/save", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({ status: "google_connected" }),
-        }).catch(() => {
-          // Best effort only; onboarding screen will still continue from session state.
-        });
         setStatus("Connected! Redirecting you back…");
-        setTimeout(() => router.push("/onboarding"), 1200);
+        setTimeout(() => router.push("/onboarding?oauth=google_connected"), 1200);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unable to complete Google connection");
       }

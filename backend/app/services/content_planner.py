@@ -91,7 +91,9 @@ class ContentPlannerService:
         self.db.refresh(plan)
         scheduled = self.scheduler.schedule(candidate.id)
         scheduled_time = self.scheduler._resolve_datetime(  # noqa: SLF001
-            candidate.candidate_date, scheduled.window_id or "morning"
+            candidate.candidate_date,
+            scheduled.window_id or "morning",
+            candidate.location.timezone if candidate.location else "UTC",
         )
         self.post_jobs.queue_from_plan(
             plan, run_at=scheduled_time, dedupe_key=f"plan:{plan.id}:{scheduled_time.isoformat()}"

@@ -29,8 +29,18 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!access.signedIn) {
     redirect("/sign-in?redirect=/app");
   }
+  if (access.role === "owner_admin") {
+    const adminBase = (process.env.NEXT_PUBLIC_ADMIN_APP_URL ?? "http://localhost:3002").replace(/\/$/, "");
+    redirect(`${adminBase}/admin`);
+  }
+  if (access.role !== "client") {
+    redirect("/sign-in?redirect=/app&error=invalid_role");
+  }
   if (!access.completed) {
-    redirect("/onboarding");
+    const onboardingTarget = access.destination && access.destination.startsWith("/onboarding")
+      ? access.destination
+      : "/onboarding";
+    redirect(onboardingTarget);
   }
 
   return (

@@ -28,7 +28,11 @@ class RotationEngine:
             .all()
         )
         cooldown_cutoff = now - self.cooldown
-        recent = {memory.value for memory in memories if memory.last_used_at >= cooldown_cutoff}
+        recent = {
+            memory.value
+            for memory in memories
+            if self._as_aware(memory.last_used_at) >= cooldown_cutoff
+        }
         available = [value for value in candidates if value not in recent]
         choice = available[0] if available else (candidates[0] if candidates else None)
         if choice:
@@ -42,3 +46,11 @@ class RotationEngine:
             self.db.add(memory)
             self.db.commit()
         return choice
+
+    @staticmethod
+    def _as_aware(value: datetime | None) -> datetime:
+        if value is None:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value

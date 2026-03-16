@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 
+from backend.app.api import admin_orgs as admin_orgs_api
 from backend.app.models.enums import MembershipRole, OrganizationType
 from backend.app.models.location import Location
 from backend.app.models.membership import Membership
@@ -17,8 +18,18 @@ def _create_staff_user(db_session) -> User:
     return staff
 
 
-def test_admin_create_and_list_orgs(api_client, db_session):
+def test_admin_create_and_list_orgs(api_client, db_session, monkeypatch):
     staff = _create_staff_user(db_session)
+    captured = {}
+
+    def _spy_ensure_tenant_row(db, *, tenant_id, business_name, tenant_type, slug=None, plan_tier="starter"):
+        captured["tenant_id"] = tenant_id
+        captured["business_name"] = business_name
+        captured["tenant_type"] = tenant_type
+        captured["slug"] = slug
+        captured["plan_tier"] = plan_tier
+
+    monkeypatch.setattr(admin_orgs_api, "ensure_tenant_row", _spy_ensure_tenant_row)
 
     response = api_client.post(
         "/api/admin/orgs",
@@ -31,6 +42,11 @@ def test_admin_create_and_list_orgs(api_client, db_session):
     assert data["plan_tier"] == "growth"
     assert data["needs_attention"] is False
     assert data["posting_paused"] is False
+    assert captured["tenant_id"] == uuid.UUID(data["id"])
+    assert captured["business_name"] == "Client One"
+    assert captured["tenant_type"] == OrganizationType.BUSINESS
+    assert captured["slug"] is None
+    assert captured["plan_tier"] == "growth"
 
     list_response = api_client.get("/api/admin/orgs", params={"user_id": str(staff.id)})
     assert list_response.status_code == 200

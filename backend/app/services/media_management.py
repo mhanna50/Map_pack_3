@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import uuid
 from typing import TYPE_CHECKING
+import re
 
 from sqlalchemy.orm import Session
 
@@ -10,8 +11,9 @@ from backend.app.models.enums import ActionType, MediaStatus, MediaType, Pending
 from backend.app.models.media_album import MediaAlbum
 from backend.app.models.media_asset import MediaAsset
 from backend.app.models.media_upload_request import MediaUploadRequest
+from backend.app.models.client_upload import ClientUpload
 from backend.app.services.media_selection import MediaSelector
-from backend.app.services.validators import assert_location_in_org, assert_connected_account_in_org
+from backend.app.services.validators import assert_location_in_org
 
 if TYPE_CHECKING:
     from backend.app.services.actions import ActionService
@@ -68,23 +70,42 @@ class MediaManagementService:
     ) -> MediaAsset:
         if location_id:
             assert_location_in_org(self.db, location_id=location_id, organization_id=organization_id)
+        normalized_categories = self._resolve_categories(
+            categories=categories,
+            file_name=file_name,
+            description=description,
+            job_type=job_type,
+            season=season,
+            shot_stage=shot_stage,
+        )
         asset = MediaAsset(
             organization_id=organization_id,
             location_id=location_id,
             storage_url=storage_url,
             file_name=file_name,
+            source="upload",
             media_type=media_type,
-            categories=categories or [],
+            categories=normalized_categories,
             album_id=album_id,
             description=description,
-            auto_caption=self._generate_caption(categories or [], description),
+            auto_caption=self._generate_caption(normalized_categories, description),
             status=MediaStatus.PENDING,
             job_type=job_type,
             season=season,
             shot_stage=shot_stage,
             upload_request_id=upload_request_id,
+            metadata_json={"source": "upload", "uploaded_at": datetime.now(timezone.utc).isoformat()},
         )
         self.db.add(asset)
+        self.db.flush()
+        upload_record = ClientUpload(
+            organization_id=organization_id,
+            location_id=location_id,
+            media_asset_id=asset.id,
+            description=description,
+            uploaded_at=datetime.now(timezone.utc),
+        )
+        self.db.add(upload_record)
         self.db.commit()
         self.db.refresh(asset)
         if upload_request_id:
@@ -176,7 +197,7 @@ class MediaManagementService:
         self, *, location_id: uuid.UUID, theme: str | None = None
     ) -> MediaAsset | None:
         selector = MediaSelector(self.db)
-        return selector.pick_asset(location_id=location_id, theme=theme)
+        return selector.pick_asset(location_id=location_id, theme=theme, mark_used=False)
 
     def list_assets(
         self,
@@ -220,6 +241,32 @@ class MediaManagementService:
         if not categories:
             return "Fresh upload ready for review."
         return f"New {categories[0]} photo ready to share."
+
+    @staticmethod
+    def _resolve_categories(
+        *,
+        categories: list[str] | None,
+        file_name: str,
+        description: str | None,
+        job_type: str | None,
+        season: str | None,
+        shot_stage: str | None,
+    ) -> list[str]:
+        values: list[str] = []
+        for item in categories or []:
+            if item:
+                values.append(str(item).strip().lower())
+        for text_value in [file_name, description, job_type, season, shot_stage]:
+            if not text_value:
+                continue
+            for token in re.findall(r"[a-z0-9]+", str(text_value).lower()):
+                if len(token) >= 4:
+                    values.append(token)
+        deduped: list[str] = []
+        for value in values:
+            if value and value not in deduped:
+                deduped.append(value)
+        return deduped
 
     def _attach_asset_to_request(self, asset: MediaAsset, request_id: uuid.UUID) -> None:
         request = self.db.get(MediaUploadRequest, request_id)
