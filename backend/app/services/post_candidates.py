@@ -12,6 +12,7 @@ from backend.app.models.post import Post
 from backend.app.models.location import Location
 from backend.app.models.post_candidate import PostCandidate
 from backend.app.models.daily_signal import DailySignal
+from backend.app.models.gbp_post_keyword_mapping import GbpPostKeywordMapping
 from backend.app.services.alerts import AlertService
 from backend.app.services.bucket_performance import BucketPerformanceService
 from backend.app.services.daily_signals import DailySignalService
@@ -63,6 +64,11 @@ class PostCandidateService:
         settings = self.settings.merged(organization_id, location_id)
         verified_offers = self.settings.verified_offers(organization_id, location_id)
         verified_events = self.settings.verified_events(organization_id, location_id)
+        planned_mapping = self._planned_mapping(
+            organization_id=organization_id,
+            location_id=location_id,
+            target_date=target_date,
+        )
         best: tuple[dict[str, Any], float] | None = None
         as_of = datetime.combine(target_date, datetime.min.time(), tzinfo=timezone.utc)
         reasons: dict[str, Any] = {
@@ -99,32 +105,43 @@ class PostCandidateService:
             return None
         mix = settings.get("content_mix", {})
         total_weight = sum(v for v in mix.values() if isinstance(v, (int, float)) and v > 0)
-        for bucket in BUCKETS:
-            if bucket["id"] == "offer" and not verified_offers:
-                continue
-            raw_weight = mix.get(bucket["id"], 0.0)
-            if raw_weight <= 0:
-                continue
-            norm_weight = raw_weight / total_weight if total_weight and not isclose(total_weight, 0.0) else 1.0
-            score = self._score_bucket(bucket, signal, location_id, target_date, as_of=as_of)
-            score = score * (0.5 + norm_weight)  # blend base score with mix weight
-            if seasonal_bucket and bucket["id"] == seasonal_bucket:
-                score += 10
-            if event_trigger and bucket["id"] == event_trigger.get("bucket"):
-                score += event_trigger.get("boost", 12)
-            perf_score = self.bucket_perf.get_score(
-                organization_id=organization_id,
-                location_id=location_id,
-                bucket=bucket["id"],
-                topic_tag=None,
-                as_of=as_of,
-            )
-            reasons[f"bucket_{bucket['id']}_score"] = perf_score
-            score += min(20, perf_score)
-            if score <= 0:
-                continue
-            if not best or score > best[1]:
-                best = (bucket, score)
+        if planned_mapping:
+            forced_bucket = self._bucket_for_angle(planned_mapping.post_angle)
+            best = ({"id": forced_bucket, "cooldown_days": 0}, 999.0)
+            reasons["keyword_mapping_id"] = str(planned_mapping.id)
+            reasons["target_keyword"] = planned_mapping.target_keyword
+            reasons["secondary_keywords"] = planned_mapping.secondary_keywords or []
+            reasons["keyword_post_angle"] = planned_mapping.post_angle
+            reasons["keyword_post_type"] = planned_mapping.post_type
+            reasons["keyword_cta"] = planned_mapping.cta
+            reasons["keyword_image_theme"] = planned_mapping.suggested_image_theme
+        else:
+            for bucket in BUCKETS:
+                if bucket["id"] == "offer" and not verified_offers:
+                    continue
+                raw_weight = mix.get(bucket["id"], 0.0)
+                if raw_weight <= 0:
+                    continue
+                norm_weight = raw_weight / total_weight if total_weight and not isclose(total_weight, 0.0) else 1.0
+                score = self._score_bucket(bucket, signal, location_id, target_date, as_of=as_of)
+                score = score * (0.5 + norm_weight)  # blend base score with mix weight
+                if seasonal_bucket and bucket["id"] == seasonal_bucket:
+                    score += 10
+                if event_trigger and bucket["id"] == event_trigger.get("bucket"):
+                    score += event_trigger.get("boost", 12)
+                perf_score = self.bucket_perf.get_score(
+                    organization_id=organization_id,
+                    location_id=location_id,
+                    bucket=bucket["id"],
+                    topic_tag=None,
+                    as_of=as_of,
+                )
+                reasons[f"bucket_{bucket['id']}_score"] = perf_score
+                score += min(20, perf_score)
+                if score <= 0:
+                    continue
+                if not best or score > best[1]:
+                    best = (bucket, score)
         if not best or best[1] < threshold:
             return None
         selected_bucket = best[0]["id"]
@@ -171,6 +188,11 @@ class PostCandidateService:
         self.db.add(candidate)
         self.db.commit()
         self.db.refresh(candidate)
+        if planned_mapping:
+            planned_mapping.post_candidate_id = candidate.id
+            planned_mapping.status = "scheduled"
+            self.db.add(planned_mapping)
+            self.db.commit()
         return candidate
 
     def _latest_signal(self, organization_id: uuid.UUID, location_id: uuid.UUID, target_date: date) -> DailySignal | None:
@@ -258,6 +280,36 @@ class PostCandidateService:
         if selected_bucket == "local_highlight" and verified_events:
             return "event"
         return "update"
+
+    def _planned_mapping(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        location_id: uuid.UUID,
+        target_date: date,
+    ) -> GbpPostKeywordMapping | None:
+        return (
+            self.db.query(GbpPostKeywordMapping)
+            .filter(
+                GbpPostKeywordMapping.organization_id == organization_id,
+                GbpPostKeywordMapping.location_id == location_id,
+                GbpPostKeywordMapping.publish_date == target_date,
+                GbpPostKeywordMapping.status.in_(["planned", "queued"]),
+            )
+            .order_by(GbpPostKeywordMapping.created_at.asc())
+            .first()
+        )
+
+    @staticmethod
+    def _bucket_for_angle(post_angle: str | None) -> str:
+        mapping = {
+            "service_post": "service_spotlight",
+            "offer_post": "offer",
+            "trust_post": "proof",
+            "local_relevance_post": "local_highlight",
+            "seasonal_post": "seasonal_tip",
+        }
+        return mapping.get((post_angle or "").lower(), "service_spotlight")
 
 
     @staticmethod

@@ -11,6 +11,7 @@ from backend.app.models.enums import (
     AutomationActionType,
     AutomationCondition,
     AutomationTriggerType,
+    LocationStatus,
     OrganizationType,
 )
 from backend.app.models.organization import Organization
@@ -189,3 +190,67 @@ def test_schedule_automation_rules_creates_actions(db_session, worker_session_fa
 
     result = worker_tasks._schedule_automation_rules()
     assert result["scheduled"] >= 1
+
+
+def test_schedule_keyword_campaigns_monthly_creates_actions(db_session, worker_session_factory):
+    org = Organization(
+        name="Keyword Monthly Org",
+        org_type=OrganizationType.AGENCY,
+        metadata_json={"onboarding_status": "completed"},
+    )
+    db_session.add(org)
+    db_session.flush()
+    location = Location(
+        name="Keyword Monthly Location",
+        organization_id=org.id,
+        timezone="UTC",
+        status=LocationStatus.ACTIVE,
+        google_location_id="accounts/11/locations/22",
+        address={"city": "Austin", "state": "TX", "primaryCategory": "HVAC contractor"},
+    )
+    db_session.add(location)
+    db_session.flush()
+    db_session.add(
+        LocationSettings(
+            location_id=location.id,
+            services=["ac repair", "furnace replacement"],
+            settings_json={"gbp_ready": True},
+        )
+    )
+    db_session.commit()
+
+    result = worker_tasks._schedule_keyword_campaigns_monthly()
+    assert result["scheduled"] >= 1
+
+
+def test_schedule_keyword_campaigns_onboarding_creates_one_action(db_session, worker_session_factory):
+    org = Organization(
+        name="Keyword Onboarding Org",
+        org_type=OrganizationType.AGENCY,
+        metadata_json={"onboarding_status": "completed"},
+    )
+    db_session.add(org)
+    db_session.flush()
+    location = Location(
+        name="Keyword Onboarding Location",
+        organization_id=org.id,
+        timezone="UTC",
+        status=LocationStatus.ACTIVE,
+        google_location_id="accounts/33/locations/44",
+        address={"city": "Austin", "state": "TX", "primaryCategory": "Plumber"},
+    )
+    db_session.add(location)
+    db_session.flush()
+    db_session.add(
+        LocationSettings(
+            location_id=location.id,
+            services=["pipe repair", "water heater install"],
+            settings_json={"gbp_ready": True},
+        )
+    )
+    db_session.commit()
+
+    first = worker_tasks._schedule_keyword_campaigns_onboarding()
+    second = worker_tasks._schedule_keyword_campaigns_onboarding()
+    assert first["scheduled"] >= 1
+    assert second["scheduled"] == 0

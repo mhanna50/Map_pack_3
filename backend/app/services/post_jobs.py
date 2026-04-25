@@ -19,6 +19,7 @@ from backend.app.models.enums import (
 from backend.app.models.post import Post
 from backend.app.models.post_job import PostJob
 from backend.app.models.post_attempt import PostAttempt
+from backend.app.models.gbp_post_keyword_mapping import GbpPostKeywordMapping
 from backend.app.services.audit import AuditService
 from backend.app.services.posts import PostService
 from backend.app.services.rate_limits import RateLimitError, RateLimitService
@@ -142,6 +143,7 @@ class PostJobService:
             job.result_json = result
             attempt.status = PostJobStatus.SUCCEEDED
             attempt.finished_at = datetime.now(timezone.utc)
+            self._mark_mapping_status(post=post, status="published")
             self.db.add(job)
             self.db.add(attempt)
             self.db.commit()
@@ -230,9 +232,56 @@ class PostJobService:
             topic_tags=topic_tags,
             media_asset_id=media_asset_id,
         )
+        if plan and plan.candidate_id:
+            self._attach_mapping_to_post(
+                organization_id=job.organization_id,
+                location_id=job.location_id,
+                post_candidate_id=plan.candidate_id,
+                post_id=post.id,
+            )
         return post
 
     @staticmethod
     def _fingerprint(plan: ContentPlan) -> str:
         payload = f"{plan.organization_id}:{plan.location_id}:{plan.target_date}"
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+
+    def _attach_mapping_to_post(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        location_id: uuid.UUID,
+        post_candidate_id: uuid.UUID,
+        post_id: uuid.UUID,
+    ) -> None:
+        mapping = (
+            self.db.query(GbpPostKeywordMapping)
+            .filter(
+                GbpPostKeywordMapping.organization_id == organization_id,
+                GbpPostKeywordMapping.location_id == location_id,
+                GbpPostKeywordMapping.post_candidate_id == post_candidate_id,
+            )
+            .order_by(GbpPostKeywordMapping.created_at.desc())
+            .first()
+        )
+        if not mapping:
+            return
+        mapping.post_id = post_id
+        mapping.status = "scheduled"
+        self.db.add(mapping)
+        self.db.commit()
+
+    def _mark_mapping_status(self, *, post: Post, status: str) -> None:
+        mapping = (
+            self.db.query(GbpPostKeywordMapping)
+            .filter(
+                GbpPostKeywordMapping.organization_id == post.organization_id,
+                GbpPostKeywordMapping.location_id == post.location_id,
+                GbpPostKeywordMapping.post_id == post.id,
+            )
+            .first()
+        )
+        if not mapping:
+            return
+        mapping.status = status
+        self.db.add(mapping)

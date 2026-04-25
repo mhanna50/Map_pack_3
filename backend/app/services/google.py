@@ -113,9 +113,31 @@ class GoogleOAuthService:
 
 
 class GoogleBusinessClient:
+    DEFAULT_LOCATION_READ_MASK = ",".join(
+        [
+            "name",
+            "title",
+            "storeCode",
+            "storefrontAddress",
+            "websiteUri",
+            "categories",
+            "serviceArea",
+            "serviceItems",
+            "regularHours",
+            "specialHours",
+            "metadata",
+            "phoneNumbers",
+            "latlng",
+            "profile",
+        ]
+    )
+
     def __init__(self, access_token: str) -> None:
         self.access_token = access_token
         self.base_url = str(settings.GOOGLE_BUSINESS_API_BASE_URL).rstrip("/")
+        self.account_management_base_url = str(
+            settings.GOOGLE_ACCOUNT_MANAGEMENT_API_BASE_URL
+        ).rstrip("/")
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -123,9 +145,11 @@ class GoogleBusinessClient:
             "Content-Type": "application/json",
         }
 
-    def _get(self, endpoint: str) -> dict[str, Any]:
+    def _get(
+        self, endpoint: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         with httpx.Client(timeout=30) as client:
-            resp = client.get(endpoint, headers=self._headers())
+            resp = client.get(endpoint, headers=self._headers(), params=params)
             self._raise_if_error(resp)
             return resp.json()
 
@@ -136,15 +160,39 @@ class GoogleBusinessClient:
             return resp.json()
 
     def list_accounts(self) -> list[dict[str, Any]]:
-        data = self._get(f"{self.base_url}/accounts")
-        return data.get("accounts", [])
+        accounts: list[dict[str, Any]] = []
+        params: dict[str, Any] = {"pageSize": 20}
+        while True:
+            data = self._get(
+                f"{self.account_management_base_url}/accounts", params=params
+            )
+            accounts.extend(data.get("accounts", []))
+            next_page_token = data.get("nextPageToken")
+            if not next_page_token:
+                return accounts
+            params["pageToken"] = next_page_token
 
     def list_locations(self, account_name: str) -> list[dict[str, Any]]:
-        data = self._get(f"{self.base_url}/{account_name}/locations")
-        return data.get("locations", [])
+        locations: list[dict[str, Any]] = []
+        params: dict[str, Any] = {
+            "pageSize": 100,
+            "readMask": self.DEFAULT_LOCATION_READ_MASK,
+        }
+        while True:
+            data = self._get(
+                f"{self.base_url}/{account_name}/locations", params=params
+            )
+            locations.extend(data.get("locations", []))
+            next_page_token = data.get("nextPageToken")
+            if not next_page_token:
+                return locations
+            params["pageToken"] = next_page_token
 
     def get_location(self, location_name: str) -> dict[str, Any]:
-        return self._get(f"{self.base_url}/{location_name}")
+        return self._get(
+            f"{self.base_url}/{location_name}",
+            params={"readMask": self.DEFAULT_LOCATION_READ_MASK},
+        )
 
     def list_reviews(self, location_name: str) -> list[dict[str, Any]]:
         data = self._get(f"{self.base_url}/{location_name}/reviews")

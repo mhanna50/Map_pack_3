@@ -38,4 +38,12 @@ celery_app.conf.beat_schedule = {
         "task": "actions.connection_health",
         "schedule": crontab(minute="*/30"),
     },
+    "schedule-keyword-campaigns-monthly": {
+        "task": "actions.schedule_keyword_campaigns_monthly",
+        "schedule": crontab(minute=10, hour=2, day_of_month="1"),
+    },
+    "schedule-keyword-campaigns-onboarding": {
+        "task": "actions.schedule_keyword_campaigns_onboarding",
+        "schedule": crontab(minute="*/10"),
+    },
 }

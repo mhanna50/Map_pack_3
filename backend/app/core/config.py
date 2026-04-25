@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_OAUTH_REDIRECT_URI: AnyHttpUrl | None = None
+    GOOGLE_ACCOUNT_MANAGEMENT_API_BASE_URL: AnyHttpUrl = cast(
+        AnyHttpUrl, "https://mybusinessaccountmanagement.googleapis.com/v1"
+    )
     GOOGLE_BUSINESS_API_BASE_URL: AnyHttpUrl = cast(
         AnyHttpUrl, "https://mybusinessbusinessinformation.googleapis.com/v1"
     )

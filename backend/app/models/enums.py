@@ -49,6 +49,8 @@ class ActionType(str, Enum):
     SCHEDULE_POST = "schedule_post"
     PLAN_CONTENT = "plan_content"
     EXECUTE_POST_JOB = "execute_post_job"
+    RUN_KEYWORD_CAMPAIGN = "run_keyword_campaign"
+    RUN_KEYWORD_FOLLOWUP_SCAN = "run_keyword_followup_scan"
     CUSTOM = "custom"
 
 

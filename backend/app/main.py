@@ -23,6 +23,7 @@ from .api.admin_alerts import router as admin_alerts_router
 from .api.admin_audit import router as admin_audit_router
 from .api.admin_observability import router as admin_observability_router
 from .api.auth import router as auth_router
+from .api.keyword_strategy import router as keyword_strategy_router
 
 app = FastAPI(title="Map 3-Pack API")
 
@@ -60,6 +61,7 @@ app.include_router(admin_alerts_router, prefix="/api")
 app.include_router(admin_audit_router, prefix="/api")
 app.include_router(admin_observability_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
+app.include_router(keyword_strategy_router, prefix="/api")
 
 
 @app.get("/")

@@ -10,6 +10,7 @@ import { Home, Image, Settings, Star, Gauge, LifeBuoy } from "lucide-react";
 const navItems = [
   { href: "/dashboard", label: "Overview", icon: Gauge },
   { href: "/dashboard/gbp", label: "GBP Monitoring", icon: Home },
+  { href: "/dashboard/keywords", label: "Keyword Strategy", icon: Gauge },
   { href: "/dashboard/reviews", label: "Reviews", icon: Star },
   { href: "/dashboard/content", label: "Content", icon: Image },
   { href: "/dashboard/settings", label: "Settings & Billing", icon: Settings },

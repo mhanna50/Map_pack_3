@@ -38,6 +38,21 @@ const ONBOARDING_STATUS_RANK: Record<string, number> = {
   activated: 6,
   canceled: -1,
 };
+const ONBOARDING_AUTH_STORAGE_PREFIX = "map-pack-client-auth:onboarding";
+
+const buildOnboardingAuthStorageKey = (inviteEmail: string | null, inviteToken: string | null): string | null => {
+  if (!inviteEmail && !inviteToken) {
+    return null;
+  }
+  if (inviteEmail) {
+    return `${ONBOARDING_AUTH_STORAGE_PREFIX}:email:${inviteEmail}`;
+  }
+  const tokenPrefix = (inviteToken ?? "")
+    .slice(0, 24)
+    .replace(/[^a-z0-9_-]/gi, "")
+    .toLowerCase();
+  return `${ONBOARDING_AUTH_STORAGE_PREFIX}:token:${tokenPrefix || "invite"}`;
+};
 
 const buildScopedKey = (baseKey: string, scope: string) => `${baseKey}:${scope}`;
 type StripeSubmitHandle = { submit: () => Promise<boolean> };
@@ -438,6 +453,16 @@ function OnboardingContent() {
   const [generatingServiceIndex, setGeneratingServiceIndex] = useState<number | null>(null);
   const inviteToken = searchParams?.get("token") ?? null;
   const oauthStatusFromQuery = searchParams?.get("oauth");
+  const [authBootstrapComplete, setAuthBootstrapComplete] = useState(false);
+  const onboardingAuthStorageKey = useMemo(
+    () => buildOnboardingAuthStorageKey(inviteEmailFromQuery, inviteToken),
+    [inviteEmailFromQuery, inviteToken],
+  );
+  const authClient = useMemo(
+    () => createClient(onboardingAuthStorageKey ? { storageKey: onboardingAuthStorageKey } : undefined),
+    [onboardingAuthStorageKey],
+  );
+  const getScopedAccessToken = useCallback(async () => getAccessToken(authClient), [authClient]);
 
   const buildOnboardingDraft = useCallback(
     (overrides?: { stripeStarted?: boolean; googleConnected?: boolean }): OnboardingDraftState => ({
@@ -591,10 +616,12 @@ function OnboardingContent() {
     let active = true;
     const checkSession = async () => {
       try {
-        const token = await getAccessToken();
+        const token = await getScopedAccessToken();
         if (!active) return;
-        const supabase = createClient();
-        const { data } = await supabase.auth.getUser();
+        const { data, error } = await authClient.auth.getUser();
+        if (error) {
+          throw error;
+        }
         const user = data.user;
         const verifiedPasswordSetAt = readSupabasePasswordSetAt(user);
         setHasSession(Boolean(token && user?.id));
@@ -603,6 +630,13 @@ function OnboardingContent() {
         if (verifiedPasswordSetAt) {
           setPasswordSetAt((prev) => prev ?? verifiedPasswordSetAt);
         }
+      } catch {
+        if (!active) {
+          return;
+        }
+        setHasSession(false);
+        setUserEmail(null);
+        setUserStorageScope(null);
       } finally {
         if (active) {
           setCheckingSession(false);
@@ -613,7 +647,7 @@ function OnboardingContent() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [authClient, getScopedAccessToken]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !userStorageScope) {
@@ -750,7 +784,7 @@ function OnboardingContent() {
       if (!tenantId) {
         return;
       }
-      const accessToken = await getAccessToken();
+      const accessToken = await getScopedAccessToken();
       if (!accessToken) {
         return;
       }
@@ -767,10 +801,13 @@ function OnboardingContent() {
         applyOnboardingDraft(payload.metadata_json.onboarding_draft);
       }
     },
-    [applyOnboardingDraft],
+    [applyOnboardingDraft, getScopedAccessToken],
   );
 
   useEffect(() => {
+    if (!authBootstrapComplete) {
+      return;
+    }
     let cancelled = false;
     setLoadingClaimStatus(true);
     const run = async () => {
@@ -804,7 +841,7 @@ function OnboardingContent() {
         }
 
         // Then claim any pending onboarding row by email (Supabase session required)
-        const accessToken = await getAccessToken();
+        const accessToken = await getScopedAccessToken();
         const claimHeaders: Record<string, string> = {
           "Content-Type": "application/json",
         };
@@ -915,7 +952,7 @@ function OnboardingContent() {
     return () => {
       cancelled = true;
     };
-  }, [applyOnboardingDraft, inviteEmailFromQuery, inviteToken, loadOrganizationDraftFromDb]);
+  }, [applyOnboardingDraft, authBootstrapComplete, getScopedAccessToken, inviteEmailFromQuery, inviteToken, loadOrganizationDraftFromDb]);
 
   const hasInviteContext = Boolean(inviteToken || inviteEmailFromQuery);
   const onboardingFullyCompleted =
@@ -1003,7 +1040,7 @@ function OnboardingContent() {
       if (!tenantId) {
         return;
       }
-      const accessToken = await getAccessToken();
+      const accessToken = await getScopedAccessToken();
       if (!accessToken) {
         throw new Error("Sign in to continue.");
       }
@@ -1031,7 +1068,7 @@ function OnboardingContent() {
         throw new Error(message);
       }
     },
-    [],
+    [getScopedAccessToken],
   );
 
   const saveProgress = useCallback(async (payload: SavePayload) => {
@@ -1041,7 +1078,7 @@ function OnboardingContent() {
     setSavingProgress(true);
     setProgressError(null);
     try {
-      const accessToken = await getAccessToken();
+      const accessToken = await getScopedAccessToken();
       const res = await fetch("/api/onboarding/save", {
         method: "POST",
         headers: {
@@ -1106,29 +1143,37 @@ function OnboardingContent() {
     } finally {
       setSavingProgress(false);
     }
-  }, [buildOnboardingDraft, currentStep, hasSession, orgInfo.name, organizationId, passwordSetAt, persistOrganizationDraft, resolvedInviteEmail]);
+  }, [buildOnboardingDraft, currentStep, getScopedAccessToken, hasSession, orgInfo.name, organizationId, persistOrganizationDraft, resolvedInviteEmail]);
 
   const refreshSession = useCallback(async () => {
     setCheckingSession(true);
-    const token = await getAccessToken();
-    const supabase = createClient();
-    const { data } = await supabase.auth.getUser();
-    const user = data.user;
-    const verifiedPasswordSetAt = readSupabasePasswordSetAt(user);
-    setHasSession(Boolean(token && user?.id));
-    setUserEmail(user?.email ?? null);
-    setUserStorageScope(user?.id ?? null);
-    if (verifiedPasswordSetAt) {
-      setPasswordSetAt((prev) => prev ?? verifiedPasswordSetAt);
+    try {
+      const token = await getScopedAccessToken();
+      const { data, error } = await authClient.auth.getUser();
+      if (error) {
+        throw error;
+      }
+      const user = data.user;
+      const verifiedPasswordSetAt = readSupabasePasswordSetAt(user);
+      setHasSession(Boolean(token && user?.id));
+      setUserEmail(user?.email ?? null);
+      setUserStorageScope(user?.id ?? null);
+      if (verifiedPasswordSetAt) {
+        setPasswordSetAt((prev) => prev ?? verifiedPasswordSetAt);
+      }
+    } catch {
+      setHasSession(false);
+      setUserEmail(null);
+      setUserStorageScope(null);
+    } finally {
+      setCheckingSession(false);
     }
-    setCheckingSession(false);
-  }, []);
+  }, [authClient, getScopedAccessToken]);
 
   const handleSwitchAccount = useCallback(async () => {
     setSwitchingAccount(true);
     try {
-      const supabase = createClient();
-      await supabase.auth.signOut();
+      await authClient.auth.signOut({ scope: "local" });
       setHasSession(false);
       setUserEmail(null);
       setUserStorageScope(null);
@@ -1138,13 +1183,16 @@ function OnboardingContent() {
     } finally {
       setSwitchingAccount(false);
     }
-  }, [router]);
+  }, [authClient, router]);
 
   // When landing from a Supabase invite/magic link, exchange the token in the URL for a session
   // so we can read the user's email immediately.
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const supabase = createClient();
+    setAuthBootstrapComplete(false);
+    if (typeof window === "undefined") {
+      setAuthBootstrapComplete(true);
+      return;
+    }
     const bootstrapSession = async () => {
       try {
         // Hash params (/#access_token=...&refresh_token=...)
@@ -1154,7 +1202,7 @@ function OnboardingContent() {
           const access_token = params.get("access_token");
           const refresh_token = params.get("refresh_token");
           if (access_token && refresh_token) {
-            await supabase.auth.setSession({ access_token, refresh_token });
+            await authClient.auth.setSession({ access_token, refresh_token });
             window.location.hash = "";
           }
         }
@@ -1162,16 +1210,17 @@ function OnboardingContent() {
         // PKCE / code param (?code=...) from email link
         const code = new URLSearchParams(window.location.search).get("code");
         if (code) {
-          await supabase.auth.exchangeCodeForSession(code);
+          await authClient.auth.exchangeCodeForSession(code);
         }
       } catch {
         // ignore; fall back to normal session check
       } finally {
         await refreshSession();
+        setAuthBootstrapComplete(true);
       }
     };
     void bootstrapSession();
-  }, [refreshSession]);
+  }, [authClient, refreshSession]);
 
   const createOrganization = async (): Promise<string> => {
     if (organizationId) {
@@ -1183,7 +1232,7 @@ function OnboardingContent() {
     setCreatingOrg(true);
     setCreateOrgError(null);
     try {
-      const token = await getAccessToken();
+      const token = await getScopedAccessToken();
       if (!token) {
         throw new Error("Sign in to create your organization.");
       }
@@ -1230,7 +1279,7 @@ function OnboardingContent() {
     setConnectError(null);
     setConnectingGoogle(true);
     try {
-      const token = await getAccessToken();
+      const token = await getScopedAccessToken();
       if (!token) {
         throw new Error("Sign in to connect Google.");
       }
@@ -1373,7 +1422,7 @@ function OnboardingContent() {
 
   const loadGoogleAccounts = useCallback(async () => {
     if (!organizationId) return;
-    const token = await getAccessToken();
+    const token = await getScopedAccessToken();
     if (!token) return;
     setLoadingGoogleAccounts(true);
     setConnectError(null);
@@ -1414,11 +1463,11 @@ function OnboardingContent() {
     } finally {
       setLoadingGoogleAccounts(false);
     }
-  }, [organizationId]);
+  }, [getScopedAccessToken, organizationId]);
 
   const loadGoogleLocations = useCallback(async (accountId: string) => {
     if (!accountId) return;
-    const token = await getAccessToken();
+    const token = await getScopedAccessToken();
     if (!token) return;
     setLoadingGoogleLocations(true);
     setConnectError(null);
@@ -1454,14 +1503,14 @@ function OnboardingContent() {
     } finally {
       setLoadingGoogleLocations(false);
     }
-  }, []);
+  }, [getScopedAccessToken]);
 
   const handleSelectGoogleLocation = useCallback(async () => {
     if (!organizationId || !selectedGoogleAccountId || !selectedGoogleLocationName) {
       setConnectError("Select a Google account and location first.");
       return;
     }
-    const token = await getAccessToken();
+    const token = await getScopedAccessToken();
     if (!token) {
       setConnectError("Sign in to continue.");
       return;
@@ -1523,6 +1572,7 @@ function OnboardingContent() {
     saveProgress,
     selectedGoogleAccountId,
     selectedGoogleLocationName,
+    getScopedAccessToken,
   ]);
 
   const generateServiceDescription = useCallback(async (serviceName: string) => {
@@ -1602,10 +1652,7 @@ function OnboardingContent() {
     void loadGoogleLocations(selectedGoogleAccountId);
   }, [loadGoogleLocations, selectedGoogleAccountId]);
 
-  const statusForStep = (
-    step: number,
-    overrides?: { stripeStarted?: boolean; googleConnected?: boolean },
-  ) => {
+  const statusForStep = (step: number) => {
     switch (step) {
       case 0:
         return "business_setup";
@@ -1622,7 +1669,7 @@ function OnboardingContent() {
     overrides?: { stripeStarted?: boolean; googleConnected?: boolean },
   ) => {
     let resolvedTenantId = organizationId;
-    const nextStatus = statusForStep(currentStep, overrides);
+    const nextStatus = statusForStep(currentStep);
     if (!resolvedTenantId) {
       try {
         resolvedTenantId = await createOrganization();

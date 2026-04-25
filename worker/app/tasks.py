@@ -13,6 +13,7 @@ from backend.app.models.enums import ActionStatus, ActionType
 from backend.app.models.organization import Organization
 from backend.app.services.gbp_connections import GbpConnectionService
 from backend.app.services.actions import ActionExecutor, ActionService
+from backend.app.services.keyword_strategy import KeywordCampaignSchedulerService
 
 logger = get_task_logger(__name__)
 
@@ -119,6 +120,26 @@ def _connection_health() -> Dict[str, int]:
         db.close()
 
 
+def _schedule_keyword_campaigns_monthly() -> Dict[str, int]:
+    db = SessionLocal()
+    try:
+        scheduler = KeywordCampaignSchedulerService(db)
+        scheduled = scheduler.schedule_monthly_campaigns()
+        return {"scheduled": scheduled}
+    finally:
+        db.close()
+
+
+def _schedule_keyword_campaigns_onboarding() -> Dict[str, int]:
+    db = SessionLocal()
+    try:
+        scheduler = KeywordCampaignSchedulerService(db)
+        scheduled = scheduler.schedule_onboarding_first_runs()
+        return {"scheduled": scheduled}
+    finally:
+        db.close()
+
+
 dispatch_due_actions = cast(
     Task, celery_app.task(name="actions.dispatch_due")(_dispatch_due_actions)
 )
@@ -131,4 +152,16 @@ plan_content = cast(
 )
 connection_health = cast(
     Task, celery_app.task(name="actions.connection_health")(_connection_health)
+)
+schedule_keyword_campaigns_monthly = cast(
+    Task,
+    celery_app.task(name="actions.schedule_keyword_campaigns_monthly")(
+        _schedule_keyword_campaigns_monthly
+    ),
+)
+schedule_keyword_campaigns_onboarding = cast(
+    Task,
+    celery_app.task(name="actions.schedule_keyword_campaigns_onboarding")(
+        _schedule_keyword_campaigns_onboarding
+    ),
 )

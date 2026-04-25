@@ -71,6 +71,11 @@ class PostCompositionService:
         seasonal_hint = self._seasonal_hint(candidate.candidate_date)
         offer_context = offers[0] if offers else None
         event_context = events[0] if events else None
+        focus_keyword = None
+        if isinstance(candidate.reason_json, dict):
+            raw_keyword = candidate.reason_json.get("target_keyword")
+            if isinstance(raw_keyword, str) and raw_keyword.strip():
+                focus_keyword = raw_keyword.strip()
 
         # Best effort GBP media import so existing GBP photos share the same local media pool.
         self._sync_gbp_media_best_effort(candidate)
@@ -96,6 +101,7 @@ class PostCompositionService:
             offer_context=offer_context,
             event_context=event_context,
             media_tags=list(media.categories or []) if media else [],
+            focus_keyword=focus_keyword,
         )
         caption = generated or self._fallback_caption(
             post_type=post_type,
@@ -109,7 +115,9 @@ class PostCompositionService:
             cta=cta,
             offer_context=offer_context,
             event_context=event_context,
+            focus_keyword=focus_keyword,
         )
+        caption = self._inject_focus_keyword(caption, focus_keyword)
 
         recent_bodies = self._recent_bodies(candidate.location_id)
         errors = self.guardrails.validate(
@@ -135,6 +143,7 @@ class PostCompositionService:
                 cta=cta,
                 offer_context=offer_context,
                 event_context=event_context,
+                focus_keyword=focus_keyword,
             )
             fallback_errors = self.guardrails.validate(
                 safe_fallback,
@@ -313,6 +322,7 @@ class PostCompositionService:
         offer_context: dict | None,
         event_context: dict | None,
         media_tags: list[str],
+        focus_keyword: str | None,
     ) -> str | None:
         if not settings.OPENAI_API_KEY:
             return None
@@ -333,6 +343,7 @@ class PostCompositionService:
             "seasonal_hint": seasonal_hint,
             "cta": cta,
             "media_tags": media_tags,
+            "focus_keyword": focus_keyword,
             "verified_offer": offer_context,
             "verified_event": event_context,
             "constraints": [
@@ -378,6 +389,7 @@ class PostCompositionService:
         cta: str,
         offer_context: dict | None,
         event_context: dict | None,
+        focus_keyword: str | None,
     ) -> str:
         tone_openers = {
             "friendly": "Friendly guidance from your local team:",
@@ -425,7 +437,21 @@ class PostCompositionService:
         line_one, line_two = angle_map.get(angle, angle_map["service_highlight"])
         if tone == "concise":
             return f"{opener} {line_one} {cta}"
-        return f"{opener} {line_one} {line_two} {cta}"
+        text = f"{opener} {line_one} {line_two} {cta}"
+        return self._inject_focus_keyword(text, focus_keyword)
+
+    @staticmethod
+    def _inject_focus_keyword(text: str, focus_keyword: str | None) -> str:
+        if not focus_keyword:
+            return text
+        lowered = text.lower()
+        keyword_lower = focus_keyword.lower()
+        if keyword_lower in lowered:
+            return text
+        suffix = f"We also support customers searching for {focus_keyword}."
+        if text.endswith("."):
+            return f"{text} {suffix}"
+        return f"{text}. {suffix}"
 
     def _recent_bodies(self, location_id: uuid.UUID, days: int = 60) -> list[str]:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)

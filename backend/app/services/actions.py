@@ -31,6 +31,7 @@ from .post_scheduler import PostSchedulerService
 from .post_metrics import PostMetricsService
 from .content_planner import ContentPlannerService
 from .post_jobs import PostJobService
+from .keyword_strategy import KeywordCampaignService
 from ..models.location import Location
 from ..models.post_job import PostJob
 from ..models.gbp_connection import GbpConnection
@@ -422,6 +423,7 @@ class ActionExecutor:
         self.post_metrics = PostMetricsService(db)
         self.content_planner = ContentPlannerService(db)
         self.post_jobs = PostJobService(db)
+        self.keyword_campaigns = KeywordCampaignService(db)
         self.connection_service = GbpConnectionService(db)
         self.alerts = AlertService(db)
         self.oauth = GoogleOAuthService()
@@ -442,6 +444,8 @@ class ActionExecutor:
             ActionType.SCHEDULE_POST: self._handle_schedule_post,
             ActionType.PLAN_CONTENT: self._handle_plan_content,
             ActionType.EXECUTE_POST_JOB: self._handle_execute_post_job,
+            ActionType.RUN_KEYWORD_CAMPAIGN: self._handle_run_keyword_campaign,
+            ActionType.RUN_KEYWORD_FOLLOWUP_SCAN: self._handle_run_keyword_followup_scan,
             ActionType.CUSTOM: self._handle_noop,
         }
 
@@ -689,6 +693,38 @@ class ActionExecutor:
             return {"status": "missing_post_job"}
         result = self.post_jobs.execute(uuid.UUID(job_id))
         return result
+
+    def _handle_run_keyword_campaign(self, action: Action) -> dict[str, Any]:
+        payload = action.payload or {}
+        location_id = payload.get("location_id") or (str(action.location_id) if action.location_id else None)
+        if not location_id:
+            return {"status": "missing_location"}
+        cycle = self.keyword_campaigns.run_cycle(
+            organization_id=action.organization_id,
+            location_id=uuid.UUID(str(location_id)),
+            cycle_year=int(payload["cycle_year"]) if payload.get("cycle_year") else None,
+            cycle_month=int(payload["cycle_month"]) if payload.get("cycle_month") else None,
+            trigger_source=str(payload.get("trigger_source") or "monthly"),
+            onboarding_triggered=bool(payload.get("onboarding_triggered") is True),
+        )
+        return {
+            "status": "keyword_campaign_completed",
+            "cycle_id": str(cycle.id),
+            "cycle_year": cycle.cycle_year,
+            "cycle_month": cycle.cycle_month,
+        }
+
+    def _handle_run_keyword_followup_scan(self, action: Action) -> dict[str, Any]:
+        payload = action.payload or {}
+        cycle_id = payload.get("cycle_id")
+        if not cycle_id:
+            return {"status": "missing_cycle_id"}
+        cycle = self.keyword_campaigns.run_followup_scan(cycle_id=uuid.UUID(str(cycle_id)))
+        return {
+            "status": "keyword_followup_completed",
+            "cycle_id": str(cycle.id),
+            "followup_scanned_at": cycle.followup_scanned_at.isoformat() if cycle.followup_scanned_at else None,
+        }
 
     def _handle_noop(self, action: Action) -> dict[str, Any]:
         return {"status": "no-op"}

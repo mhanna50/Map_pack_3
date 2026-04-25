@@ -54,6 +54,16 @@ from .rate_limit_state import RateLimitState
 from .client_upload import ClientUpload
 from .photo_request import PhotoRequest
 from .org_settings import OrgSettings
+from .keyword_campaign_cycle import KeywordCampaignCycle
+from .keyword_candidate import KeywordCandidate
+from .keyword_score import KeywordScore
+from .selected_keyword import SelectedKeyword
+from .gbp_optimization_action import GbpOptimizationAction
+from .gbp_post_keyword_mapping import GbpPostKeywordMapping
+from .geo_grid_scan import GeoGridScan
+from .geo_grid_scan_point import GeoGridScanPoint
+from .campaign_job_run import CampaignJobRun
+from .keyword_dashboard_aggregate import KeywordDashboardAggregate
 
 __all__ = [
     "Action",
@@ -112,4 +122,14 @@ __all__ = [
     "ClientUpload",
     "PhotoRequest",
     "OrgSettings",
+    "KeywordCampaignCycle",
+    "KeywordCandidate",
+    "KeywordScore",
+    "SelectedKeyword",
+    "GbpOptimizationAction",
+    "GbpPostKeywordMapping",
+    "GeoGridScan",
+    "GeoGridScanPoint",
+    "CampaignJobRun",
+    "KeywordDashboardAggregate",
 ]
