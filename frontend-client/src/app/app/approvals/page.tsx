@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ApprovalQueueWidget, type ApprovalItem } from "@/components/approval-queue-widget";
+import { ApprovalQueueWidget, type ApprovalItem } from "@/features/approvals/components/approval-queue-widget";
 import { Drawer } from "@/components/drawer";
 import { StatusBadge } from "@/components/status-badge";
 import { useToast } from "@/components/toast";

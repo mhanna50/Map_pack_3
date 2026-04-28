@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminUser } from "@/lib/adminDb";
+import { requireAdminUser } from "@/features/admin/adminDb";
 
 const impersonationEnabled = process.env.ALLOW_ADMIN_IMPERSONATION === "true";
 

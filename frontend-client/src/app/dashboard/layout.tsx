@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
-import { TenantProvider } from "@/lib/tenant-context";
-import { getOnboardingAccessState } from "@/lib/server/onboarding-guard";
+import { TenantProvider } from "@/features/tenants/tenant-context";
+import { getOnboardingAccessState } from "@/features/onboarding/server/onboarding-guard";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const access = await getOnboardingAccessState();

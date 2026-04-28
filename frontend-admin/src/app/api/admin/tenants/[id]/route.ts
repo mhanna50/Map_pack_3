@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchTenantDetail, requireAdminUser, setTenantAutomationPaused } from "@/lib/adminDb";
+import { fetchTenantDetail, requireAdminUser, setTenantAutomationPaused } from "@/features/admin/adminDb";
 
 export async function GET(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {

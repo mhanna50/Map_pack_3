@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminUser } from "@/lib/adminDb";
+import { requireAdminUser } from "@/features/admin/adminDb";
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {

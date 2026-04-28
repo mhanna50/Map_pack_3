@@ -1,13 +1,11 @@
 "use client";
 
-import { forwardRef, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
-import { loadStripe } from "@stripe/stripe-js";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getAccessToken } from "@/lib/supabase/session";
 
-const steps = ["Google login + profile", "Business info + brand voice", "Services", "Stripe signup"];
+const steps = ["Google login + GBP", "Business info + services", "Stripe payment"];
 
 const toneOptions = ["Friendly", "Professional", "Bold", "Concise"];
 const toneSentenceSamples: Record<string, string> = {
@@ -17,11 +15,9 @@ const toneSentenceSamples: Record<string, string> = {
   Concise: "Fast HVAC repair, clear pricing, and reliable results.",
 };
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000").trim().replace(/\/+$/, "");
-const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "");
 const ONBOARDING_DRAFT_KEY = "onboarding:draft:v1";
 const ONBOARDING_ORG_ID_KEY = "onboarding:orgId:v1";
 const ONBOARDING_GOOGLE_CONNECTED_KEY = "onboarding:googleConnected:v1";
-const ONBOARDING_STRIPE_STARTED_KEY = "onboarding:stripeStarted:v1";
 const DEFAULT_LIST_ROWS = 3;
 const MAX_SECONDARY_LOCATIONS = 10;
 const MAX_SERVICE_ROWS = 10;
@@ -55,7 +51,6 @@ const buildOnboardingAuthStorageKey = (inviteEmail: string | null, inviteToken: 
 };
 
 const buildScopedKey = (baseKey: string, scope: string) => `${baseKey}:${scope}`;
-type StripeSubmitHandle = { submit: () => Promise<boolean> };
 type LocationInput = {
   city: string;
   state: string;
@@ -64,10 +59,15 @@ type OrgInfoState = {
   name: string;
   firstName: string;
   lastName: string;
+  contactName: string;
+  contactEmail: string;
+  phone: string;
+  addressOrServiceArea: string;
   primaryCategory: string;
   primaryLocationCity: string;
   primaryLocationState: string;
   secondaryLocations: LocationInput[];
+  existingBusinessDescription: string;
 };
 type BrandVoiceState = {
   tone: string;
@@ -107,7 +107,6 @@ type OnboardingDraftState = {
   selectedGoogleLocationName?: string | null;
   selectedGoogleLocation?: Partial<SelectedGoogleLocation> | null;
   googleConnected?: boolean;
-  stripeStarted?: boolean;
   agreementAccepted?: boolean;
   agreementSignature?: string;
   passwordSetAt?: string | null;
@@ -121,10 +120,15 @@ const defaultOrgInfo: OrgInfoState = {
   name: "",
   firstName: "",
   lastName: "",
+  contactName: "",
+  contactEmail: "",
+  phone: "",
+  addressOrServiceArea: "",
   primaryCategory: "",
   primaryLocationCity: "",
   primaryLocationState: "",
   secondaryLocations: Array.from({ length: DEFAULT_LIST_ROWS }, () => ({ city: "", state: "" })),
+  existingBusinessDescription: "",
 };
 
 const defaultBrandVoice: BrandVoiceState = {
@@ -229,13 +233,12 @@ const statusToResumeStep = (status?: string | null) => {
     case "business_setup":
       return 1;
     case "stripe_pending":
-      return 2;
     case "stripe_started":
     case "google_pending":
     case "google_connected":
     case "completed":
     case "activated":
-      return 3;
+      return 2;
     default:
       return 0;
   }
@@ -324,73 +327,6 @@ const readSupabasePasswordSetAt = (value: unknown): string | null => {
   return typeof raw === "string" && raw.trim() ? raw.trim() : null;
 };
 
-type StripePaymentProps = {
-  onPaid: () => void;
-  setError: (message: string | null) => void;
-  setSubmitting: (value: boolean) => void;
-  submitting: boolean;
-  showValidationCue: boolean;
-  onValidationIssue: () => void;
-};
-
-const StripePaymentSection = forwardRef<StripeSubmitHandle, StripePaymentProps>(function StripePaymentSection(
-  { onPaid, setError, setSubmitting, submitting, showValidationCue, onValidationIssue },
-  ref,
-) {
-  const stripe = useStripe();
-  const elements = useElements();
-
-  useImperativeHandle(ref, () => ({
-    submit: async () => {
-      if (!stripe || !elements) {
-        setError("Payment form not ready yet. Please wait a moment.");
-        onValidationIssue();
-        return false;
-      }
-      setSubmitting(true);
-      setError(null);
-      try {
-        const submitResult = await elements.submit();
-        if (submitResult.error) {
-          setError(submitResult.error.message ?? "Please complete all required payment fields.");
-          onValidationIssue();
-          return false;
-        }
-
-        const result = await stripe.confirmPayment({
-          elements,
-          redirect: "if_required",
-        });
-        if (result.error) {
-          setError(result.error.message ?? "Payment failed");
-          onValidationIssue();
-          return false;
-        }
-        onPaid();
-        return true;
-      } finally {
-        setSubmitting(false);
-      }
-    },
-  }));
-
-  return (
-    <div
-      className={`space-y-4 rounded-2xl border p-4 transition ${
-        showValidationCue ? "border-rose-300 bg-rose-50/40" : "border-slate-200"
-      }`}
-    >
-      <PaymentElement options={{ layout: "tabs" }} />
-      {showValidationCue && (
-        <p className="text-xs text-rose-700">
-          Complete all required billing fields before continuing.
-        </p>
-      )}
-      {submitting && <p className="text-xs text-slate-500">Processing payment…</p>}
-    </div>
-  );
-});
-
 export default function OnboardingPage() {
   return (
     <Suspense fallback={<div className="min-h-screen px-6 py-12 text-center text-slate-600">Loading onboarding…</div>}>
@@ -414,13 +350,8 @@ function OnboardingContent() {
   const [resolvedInviteEmail, setResolvedInviteEmail] = useState<string | null>(inviteEmailFromQuery);
   const [passwordSetAt, setPasswordSetAt] = useState<string | null>(null);
   const [stripeStarted, setStripeStarted] = useState(false);
-  const [stripeClientSecret, setStripeClientSecret] = useState<string | null>(null);
   const [stripeLoading, setStripeLoading] = useState(false);
   const [stripeError, setStripeError] = useState<string | null>(null);
-  const [stripeSubmitting, setStripeSubmitting] = useState(false);
-  const [stripeFieldAttention, setStripeFieldAttention] = useState(false);
-  const stripeSectionRef = useRef<StripeSubmitHandle>(null);
-  const stripeInitAttemptedRef = useRef(false);
   const [googleConnected, setGoogleConnected] = useState(false);
   const [agreementAccepted, setAgreementAccepted] = useState(false);
   const [agreementSignature, setAgreementSignature] = useState("");
@@ -465,7 +396,7 @@ function OnboardingContent() {
   const getScopedAccessToken = useCallback(async () => getAccessToken(authClient), [authClient]);
 
   const buildOnboardingDraft = useCallback(
-    (overrides?: { stripeStarted?: boolean; googleConnected?: boolean }): OnboardingDraftState => ({
+    (overrides?: { googleConnected?: boolean }): OnboardingDraftState => ({
       organizationId: organizationId ?? undefined,
       orgInfo,
       brandVoice,
@@ -475,7 +406,6 @@ function OnboardingContent() {
       selectedGoogleLocationName,
       selectedGoogleLocation,
       googleConnected: overrides?.googleConnected ?? googleConnected,
-      stripeStarted: overrides?.stripeStarted ?? stripeStarted,
       agreementAccepted,
       agreementSignature,
       passwordSetAt,
@@ -493,7 +423,6 @@ function OnboardingContent() {
       selectedGoogleLocation,
       selectedGoogleLocationName,
       services,
-      stripeStarted,
     ],
   );
 
@@ -524,6 +453,13 @@ function OnboardingContent() {
         name: typeof orgInfoDraft.name === "string" ? orgInfoDraft.name : prev.name,
         firstName: typeof orgInfoDraft.firstName === "string" ? orgInfoDraft.firstName : prev.firstName,
         lastName: typeof orgInfoDraft.lastName === "string" ? orgInfoDraft.lastName : prev.lastName,
+        contactName: typeof orgInfoDraft.contactName === "string" ? orgInfoDraft.contactName : prev.contactName,
+        contactEmail: typeof orgInfoDraft.contactEmail === "string" ? orgInfoDraft.contactEmail : prev.contactEmail,
+        phone: typeof orgInfoDraft.phone === "string" ? orgInfoDraft.phone : prev.phone,
+        addressOrServiceArea:
+          typeof orgInfoDraft.addressOrServiceArea === "string"
+            ? orgInfoDraft.addressOrServiceArea
+            : prev.addressOrServiceArea,
         primaryCategory: typeof orgInfoDraft.primaryCategory === "string" ? orgInfoDraft.primaryCategory : prev.primaryCategory,
         primaryLocationCity: normalizedPrimary ? normalizedPrimary.city : prev.primaryLocationCity,
         primaryLocationState: normalizedPrimary ? normalizedPrimary.state : prev.primaryLocationState,
@@ -531,6 +467,10 @@ function OnboardingContent() {
           orgInfoDraft.secondaryLocations !== undefined
             ? normalizeSecondaryLocations(orgInfoDraft.secondaryLocations)
             : prev.secondaryLocations,
+        existingBusinessDescription:
+          typeof orgInfoDraft.existingBusinessDescription === "string"
+            ? orgInfoDraft.existingBusinessDescription
+            : prev.existingBusinessDescription,
       }));
     }
     if (brandVoiceDraft) {
@@ -589,12 +529,6 @@ function OnboardingContent() {
     if (typeof rawDraft.googleConnected === "boolean") {
       setGoogleConnected(rawDraft.googleConnected);
     }
-    if (typeof rawDraft.stripeStarted === "boolean") {
-      setStripeStarted(rawDraft.stripeStarted);
-      if (rawDraft.stripeStarted) {
-        setStripeClientSecret(null);
-      }
-    }
     if (typeof rawDraft.agreementAccepted === "boolean") {
       setAgreementAccepted(rawDraft.agreementAccepted);
     }
@@ -611,6 +545,17 @@ function OnboardingContent() {
       setResolvedInviteEmail(inviteEmailFromQuery);
     }
   }, [inviteEmailFromQuery]);
+
+  useEffect(() => {
+    if (!userEmail) {
+      return;
+    }
+    setOrgInfo((prev) => ({
+      ...prev,
+      contactEmail: prev.contactEmail || userEmail,
+      contactName: prev.contactName || [prev.firstName, prev.lastName].filter(Boolean).join(" "),
+    }));
+  }, [userEmail]);
 
   useEffect(() => {
     let active = true;
@@ -671,11 +616,6 @@ function OnboardingContent() {
     if (storedConnected === "true") {
       setGoogleConnected(true);
     }
-    const storedStripeStarted = sessionStorage.getItem(buildScopedKey(ONBOARDING_STRIPE_STARTED_KEY, userStorageScope));
-    if (storedStripeStarted === "true") {
-      setStripeStarted(true);
-      setStripeClientSecret(null);
-    }
   }, [applyOnboardingDraft, userStorageScope]);
 
 
@@ -699,85 +639,9 @@ function OnboardingContent() {
     if (typeof window === "undefined" || !userStorageScope) {
       return;
     }
-    sessionStorage.setItem(buildScopedKey(ONBOARDING_STRIPE_STARTED_KEY, userStorageScope), stripeStarted ? "true" : "false");
-  }, [stripeStarted, userStorageScope]);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !userStorageScope) {
-      return;
-    }
     const draft = buildOnboardingDraft();
     localStorage.setItem(buildScopedKey(ONBOARDING_DRAFT_KEY, userStorageScope), JSON.stringify(draft));
   }, [buildOnboardingDraft, userStorageScope]);
-
-  const initializeStripeIntent = useCallback(async () => {
-    if (!userEmail) {
-      setStripeError("Sign in to continue.");
-      return;
-    }
-    const companyName = orgInfo.name.trim();
-    if (companyName.length > 0 && companyName.length < 2) {
-      setStripeError("Company name must be at least 2 characters. Go back to Business setup and update it.");
-      return;
-    }
-    setStripeLoading(true);
-    setStripeError(null);
-    setStripeFieldAttention(false);
-    setStripeClientSecret(null);
-    try {
-      const response = await fetch(`${API_BASE_URL}/billing/subscribe`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: userEmail,
-          company_name: companyName || "New client",
-          plan: "starter",
-        }),
-      });
-      if (!response.ok) {
-        const message = await readErrorMessage(response, "Unable to start Stripe checkout");
-        throw new Error(message);
-      }
-      const payload = await response.json();
-      const requiresPaymentMethod = payload?.requires_payment_method !== false;
-      const clientSecret = typeof payload?.client_secret === "string" ? payload.client_secret : null;
-
-      if (!requiresPaymentMethod || !clientSecret) {
-        setStripeStarted(true);
-        setStripeClientSecret(null);
-        return;
-      }
-
-      setStripeClientSecret(clientSecret);
-    } catch (error) {
-      const message = normalizeClientError(error, "Unable to start Stripe checkout");
-      setStripeError(message);
-    } finally {
-      setStripeLoading(false);
-    }
-  }, [orgInfo.name, userEmail]);
-
-  useEffect(() => {
-    if (currentStep !== 3) {
-      stripeInitAttemptedRef.current = false;
-      return;
-    }
-    if (!userEmail || stripeStarted || stripeClientSecret || stripeLoading || stripeInitAttemptedRef.current) {
-      return;
-    }
-    stripeInitAttemptedRef.current = true;
-    void initializeStripeIntent();
-  }, [currentStep, initializeStripeIntent, stripeClientSecret, stripeLoading, stripeStarted, userEmail]);
-
-  useEffect(() => {
-    if (!stripeFieldAttention) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      setStripeFieldAttention(false);
-    }, 2500);
-    return () => window.clearTimeout(timer);
-  }, [stripeFieldAttention]);
 
   const loadOrganizationDraftFromDb = useCallback(
     async (tenantId: string | null | undefined) => {
@@ -907,6 +771,8 @@ function OnboardingContent() {
           name: claim.business_name || prev.name,
           firstName: claim.first_name || prev.firstName,
           lastName: claim.last_name || prev.lastName,
+          contactName: prev.contactName || [claim.first_name, claim.last_name].filter(Boolean).join(" "),
+          contactEmail: prev.contactEmail || userEmail || "",
         }));
 
         const claimStatus = typeof claim.status === "string" ? claim.status : "in_progress";
@@ -919,7 +785,6 @@ function OnboardingContent() {
 
         if (["google_pending", "google_connected", "completed", "activated"].includes(claimStatus)) {
           setStripeStarted(true);
-          setStripeClientSecret(null);
         }
 
         if (["google_connected", "completed", "activated"].includes(claimStatus)) {
@@ -952,13 +817,21 @@ function OnboardingContent() {
     return () => {
       cancelled = true;
     };
-  }, [applyOnboardingDraft, authBootstrapComplete, getScopedAccessToken, inviteEmailFromQuery, inviteToken, loadOrganizationDraftFromDb]);
+  }, [applyOnboardingDraft, authBootstrapComplete, getScopedAccessToken, inviteEmailFromQuery, inviteToken, loadOrganizationDraftFromDb, userEmail]);
 
   const hasInviteContext = Boolean(inviteToken || inviteEmailFromQuery);
   const onboardingFullyCompleted =
     (ONBOARDING_STATUS_RANK[onboardingStatus] ?? -1) >= ONBOARDING_STATUS_RANK.completed;
   const businessSetupSaved =
     Boolean(organizationId) && (ONBOARDING_STATUS_RANK[onboardingStatus] ?? -1) >= ONBOARDING_STATUS_RANK.business_setup;
+
+  useEffect(() => {
+    if (searchParams?.get("payment") !== "success" || !onboardingFullyCompleted) {
+      return;
+    }
+    router.replace("/dashboard");
+    router.refresh();
+  }, [onboardingFullyCompleted, router, searchParams]);
 
   const hasConnectedGbpLocation =
     googleConnected &&
@@ -967,12 +840,23 @@ function OnboardingContent() {
   const missingBusinessFields = useMemo(() => {
     const missing: string[] = [];
     if (!orgInfo.name.trim()) missing.push("Company name");
+    if (!orgInfo.addressOrServiceArea.trim()) missing.push("Address or service area");
+    if (!orgInfo.phone.trim()) missing.push("Phone number");
+    if (!orgInfo.contactName.trim()) missing.push("Contact name");
+    if (!orgInfo.contactEmail.trim()) missing.push("Contact email");
+    if (orgInfo.contactEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(orgInfo.contactEmail.trim())) {
+      missing.push("Valid contact email");
+    }
     if (!orgInfo.primaryCategory.trim()) missing.push("Primary category");
     if (!orgInfo.primaryLocationCity.trim()) missing.push("Primary location city");
     if (!orgInfo.primaryLocationState.trim()) missing.push("Primary location state");
     return missing;
   }, [
     orgInfo.name,
+    orgInfo.addressOrServiceArea,
+    orgInfo.contactEmail,
+    orgInfo.contactName,
+    orgInfo.phone,
     orgInfo.primaryCategory,
     orgInfo.primaryLocationCity,
     orgInfo.primaryLocationState,
@@ -994,10 +878,7 @@ function OnboardingContent() {
       return checkingSession || !hasSession || !orgInfo.firstName.trim() || !orgInfo.lastName.trim() || !hasConnectedGbpLocation;
     }
     if (currentStep === 1) {
-      return missingBusinessFields.length > 0;
-    }
-    if (currentStep === 2) {
-      return namedServicesCount === 0 || servicesMissingDescriptions.length > 0;
+      return missingBusinessFields.length > 0 || namedServicesCount === 0 || servicesMissingDescriptions.length > 0;
     }
     return false;
   }, [
@@ -1066,6 +947,30 @@ function OnboardingContent() {
           return;
         }
         throw new Error(message);
+      }
+      const locationId = draft.selectedGoogleLocation?.connectedLocationId;
+      const serviceNames = (draft.services ?? [])
+        .map((service) => service.name.trim())
+        .filter(Boolean);
+      if (locationId && serviceNames.length > 0) {
+        const settingsRes = await fetch(`${API_BASE_URL}/orgs/locations/${locationId}/settings`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            services: serviceNames,
+            voice_profile: {
+              tone: draft.brandVoice?.tone,
+              business_description: draft.orgInfo?.existingBusinessDescription,
+            },
+          }),
+        });
+        if (!settingsRes.ok) {
+          const message = await readErrorMessage(settingsRes, "Failed to persist services");
+          throw new Error(message);
+        }
       }
     },
     [getScopedAccessToken],
@@ -1144,6 +1049,76 @@ function OnboardingContent() {
       setSavingProgress(false);
     }
   }, [buildOnboardingDraft, currentStep, getScopedAccessToken, hasSession, orgInfo.name, organizationId, persistOrganizationDraft, resolvedInviteEmail]);
+
+  const startStripeCheckout = useCallback(async (tenantId: string) => {
+    if (!userEmail) {
+      setStripeError("Sign in to continue.");
+      return;
+    }
+    const companyName = orgInfo.name.trim();
+    if (companyName.length > 0 && companyName.length < 2) {
+      setStripeError("Company name must be at least 2 characters. Go back to Business setup and update it.");
+      return;
+    }
+    setStripeLoading(true);
+    setStripeError(null);
+    try {
+      await saveProgress({
+        business_name: companyName || "New client",
+        first_name: orgInfo.firstName.trim(),
+        last_name: orgInfo.lastName.trim(),
+        status: "stripe_started",
+        tenant_id: tenantId,
+        onboarding_draft: buildOnboardingDraft(),
+        agreement_signature: agreementSignature.trim() || undefined,
+        agreement_accepted: agreementAccepted,
+        agreement_signed_at: agreementAccepted && agreementSignature.trim() ? new Date().toISOString() : undefined,
+        password_set: Boolean(passwordSetAt),
+        password_set_at: passwordSetAt,
+      });
+      const response = await fetch(`${API_BASE_URL}/billing/checkout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: userEmail,
+          company_name: companyName || "New client",
+          plan: "starter",
+          tenant_id: tenantId,
+          user_id: userStorageScope,
+          success_path: "/onboarding?payment=success",
+          cancel_path: "/onboarding?payment=canceled",
+        }),
+      });
+      if (!response.ok) {
+        const message = await readErrorMessage(response, "Unable to start Stripe checkout");
+        throw new Error(message);
+      }
+      const payload = await response.json();
+      const checkoutUrl = typeof payload?.checkout_url === "string" ? payload.checkout_url : null;
+      if (!checkoutUrl) {
+        throw new Error("Stripe checkout did not return a redirect URL");
+      }
+      if (typeof window !== "undefined") {
+        window.location.assign(checkoutUrl);
+      }
+    } catch (error) {
+      const message = normalizeClientError(error, "Unable to start Stripe checkout");
+      setStripeError(message);
+    } finally {
+      setStripeLoading(false);
+    }
+  }, [
+    agreementAccepted,
+    agreementSignature,
+    buildOnboardingDraft,
+    orgInfo.firstName,
+    orgInfo.lastName,
+    orgInfo.name,
+    passwordSetAt,
+    saveProgress,
+    userEmail,
+    userStorageScope,
+  ]);
 
   const refreshSession = useCallback(async () => {
     setCheckingSession(true);
@@ -1324,6 +1299,20 @@ function OnboardingContent() {
         : typeof metadata.website === "string"
           ? metadata.website.trim()
           : "";
+    const phoneNumbers = isRecord(metadata.phoneNumbers) ? metadata.phoneNumbers : null;
+    const phone =
+      phoneNumbers && typeof phoneNumbers.primaryPhone === "string"
+        ? phoneNumbers.primaryPhone.trim()
+        : typeof metadata.primaryPhone === "string"
+          ? metadata.primaryPhone.trim()
+          : "";
+    const profile = isRecord(metadata.profile) ? metadata.profile : null;
+    const businessDescription =
+      profile && typeof profile.description === "string"
+        ? profile.description.trim()
+        : typeof metadata.description === "string"
+          ? metadata.description.trim()
+          : "";
     const categories = isRecord(metadata.categories) ? metadata.categories : null;
     const primaryCategoryRaw = categories && isRecord(categories.primaryCategory)
       ? categories.primaryCategory
@@ -1350,6 +1339,15 @@ function OnboardingContent() {
         : storefrontAddress && typeof storefrontAddress.regionCode === "string"
           ? storefrontAddress.regionCode.trim()
           : "";
+    const addressLines = storefrontAddress && Array.isArray(storefrontAddress.addressLines)
+      ? storefrontAddress.addressLines.filter((line): line is string => typeof line === "string" && Boolean(line.trim()))
+      : [];
+    const addressOrServiceArea = [
+      ...addressLines,
+      city,
+      state,
+      storefrontAddress && typeof storefrontAddress.postalCode === "string" ? storefrontAddress.postalCode.trim() : "",
+    ].filter(Boolean).join(", ");
 
     const secondaryLocations: LocationInput[] = [];
     const serviceArea = isRecord(metadata.serviceArea) ? metadata.serviceArea : null;
@@ -1364,6 +1362,9 @@ function OnboardingContent() {
 
     if (title) importedKeys.add("name");
     if (website) importedKeys.add("websiteText");
+    if (phone) importedKeys.add("phone");
+    if (addressOrServiceArea) importedKeys.add("addressOrServiceArea");
+    if (businessDescription) importedKeys.add("existingBusinessDescription");
     if (primaryCategory) importedKeys.add("primaryCategory");
     if (city) importedKeys.add("primaryLocationCity");
     if (state) importedKeys.add("primaryLocationState");
@@ -1373,9 +1374,12 @@ function OnboardingContent() {
     setOrgInfo((prev) => ({
       ...prev,
       name: title || prev.name,
+      phone: phone || prev.phone,
+      addressOrServiceArea: addressOrServiceArea || prev.addressOrServiceArea,
       primaryCategory: primaryCategory || prev.primaryCategory,
       primaryLocationCity: city || prev.primaryLocationCity,
       primaryLocationState: state || prev.primaryLocationState,
+      existingBusinessDescription: businessDescription || prev.existingBusinessDescription,
       secondaryLocations:
         secondaryLocations.length > 0
           ? normalizeSecondaryLocations(secondaryLocations)
@@ -1549,12 +1553,19 @@ function OnboardingContent() {
       if (location) {
         applyImportedBusinessFromGoogleLocation(location);
       }
+      const googleDraft: OnboardingDraftState = {
+        ...buildOnboardingDraft({ googleConnected: true }),
+        selectedGoogleAccountId,
+        selectedGoogleLocationName,
+        selectedGoogleLocation: selected,
+        googleConnected: true,
+      };
       await saveProgress({
         first_name: orgInfo.firstName.trim(),
         last_name: orgInfo.lastName.trim(),
         tenant_id: organizationId,
         status: "in_progress",
-        onboarding_draft: buildOnboardingDraft({ googleConnected: true }),
+        onboarding_draft: googleDraft,
       });
     } catch (error) {
       setConnectError(normalizeClientError(error, "Unable to connect selected Google location"));
@@ -1658,15 +1669,13 @@ function OnboardingContent() {
         return "business_setup";
       case 1:
         return "stripe_pending";
-      case 2:
-        return "stripe_started";
       default:
         return "in_progress";
     }
   };
 
   const goNext = async (
-    overrides?: { stripeStarted?: boolean; googleConnected?: boolean },
+    overrides?: { googleConnected?: boolean },
   ) => {
     let resolvedTenantId = organizationId;
     const nextStatus = statusForStep(currentStep);
@@ -1711,7 +1720,7 @@ function OnboardingContent() {
   };
 
   const handleContinue = async () => {
-    if (currentStep === 3) {
+    if (currentStep === 2) {
       setAgreementError(null);
       if (!agreementSignature.trim()) {
         setAgreementError("Type your full name to sign the agreement.");
@@ -1722,13 +1731,12 @@ function OnboardingContent() {
         return;
       }
       if (!stripeStarted) {
-        if (!stripeClientSecret) {
+        if (!organizationId) {
+          setStripeError("Onboarding is missing a tenant. Refresh and try again.");
           return;
         }
-        const ok = await stripeSectionRef.current?.submit();
-        if (!ok) {
-          return;
-        }
+        await startStripeCheckout(organizationId);
+        return;
       }
       setFinalizingOnboarding(true);
       try {
@@ -1738,7 +1746,7 @@ function OnboardingContent() {
           last_name: orgInfo.lastName.trim(),
           status: "completed",
           tenant_id: organizationId ?? undefined,
-          onboarding_draft: buildOnboardingDraft({ stripeStarted: true, googleConnected: true }),
+          onboarding_draft: buildOnboardingDraft({ googleConnected: true }),
           agreement_signature: agreementSignature.trim() || undefined,
           agreement_accepted: agreementAccepted,
           agreement_signed_at: agreementAccepted && agreementSignature.trim() ? new Date().toISOString() : undefined,
@@ -1823,10 +1831,10 @@ function OnboardingContent() {
     return (
       <div className="min-h-screen bg-slate-50 px-6 py-12">
         <div className="mx-auto max-w-2xl space-y-6 rounded-3xl bg-white p-8 text-center shadow-sm">
-          <p className="text-xs uppercase tracking-[0.3em] text-primary">Invite Required</p>
+          <p className="text-xs uppercase tracking-[0.3em] text-primary">Onboarding Link</p>
           <h1 className="text-3xl font-semibold">This onboarding link is not active</h1>
           <p className="text-sm text-slate-600">
-            {tokenError ?? "Ask an admin to send you a valid onboarding invite, then open that invite link."}
+            {tokenError ?? "Sign in to start onboarding, or ask an admin to send you a valid onboarding invite link."}
           </p>
           <button
             className="inline-block rounded-full bg-primary px-6 py-3 text-sm font-semibold text-white"
@@ -1847,9 +1855,9 @@ function OnboardingContent() {
       <div className="min-h-screen bg-slate-50 px-6 py-12">
         <div className="mx-auto max-w-2xl space-y-6 rounded-3xl bg-white p-8 text-center shadow-sm">
           <p className="text-xs uppercase tracking-[0.3em] text-primary">Sign In Required</p>
-          <h1 className="text-3xl font-semibold">Open onboarding from your invite link</h1>
+          <h1 className="text-3xl font-semibold">Sign in to start onboarding</h1>
           <p className="text-sm text-slate-600">
-            Onboarding is invite-only. Sign in first, or use the onboarding invite email sent by your admin.
+            Sign in with the Google account you want to use for Map Pack 3. You can also use an invite link if an admin sent one.
           </p>
           <button
             className="inline-block rounded-full bg-primary px-6 py-3 text-sm font-semibold text-white"
@@ -1987,8 +1995,20 @@ function OnboardingContent() {
                   </label>
                 )}
 
+                {!loadingGoogleAccounts && organizationId && googleAccounts.length === 0 && oauthStatusFromQuery === "google_connected" && (
+                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                    Google connected successfully, but no Google Business Profile accounts were returned. Confirm this Google account has owner or manager access to a Business Profile, then refresh accounts.
+                  </div>
+                )}
+
                 {loadingGoogleLocations && (
                   <p className="mt-3 text-sm text-slate-600">Loading Business Profile locations…</p>
+                )}
+
+                {!loadingGoogleLocations && selectedGoogleAccountId && googleLocations.length === 0 && (
+                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                    No Google Business Profile locations were returned for this Google account. Choose another account or create/claim a Business Profile in Google before continuing.
+                  </div>
                 )}
 
                 {googleLocations.length > 0 && (
@@ -2100,6 +2120,57 @@ function OnboardingContent() {
               <div className="grid gap-3 md:grid-cols-2">
                 <label className="block">
                   <span className="flex items-center justify-between text-slate-600">
+                    <span>Business address or service area</span>
+                    <span className={`rounded-full px-2 py-0.5 text-xs ${fieldOriginMeta("addressOrServiceArea", orgInfo.addressOrServiceArea).className}`}>
+                      {fieldOriginMeta("addressOrServiceArea", orgInfo.addressOrServiceArea).label}
+                    </span>
+                  </span>
+                  <input
+                    className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
+                    placeholder="123 Main St, Austin, TX or Austin metro"
+                    value={orgInfo.addressOrServiceArea}
+                    onChange={(event) => setOrgInfo((prev) => ({ ...prev, addressOrServiceArea: event.target.value }))}
+                  />
+                </label>
+                <label className="block">
+                  <span className="flex items-center justify-between text-slate-600">
+                    <span>Phone number</span>
+                    <span className={`rounded-full px-2 py-0.5 text-xs ${fieldOriginMeta("phone", orgInfo.phone).className}`}>
+                      {fieldOriginMeta("phone", orgInfo.phone).label}
+                    </span>
+                  </span>
+                  <input
+                    className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
+                    placeholder="(555) 123-4567"
+                    value={orgInfo.phone}
+                    onChange={(event) => setOrgInfo((prev) => ({ ...prev, phone: event.target.value }))}
+                  />
+                </label>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="block">
+                  <span className="text-slate-600">Contact name</span>
+                  <input
+                    className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
+                    placeholder="Alex Reyes"
+                    value={orgInfo.contactName}
+                    onChange={(event) => setOrgInfo((prev) => ({ ...prev, contactName: event.target.value }))}
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-slate-600">Contact email</span>
+                  <input
+                    type="email"
+                    className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
+                    placeholder="owner@example.com"
+                    value={orgInfo.contactEmail}
+                    onChange={(event) => setOrgInfo((prev) => ({ ...prev, contactEmail: event.target.value }))}
+                  />
+                </label>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="block">
+                  <span className="flex items-center justify-between text-slate-600">
                     <span>Primary location city</span>
                     <span className={`rounded-full px-2 py-0.5 text-xs ${fieldOriginMeta("primaryLocationCity", orgInfo.primaryLocationCity).className}`}>
                       {fieldOriginMeta("primaryLocationCity", orgInfo.primaryLocationCity).label}
@@ -2195,6 +2266,22 @@ function OnboardingContent() {
                 />
               </label>
 
+              <label className="block">
+                <span className="flex items-center justify-between text-slate-600">
+                  <span>Existing business description</span>
+                  <span className={`rounded-full px-2 py-0.5 text-xs ${fieldOriginMeta("existingBusinessDescription", orgInfo.existingBusinessDescription).className}`}>
+                    {fieldOriginMeta("existingBusinessDescription", orgInfo.existingBusinessDescription).label}
+                  </span>
+                </span>
+                <textarea
+                  className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
+                  rows={3}
+                  placeholder="Paste or edit the current GBP/website business description if you have one."
+                  value={orgInfo.existingBusinessDescription}
+                  onChange={(event) => setOrgInfo((prev) => ({ ...prev, existingBusinessDescription: event.target.value }))}
+                />
+              </label>
+
               <div className="space-y-3">
                 <p className="text-sm font-semibold text-slate-800">Brand voice</p>
                 <label className="block">
@@ -2234,7 +2321,7 @@ function OnboardingContent() {
             </div>
           )}
 
-          {currentStep === 2 && (
+          {currentStep === 1 && (
             <div className="space-y-5">
               <div>
                 <h2 className="text-xl font-semibold">Confirm services + descriptions</h2>
@@ -2349,42 +2436,24 @@ function OnboardingContent() {
             </div>
           )}
 
-          {currentStep === 3 && (
+          {currentStep === 2 && (
             <div className="space-y-4">
-              <h2 className="text-xl font-semibold">Stripe signup (final step)</h2>
+              <h2 className="text-xl font-semibold">Stripe payment (final step)</h2>
               <p className="text-sm text-slate-600">
                 You are signing up for the Map Pack 3 service plan at <span className="font-semibold">$5/month</span>.
               </p>
-              <p className="text-sm text-slate-600">Pay securely without leaving onboarding. After payment succeeds, sign and click Continue.</p>
+              <p className="text-sm text-slate-600">Sign the agreement, continue to Stripe Checkout, then return here after payment is confirmed.</p>
               {stripeError && <p className="text-sm text-rose-600">{stripeError}</p>}
-              {!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ? (
-                <p className="text-sm text-amber-600">Stripe publishable key missing. Add NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY to continue.</p>
-              ) : stripeLoading && !stripeClientSecret ? (
-                <p className="text-sm text-slate-600">Preparing payment form…</p>
-              ) : stripeClientSecret ? (
-                <Elements stripe={stripePromise} options={{ clientSecret: stripeClientSecret }}>
-                  <StripePaymentSection
-                    ref={stripeSectionRef}
-                    onPaid={() => {
-                      setStripeStarted(true);
-                      setStripeClientSecret(null);
-                      setStripeFieldAttention(false);
-                    }}
-                    setError={setStripeError}
-                    setSubmitting={setStripeSubmitting}
-                    submitting={stripeSubmitting}
-                    showValidationCue={stripeFieldAttention}
-                    onValidationIssue={() => {
-                      setStripeFieldAttention(true);
-                    }}
-                  />
-                </Elements>
+              {stripeLoading ? (
+                <p className="text-sm text-slate-600">Opening Stripe Checkout…</p>
               ) : stripeStarted ? (
                 <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
                   Payment received. Your subscription is active and you can finish onboarding.
                 </div>
               ) : (
-                <p className="text-sm text-amber-600">Complete prior steps first so checkout can initialize.</p>
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                  Stripe Checkout will open after you accept the billing terms.
+                </div>
               )}
               <div className="space-y-3 rounded-2xl border border-slate-200 p-4">
                 <p className="text-sm text-slate-700">
@@ -2445,17 +2514,17 @@ function OnboardingContent() {
               savingProgress ||
               finalizingOnboarding ||
               connectingGoogleLocation ||
-              (currentStep === 3 && (stripeLoading || stripeSubmitting || (!stripeStarted && !stripeClientSecret)))
+              (currentStep === 2 && stripeLoading)
             }
           >
-            {currentStep === 3
+            {currentStep === 2
               ? finalizingOnboarding
                 ? "Finishing…"
                 : stripeStarted
                   ? "Finish onboarding"
-                  : stripeSubmitting
-                    ? "Processing…"
-                    : "Pay & finish"
+                  : stripeLoading
+                    ? "Opening Stripe…"
+                    : "Continue to Stripe"
               : savingProgress
                 ? "Saving…"
                 : creatingOrg && currentStep === 0

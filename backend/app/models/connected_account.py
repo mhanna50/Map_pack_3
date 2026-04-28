@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String
+from sqlalchemy import DateTime, Enum, ForeignKey, String, event
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -15,6 +15,7 @@ from .mixins import TimestampMixin, UUIDPrimaryKeyMixin
 class ConnectedAccount(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "connected_accounts"
 
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False
     )
@@ -34,3 +35,10 @@ class ConnectedAccount(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     organization = relationship("Organization", back_populates="connected_accounts")
     locations = relationship("Location", back_populates="connected_account")
     actions = relationship("Action", back_populates="connected_account")
+
+
+@event.listens_for(ConnectedAccount, "before_insert")
+@event.listens_for(ConnectedAccount, "before_update")
+def _sync_connected_account_tenant_id(_mapper, _connection, target: ConnectedAccount) -> None:
+    if target.tenant_id is None:
+        target.tenant_id = target.organization_id

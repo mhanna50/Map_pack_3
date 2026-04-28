@@ -16,13 +16,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { AdminShell } from "@/components/admin/shell";
+import { AdminShell } from "@/features/admin/components/shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
-import { adminApi } from "@/lib/adminApiClient";
+import { adminApi } from "@/features/admin/adminApiClient";
 import { timeAgo } from "@/lib/date-utils";
 
 type Kpis = {

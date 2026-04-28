@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createServiceClient, type SupabaseClient } from "@supabase/supabase-js";
+import { ensureOnboardingTenantRows } from "@/features/onboarding/server/onboarding-compat";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -20,7 +21,7 @@ const ONBOARDING_STATUS_RANK = {
 } as const;
 
 type OnboardingStatus = keyof typeof ONBOARDING_STATUS_RANK;
-const ONBOARDING_STEP_LABELS = ["google_profile", "business_info", "services", "stripe"] as const;
+const ONBOARDING_STEP_LABELS = ["google_profile", "business_info", "stripe"] as const;
 
 const describeOnboardingStep = (step: number): string =>
   ONBOARDING_STEP_LABELS[step] ?? `step_${step}`;
@@ -116,20 +117,18 @@ const getPasswordSetAtFromPendingRow = (row: Record<string, unknown> | null): st
   return asString(draft?.passwordSetAt);
 };
 
-const statusToResumeStep = (status: unknown, passwordSetAt: string | null): number => {
+const statusToResumeStep = (status: unknown): number => {
   const normalized = normalizeOnboardingStatus(status);
   switch (normalized) {
     case "business_setup":
       return 1;
-    case "stripe_pending":
-      return 2;
     case "stripe_started":
-      return 3;
+    case "stripe_pending":
     case "google_pending":
     case "google_connected":
     case "completed":
     case "activated":
-      return 3;
+      return 2;
     default:
       return 0;
   }
@@ -198,7 +197,6 @@ export async function POST(request: NextRequest) {
       .from("pending_onboarding")
       .select("*")
       .ilike("email", normalizedEmail)
-      .not("invited_by_admin_user_id", "is", "null")
       .limit(50),
     svc
       .from("profiles")
@@ -275,7 +273,17 @@ export async function POST(request: NextRequest) {
         profileTenantId,
         tenant?.status === "active" ? "completed" : "in_progress",
       );
-      const recoveredResumeStep = statusToResumeStep(recoveredStatus, null);
+      const compatibilityErr = await ensureOnboardingTenantRows(svc, {
+        userId: user.id,
+        email: normalizedEmail,
+        tenantId: profileTenantId,
+        businessName: tenant?.business_name ?? "",
+        plan: tenant?.plan_name ?? tenant?.plan_tier ?? "starter",
+      });
+      if (compatibilityErr) {
+        return NextResponse.json({ error: compatibilityErr }, { status: 400 });
+      }
+      const recoveredResumeStep = statusToResumeStep(recoveredStatus);
       console.info("[onboarding/claim] recovered_from_profile", {
         userId: user.id,
         email: normalizedEmail,
@@ -301,17 +309,82 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    console.warn("[onboarding/claim] invite_required", {
+    const tenantId = crypto.randomUUID();
+    const businessName = "New client";
+    const slug = `tenant-${tenantId.slice(0, 8)}`;
+    const { error: tenantErr } = await svc.from("tenants").insert({
+      tenant_id: tenantId,
+      business_name: businessName,
+      slug,
+      status: "invited",
+      plan_name: "starter",
+      plan_tier: "starter",
+      location_limit: 1,
+    });
+    if (tenantErr) {
+      return NextResponse.json({ error: tenantErr.message }, { status: 400 });
+    }
+    const { data: insertedRows, error: pendingInsertErr } = await svc
+      .from("pending_onboarding")
+      .insert({
+        email: normalizedEmail,
+        business_name: businessName,
+        first_name: "",
+        last_name: "",
+        plan: "starter",
+        location_limit: 1,
+        status: "in_progress",
+        invited_at: new Date().toISOString(),
+        invited_by_admin_user_id: null,
+        tenant_id: tenantId,
+      })
+      .select("*")
+      .limit(1);
+    if (pendingInsertErr) {
+      return NextResponse.json({ error: pendingInsertErr.message }, { status: 400 });
+    }
+    const { error: profileErr } = await svc
+      .from("profiles")
+      .upsert({
+        user_id: user.id,
+        email: normalizedEmail,
+        tenant_id: tenantId,
+        role: "owner",
+      });
+    if (profileErr) {
+      return NextResponse.json({ error: profileErr.message }, { status: 400 });
+    }
+    const compatibilityErr = await ensureOnboardingTenantRows(svc, {
       userId: user.id,
       email: normalizedEmail,
+      tenantId,
+      businessName,
+      plan: "starter",
     });
-    return NextResponse.json(
-      {
-        error: "Invite required. Ask an admin to send you an onboarding invite link.",
-        code: "invite_required",
-      },
-      { status: 403 },
-    );
+    if (compatibilityErr) {
+      return NextResponse.json({ error: compatibilityErr }, { status: 400 });
+    }
+
+    console.info("[onboarding/claim] created_self_onboarding", {
+      userId: user.id,
+      email: normalizedEmail,
+      tenantId,
+    });
+    const inserted = (insertedRows?.[0] ?? null) as Record<string, unknown> | null;
+    return NextResponse.json({
+      tenant_id: tenantId,
+      business_name: inserted?.business_name ?? businessName,
+      first_name: "",
+      last_name: "",
+      plan_name: "starter",
+      location_limit: 1,
+      status: "in_progress",
+      onboarding_draft: null,
+      agreement_signature: null,
+      agreement_accepted: false,
+      agreement_signed_at: null,
+      password_set_at: null,
+    });
   }
 
   if (pending.status === "canceled") {
@@ -359,6 +432,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: profileErr.message }, { status: 400 });
   }
 
+  const compatibilityErr = await ensureOnboardingTenantRows(svc, {
+    userId: user.id,
+    email: normalizedEmail,
+    tenantId,
+    businessName: pending.business_name ?? "",
+    plan: pending.plan ?? "starter",
+  });
+  if (compatibilityErr) {
+    return NextResponse.json({ error: compatibilityErr }, { status: 400 });
+  }
+
   // Auto-detect paid status from billing + tenant state so stale pending rows don't force re-payment.
   const effectiveStatus = await inferEffectiveOnboardingStatus(
     svc,
@@ -398,7 +482,7 @@ export async function POST(request: NextRequest) {
 
   const responsePendingRecord = (responsePending ?? null) as Record<string, unknown> | null;
   const passwordSetAt = getPasswordSetAtFromPendingRow(responsePendingRecord);
-  const resumeStep = statusToResumeStep(effectiveStatus, passwordSetAt);
+  const resumeStep = statusToResumeStep(effectiveStatus);
   console.info("[onboarding/claim] success", {
     userId: user.id,
     email: normalizedEmail,
@@ -492,6 +576,9 @@ async function inferEffectiveOnboardingStatus(
   pendingStatus: unknown,
 ): Promise<OnboardingStatus> {
   let effective = normalizeOnboardingStatus(pendingStatus);
+  if (["google_pending", "google_connected", "completed", "activated"].includes(effective)) {
+    effective = "stripe_started";
+  }
   let hasActiveBilling = false;
   let hasConnectedGbp = false;
 
@@ -518,7 +605,7 @@ async function inferEffectiveOnboardingStatus(
     console.warn("Unable to read billing subscription for onboarding claim", { tenantId, subErr });
   } else {
     const billingStatus = String(subscription?.status ?? "").toLowerCase();
-    if (["active", "trialing", "past_due"].includes(billingStatus)) {
+    if (["active", "trialing"].includes(billingStatus)) {
       hasActiveBilling = true;
       effective = maxOnboardingStatus(effective, "google_pending");
     }
@@ -533,8 +620,41 @@ async function inferEffectiveOnboardingStatus(
     console.warn("Unable to read GBP connection status for onboarding claim", { tenantId, gbpErr });
   } else {
     hasConnectedGbp = (gbpRows ?? []).some((row) => String(row.status ?? "").toLowerCase() === "connected");
-    if (hasConnectedGbp) {
+    if (hasActiveBilling && hasConnectedGbp) {
       effective = maxOnboardingStatus(effective, "google_connected");
+    }
+  }
+
+  if (!hasConnectedGbp) {
+    const { data: accountRows, error: accountErr } = await svc
+      .from("connected_accounts")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .limit(1);
+    if (accountErr) {
+      console.warn("Unable to read connected account status for onboarding claim", { tenantId, accountErr });
+    } else if ((accountRows ?? []).length > 0) {
+      hasConnectedGbp = true;
+      if (hasActiveBilling) {
+        effective = maxOnboardingStatus(effective, "google_connected");
+      }
+    }
+  }
+
+  if (!hasConnectedGbp) {
+    const { data: locationRows, error: locationErr } = await svc
+      .from("locations")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .not("google_location_id", "is", null)
+      .limit(1);
+    if (locationErr) {
+      console.warn("Unable to read GBP locations for onboarding claim", { tenantId, locationErr });
+    } else if ((locationRows ?? []).length > 0) {
+      hasConnectedGbp = true;
+      if (hasActiveBilling) {
+        effective = maxOnboardingStatus(effective, "google_connected");
+      }
     }
   }
 

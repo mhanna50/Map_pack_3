@@ -1,7 +1,7 @@
 import {
   normalizePostLoginResolution,
   resolveClientAppDestination,
-} from "@/lib/post-login-routing";
+} from "@/features/auth/post-login-routing";
 import { describe, expect, it } from "vitest";
 
 describe("post-login routing resolver", () => {
@@ -70,7 +70,7 @@ describe("post-login routing resolver", () => {
   });
 
   it("preserves onboarding resume steps across multiple states", () => {
-    const steps = ["google_profile", "business_info", "services", "stripe"];
+    const steps = ["google_profile", "business_info", "stripe"];
 
     for (const step of steps) {
       const resolution = normalizePostLoginResolution({
@@ -92,8 +92,8 @@ describe("post-login routing resolver", () => {
       next_step: "billing",
     });
 
-    expect(resolution.nextStep).toBe("services");
-    expect(resolution.destination).toBe("/onboarding?step=services");
+    expect(resolution.nextStep).toBe("stripe");
+    expect(resolution.destination).toBe("/onboarding?step=stripe");
   });
 
   it("supports redirect override only when onboarding is complete", () => {

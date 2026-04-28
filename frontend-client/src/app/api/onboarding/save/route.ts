@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createServiceClient, type SupabaseClient } from "@supabase/supabase-js";
+import { ensureOnboardingTenantRows } from "@/features/onboarding/server/onboarding-compat";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -20,8 +21,8 @@ const ONBOARDING_STATUS_RANK = {
 } as const;
 
 type OnboardingStatus = keyof typeof ONBOARDING_STATUS_RANK;
-const MAX_ONBOARDING_STEP_INDEX = 3;
-const ONBOARDING_STEP_LABELS = ["google_profile", "business_info", "services", "stripe"] as const;
+const MAX_ONBOARDING_STEP_INDEX = 2;
+const ONBOARDING_STEP_LABELS = ["google_profile", "business_info", "stripe"] as const;
 
 const describeOnboardingStep = (step: number | null): string => {
   if (step === null) return "unknown";
@@ -122,28 +123,18 @@ const getDraftFromPendingRow = (row: Record<string, unknown> | null): Record<str
   return null;
 };
 
-const getPasswordSetAtFromPendingRow = (row: Record<string, unknown> | null): string | null => {
-  if (!row) return null;
-  const direct = asString(row.password_set_at);
-  if (direct) return direct;
-  const draft = getDraftFromPendingRow(row);
-  return asString(draft?.passwordSetAt);
-};
-
-const statusToResumeStep = (status: unknown, passwordSetAt: string | null): number => {
+const statusToResumeStep = (status: unknown): number => {
   const normalized = normalizeOnboardingStatus(status);
   switch (normalized) {
     case "business_setup":
       return 1;
-    case "stripe_pending":
-      return 2;
     case "stripe_started":
-      return 3;
+    case "stripe_pending":
     case "google_pending":
     case "google_connected":
     case "completed":
     case "activated":
-      return 3;
+      return 2;
     default:
       return 0;
   }
@@ -152,11 +143,9 @@ const statusToResumeStep = (status: unknown, passwordSetAt: string | null): numb
 const deriveResumeStepFromPendingRow = (
   row: Record<string, unknown> | null,
   statusOverride?: unknown,
-  passwordSetAtOverride?: string | null,
 ): number => {
   const status = statusOverride ?? row?.status ?? "in_progress";
-  const passwordSetAt = passwordSetAtOverride ?? getPasswordSetAtFromPendingRow(row);
-  return statusToResumeStep(status, passwordSetAt);
+  return statusToResumeStep(status);
 };
 
 const normalizeStepIndex = (value: unknown): number | null => {
@@ -345,7 +334,6 @@ export async function POST(request: NextRequest) {
       .from("pending_onboarding")
       .select("*")
       .ilike("email", email)
-      .not("invited_by_admin_user_id", "is", "null")
       .limit(50),
     svc
       .from("profiles")
@@ -442,8 +430,7 @@ export async function POST(request: NextRequest) {
   const pendingColumns = await detectPendingColumns(svc, existingRecord);
   const requestedStatusWithFallback = body.status ?? existingRecord?.status ?? "in_progress";
   const mergedStatus = mergeOnboardingStatus(existingRecord?.status, requestedStatus);
-  const existingPasswordSetAt = getPasswordSetAtFromPendingRow(existingRecord);
-  const resumeStepBeforeSave = deriveResumeStepFromPendingRow(existingRecord, existingRecord?.status, existingPasswordSetAt);
+  const resumeStepBeforeSave = deriveResumeStepFromPendingRow(existingRecord, existingRecord?.status);
   if (body.client_step !== undefined && clientStep === null) {
     console.warn("[onboarding/save] invalid_client_step", {
       userId: user.id,
@@ -452,7 +439,7 @@ export async function POST(request: NextRequest) {
       currentResumeStep: resumeStepBeforeSave,
     });
     return NextResponse.json(
-      { error: "Invalid client_step. Expected an integer from 0 to 3." },
+        { error: "Invalid client_step. Expected an integer from 0 to 2." },
       { status: 400 },
     );
   }
@@ -529,8 +516,7 @@ export async function POST(request: NextRequest) {
   }
   const passwordSetAt = asString(body.password_set_at);
   const passwordSet = asBoolean(body.password_set);
-  const requestedPasswordSetAt = passwordSetAt ?? (passwordSet ? (existingPasswordSetAt ?? "__set__") : existingPasswordSetAt);
-  const requestedResumeStep = statusToResumeStep(mergedStatus, requestedPasswordSetAt);
+  const requestedResumeStep = statusToResumeStep(mergedStatus);
   const maxAllowedResumeStep = Math.min(MAX_ONBOARDING_STEP_INDEX, resumeStepBeforeSave + 1);
   if (requestedResumeStep > maxAllowedResumeStep) {
     console.warn("[onboarding/save] step_out_of_sequence_status", {
@@ -657,7 +643,6 @@ export async function POST(request: NextRequest) {
     const plan = String(merged.plan ?? "starter").trim() || "starter";
     const locationLimitRaw = Number(merged.location_limit ?? 1);
     const locationLimit = Number.isFinite(locationLimitRaw) && locationLimitRaw > 0 ? locationLimitRaw : 1;
-    const shouldActivateTenant = mergedStatus === "completed" || mergedStatus === "activated";
 
     const { data: tenantRows, error: tenantLookupErr } = await svc
       .from("tenants")
@@ -678,9 +663,6 @@ export async function POST(request: NextRequest) {
       if (businessName) {
         tenantUpdate.business_name = businessName;
       }
-      if (shouldActivateTenant) {
-        tenantUpdate.status = "active";
-      }
       const { error: tenantUpdateErr } = await svc
         .from("tenants")
         .update(tenantUpdate)
@@ -694,7 +676,7 @@ export async function POST(request: NextRequest) {
         tenant_id: resolvedTenantId,
         business_name: businessName || "New client",
         slug: slugBase,
-        status: shouldActivateTenant ? "active" : "invited",
+        status: "invited",
         plan_name: plan,
         plan_tier: plan,
         location_limit: locationLimit,
@@ -719,6 +701,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: upsertProfileErr.message }, { status: 400 });
     }
 
+    const compatibilityErr = await ensureOnboardingTenantRows(svc, {
+      userId: user.id,
+      email,
+      tenantId: resolvedTenantId,
+      businessName: businessName || "New client",
+      plan,
+    });
+    if (compatibilityErr) {
+      return NextResponse.json({ error: compatibilityErr }, { status: 400 });
+    }
+
     if (!saved?.tenant_id || saved.tenant_id !== resolvedTenantId) {
       let pendingTenantQuery = svc
         .from("pending_onboarding")
@@ -737,8 +730,7 @@ export async function POST(request: NextRequest) {
 
   const savedRecord = (saved ?? merged) as Record<string, unknown>;
   const persistedStatus = normalizeOnboardingStatus(savedRecord.status);
-  const persistedPasswordSetAt = getPasswordSetAtFromPendingRow(savedRecord);
-  const resumeStep = deriveResumeStepFromPendingRow(savedRecord, persistedStatus, persistedPasswordSetAt);
+  const resumeStep = deriveResumeStepFromPendingRow(savedRecord, persistedStatus);
   console.info("[onboarding/save] success", {
     userId: user.id,
     email,

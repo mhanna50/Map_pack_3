@@ -1,16 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { DashboardShell } from "@/components/dashboard/shell";
+import { DashboardShell } from "@/features/dashboard/components/shell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import { GeoHeatmap } from "@/components/keyword-strategy/geo-heatmap";
+import { GeoHeatmap, type ScanPayload } from "@/features/rank_tracking/components/geo-heatmap";
 import { Drawer } from "@/components/drawer";
-import { useTenant } from "@/lib/tenant-context";
+import { useTenant } from "@/features/tenants/tenant-context";
 import { fetchBackendJson } from "@/lib/backend-api";
 
 type DashboardPayload = {
@@ -69,8 +69,8 @@ type DashboardPayload = {
   geo_grid: Record<
     string,
     {
-      baseline?: any;
-      followup?: any;
+      baseline?: ScanPayload | null;
+      followup?: ScanPayload | null;
       delta?: { average_rank_delta?: number | null; visibility_delta?: number | null } | null;
     }
   >;

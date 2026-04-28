@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Eye, Shield, Ban, PauseCircle, PlayCircle } from "lucide-react";
-import { AdminShell } from "@/components/admin/shell";
+import { AdminShell } from "@/features/admin/components/shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet } from "@/components/ui/sheet";
 import { Dialog } from "@/components/ui/dialog";
-import { adminApi } from "@/lib/adminApiClient";
+import { adminApi } from "@/features/admin/adminApiClient";
 import { formatDate, timeAgo } from "@/lib/date-utils";
 import { useToast } from "@/components/ui/toast";
 

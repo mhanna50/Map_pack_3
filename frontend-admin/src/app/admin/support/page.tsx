@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AdminShell } from "@/components/admin/shell";
+import { AdminShell } from "@/features/admin/components/shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { adminApi } from "@/lib/adminApiClient";
+import { adminApi } from "@/features/admin/adminApiClient";
 import { formatDate } from "@/lib/date-utils";
 
 type SupportTicket = { id?: string; tenant_id?: string; subject?: string; status?: string; created_at?: string };
@@ -27,7 +27,7 @@ export default function SupportPage() {
       try {
         const data = await adminApi.support({ status });
         if (!active) return;
-        setRows(data.rows ?? []);
+        setRows((data.rows ?? []) as SupportTicket[]);
       } catch (err: unknown) {
         if (!active) return;
         const message = err instanceof Error ? err.message : "Failed to load tickets";

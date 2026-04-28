@@ -13,13 +13,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { AdminShell } from "@/components/admin/shell";
+import { AdminShell } from "@/features/admin/components/shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import { adminApi } from "@/lib/adminApiClient";
+import { adminApi } from "@/features/admin/adminApiClient";
 
 type UsageAggregates = { posts?: number; reviews?: number; uploads?: number };
 type UsageRanking = { tenant_id: string; posts: number; reviews: number };

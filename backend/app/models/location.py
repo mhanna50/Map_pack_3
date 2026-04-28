@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Index, Integer, String
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Index, Integer, String, event
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,6 +18,7 @@ class Location(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         Index("ix_location_org", "organization_id"),
     )
 
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False
     )
@@ -49,3 +50,10 @@ class Location(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     actions = relationship("Action", back_populates="location")
     audit_logs = relationship("AuditLog", back_populates="location")
     alerts = relationship("Alert", back_populates="location")
+
+
+@event.listens_for(Location, "before_insert")
+@event.listens_for(Location, "before_update")
+def _sync_location_tenant_id(_mapper, _connection, target: Location) -> None:
+    if target.tenant_id is None:
+        target.tenant_id = target.organization_id

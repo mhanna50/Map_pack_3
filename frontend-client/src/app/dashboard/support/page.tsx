@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { LifeBuoy, MessageCircle } from "lucide-react";
-import { DashboardShell } from "@/components/dashboard/shell";
+import { DashboardShell } from "@/features/dashboard/components/shell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useTenant } from "@/lib/tenant-context";
+import { useTenant } from "@/features/tenants/tenant-context";
 import { listSupportTickets } from "@/lib/db";
 import { format } from "@/lib/date-utils";
 

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Hero } from "@/sections/Hero";
+import { Hero } from "@/features/marketing/sections/Hero";
 
 const testimonials = [
   { quote: "We turned GBP into a reliable channel without adding headcount.", name: "Jordan K.", role: "COO, Home Services" },

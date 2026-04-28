@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AdminShell } from "@/components/admin/shell";
+import { AdminShell } from "@/features/admin/components/shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog } from "@/components/ui/dialog";
-import { adminApi } from "@/lib/adminApiClient";
+import { adminApi } from "@/features/admin/adminApiClient";
 import { formatDate } from "@/lib/date-utils";
 
 type Subscription = {
@@ -36,7 +36,7 @@ export default function BillingPage() {
       try {
         const data = await adminApi.billing();
         if (!active) return;
-        setSubs(data.rows ?? []);
+        setSubs((data.rows ?? []) as Subscription[]);
       } catch (err: unknown) {
         if (!active) return;
         const message = err instanceof Error ? err.message : "Failed to load billing";

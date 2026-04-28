@@ -1,7 +1,7 @@
 import "../globals.css";
 import { redirect } from "next/navigation";
 
-import { requireAdminUser } from "@/lib/adminDb";
+import { requireAdminUser } from "@/features/admin/adminDb";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   try {

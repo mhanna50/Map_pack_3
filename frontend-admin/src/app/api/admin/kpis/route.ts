@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchKpis, requireAdminUser } from "@/lib/adminDb";
+import { fetchKpis, requireAdminUser } from "@/features/admin/adminDb";
 
 export async function GET() {
   try {

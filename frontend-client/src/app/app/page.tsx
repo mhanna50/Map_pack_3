@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { ApprovalQueueWidget, type ApprovalItem } from "@/components/approval-queue-widget";
+import { ApprovalQueueWidget, type ApprovalItem } from "@/features/approvals/components/approval-queue-widget";
 import { ActivityLog } from "@/components/activity-log";
 
 const kpis = [

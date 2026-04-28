@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminUser, upsertPendingOnboarding, sendSupabaseInvite } from "@/lib/adminDb";
+import { requireAdminUser, upsertPendingOnboarding, sendSupabaseInvite } from "@/features/admin/adminDb";
 
 export async function POST(request: NextRequest) {
   try {

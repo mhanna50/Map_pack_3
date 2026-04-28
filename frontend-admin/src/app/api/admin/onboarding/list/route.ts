@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { listPendingOnboarding, requireAdminUser } from "@/lib/adminDb";
+import { listPendingOnboarding, requireAdminUser } from "@/features/admin/adminDb";
 
 export async function GET() {
   try {

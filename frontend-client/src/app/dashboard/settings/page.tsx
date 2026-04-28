@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DashboardShell } from "@/components/dashboard/shell";
+import { DashboardShell } from "@/features/dashboard/components/shell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/ui/tabs";
 import { Dialog } from "@/components/ui/dialog";
-import { useTenant } from "@/lib/tenant-context";
+import { useTenant } from "@/features/tenants/tenant-context";
 import { getBillingSubscription } from "@/lib/db";
 
 type Subscription = {

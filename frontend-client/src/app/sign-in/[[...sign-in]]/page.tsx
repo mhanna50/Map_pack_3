@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   normalizePostLoginResolution,
   resolveClientAppDestination,
-} from "@/lib/post-login-routing";
+} from "@/features/auth/post-login-routing";
 
 const ADMIN_APP_URL = process.env.NEXT_PUBLIC_ADMIN_APP_URL ?? "http://localhost:3002";
 const INVALID_ROLE_MESSAGE =

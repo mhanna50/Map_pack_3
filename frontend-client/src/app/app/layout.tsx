@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { LocationSwitcher } from "@/components/location-switcher";
-import { getOnboardingAccessState } from "@/lib/server/onboarding-guard";
+import { LocationSwitcher } from "@/features/tenants/components/location-switcher";
+import { getOnboardingAccessState } from "@/features/onboarding/server/onboarding-guard";
 import "../globals.css";
 
 export const metadata: Metadata = {

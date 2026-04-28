@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isOnboardingInviteResendReady, requireAdminUser, upsertPendingOnboarding } from "@/lib/adminDb";
+import { isOnboardingInviteResendReady, requireAdminUser, upsertPendingOnboarding } from "@/features/admin/adminDb";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
 
 export async function POST(request: NextRequest) {

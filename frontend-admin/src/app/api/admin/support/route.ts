@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchSupport, requireAdminUser } from "@/lib/adminDb";
+import { fetchSupport, requireAdminUser } from "@/features/admin/adminDb";
 
 export async function GET(request: NextRequest) {
   try {

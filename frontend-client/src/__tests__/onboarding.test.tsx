@@ -1,9 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import OnboardingPage from "@/app/onboarding/page";
-
-process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = "pk_test_dummy";
 
 const mockSupabaseUser: { id: string; email: string; user_metadata: Record<string, unknown> } = {
   id: "u1",
@@ -15,17 +12,10 @@ const mockGetUser = vi.fn().mockImplementation(() =>
 );
 const mockSignOut = vi.fn().mockResolvedValue({ error: null });
 
-vi.mock("@stripe/react-stripe-js", () => ({
-  Elements: ({ children }: { children: ReactNode }) => <>{children}</>,
-  PaymentElement: () => <div>Payment form</div>,
-  useStripe: () => ({ confirmPayment: vi.fn().mockResolvedValue({}) }),
-  useElements: () => ({ submit: vi.fn().mockResolvedValue({}) }),
-}));
-
 const push = vi.fn();
 const replace = vi.fn();
 const refresh = vi.fn();
-const getSearchParam = vi.fn((_: string) => null as string | null);
+const getSearchParam = vi.fn((key: string) => (key ? null : null) as string | null);
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace, refresh }),
   useSearchParams: () => ({ get: getSearchParam }),
@@ -49,9 +39,8 @@ vi.mock("@/lib/supabase/client", () => ({
 type MockConfig = {
   claim: Record<string, unknown>;
   billing: {
-    client_secret: string | null;
-    subscription_id: string;
-    requires_payment_method?: boolean;
+    checkout_url: string;
+    session_id: string;
   };
   serviceDescription: string;
 };
@@ -69,9 +58,8 @@ const makeFetchMock = (configOverrides?: Partial<MockConfig>) => {
   const config: MockConfig = {
     claim: defaultClaim(),
     billing: {
-      client_secret: null,
-      subscription_id: "sub_trial",
-      requires_payment_method: false,
+      checkout_url: "https://checkout.stripe.test/session",
+      session_id: "cs_test_123",
     },
     serviceDescription: "Professional duct cleaning that improves airflow and indoor comfort with clear scheduling and dependable service.",
     ...configOverrides,
@@ -163,7 +151,7 @@ const makeFetchMock = (configOverrides?: Partial<MockConfig>) => {
       });
     }
 
-    if (url.endsWith("/billing/subscribe")) {
+    if (url.endsWith("/billing/checkout")) {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve(config.billing),
@@ -181,9 +169,10 @@ const makeFetchMock = (configOverrides?: Partial<MockConfig>) => {
         in_progress: 0,
         business_setup: 1,
         stripe_pending: 2,
-        stripe_started: 3,
-        completed: 3,
-        activated: 3,
+        stripe_started: 2,
+        google_pending: 2,
+        completed: 2,
+        activated: 2,
       };
       return Promise.resolve({
         ok: true,
@@ -265,6 +254,10 @@ describe("Onboarding flow", () => {
         onboarding_draft: {
           orgInfo: {
             name: "Acme HVAC",
+            phone: "",
+            addressOrServiceArea: "",
+            contactName: "",
+            contactEmail: "",
             primaryLocationCity: "",
             primaryLocationState: "",
             primaryCategory: "",
@@ -283,6 +276,18 @@ describe("Onboarding flow", () => {
     fireEvent.change(screen.getByPlaceholderText("HVAC contractor"), {
       target: { value: "HVAC contractor" },
     });
+    fireEvent.change(screen.getByPlaceholderText("123 Main St, Austin, TX or Austin metro"), {
+      target: { value: "Austin metro" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("(555) 123-4567"), {
+      target: { value: "(555) 123-4567" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Alex Reyes"), {
+      target: { value: "Alex Reyes" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("owner@example.com"), {
+      target: { value: "owner@example.com" },
+    });
     fireEvent.change(screen.getByPlaceholderText("Austin"), {
       target: { value: "Austin" },
     });
@@ -292,9 +297,16 @@ describe("Onboarding flow", () => {
     fireEvent.change(screen.getByRole("combobox"), {
       target: { value: "Professional" },
     });
+    fireEvent.click(screen.getByRole("button", { name: /\+ Add service/i }));
+    fireEvent.change(screen.getByPlaceholderText(/Service \d+/i), {
+      target: { value: "Duct Cleaning" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/Add a concise, professional description for this service\./i), {
+      target: { value: "Air duct cleaning for improved airflow and comfort." },
+    });
 
     fireEvent.click(screen.getByRole("button", { name: /^Continue$/i }));
-    await screen.findByText(/Confirm services \+ descriptions/i);
+    await screen.findByText(/Stripe payment \(final step\)/i);
 
     const stepTwoSave = saveCalls.find((call) => call.status === "stripe_pending");
     expect(stepTwoSave).toBeDefined();
@@ -306,10 +318,14 @@ describe("Onboarding flow", () => {
     const { mock: fetchMock, saveCalls } = makeFetchMock({
       claim: {
         ...defaultClaim(),
-        status: "stripe_pending",
+        status: "business_setup",
         onboarding_draft: {
           orgInfo: {
             name: "Acme HVAC",
+            phone: "(555) 123-4567",
+            addressOrServiceArea: "Austin metro",
+            contactName: "Alex Reyes",
+            contactEmail: "test@example.com",
             primaryCategory: "HVAC contractor",
             primaryLocationCity: "Austin",
             primaryLocationState: "TX",
@@ -358,22 +374,26 @@ describe("Onboarding flow", () => {
     expect(screen.getAllByPlaceholderText(/Service \d+/i)).toHaveLength(1);
 
     fireEvent.click(screen.getByRole("button", { name: /^Continue$/i }));
-    await screen.findByText(/Stripe signup \(final step\)/i);
+    await screen.findByText(/Stripe payment \(final step\)/i);
 
-    const stepThreeSave = saveCalls.find((call) => call.status === "stripe_started");
-    expect(stepThreeSave).toBeDefined();
+    const stepTwoSave = saveCalls.find((call) => call.status === "stripe_pending");
+    expect(stepTwoSave).toBeDefined();
   });
 
   it("keeps Stripe as final step and routes to dashboard when completed", async () => {
     const { mock: fetchMock, saveCalls } = makeFetchMock({
       claim: {
         ...defaultClaim(),
-        status: "stripe_started",
+        status: "google_pending",
         onboarding_draft: {
           orgInfo: {
             name: "Acme HVAC",
             firstName: "Alex",
             lastName: "Reyes",
+            phone: "(555) 123-4567",
+            addressOrServiceArea: "Austin metro",
+            contactName: "Alex Reyes",
+            contactEmail: "test@example.com",
             primaryCategory: "HVAC contractor",
             primaryLocationCity: "Austin",
             primaryLocationState: "TX",
@@ -385,20 +405,18 @@ describe("Onboarding flow", () => {
               source: "manual",
             },
           ],
-          stripeStarted: true,
         },
       },
       billing: {
-        client_secret: null,
-        subscription_id: "sub_trial",
-        requires_payment_method: false,
+        checkout_url: "https://checkout.stripe.test/session",
+        session_id: "cs_test_123",
       },
     });
     global.fetch = fetchMock as unknown as typeof fetch;
 
     render(<OnboardingPage />);
 
-    await screen.findByText(/Stripe signup \(final step\)/i);
+    await screen.findByText(/Stripe payment \(final step\)/i);
     await screen.findByText(/Payment received\./i);
 
     fireEvent.change(screen.getByPlaceholderText(/Your full legal name/i), {
@@ -420,8 +438,8 @@ describe("Onboarding flow", () => {
   it("resumes onboarding at the correct next step", async () => {
     const scenarios: Array<{ status: string; heading: RegExp }> = [
       { status: "business_setup", heading: /Confirm business info \+ brand voice/i },
-      { status: "stripe_pending", heading: /Confirm services \+ descriptions/i },
-      { status: "stripe_started", heading: /Stripe signup \(final step\)/i },
+      { status: "stripe_pending", heading: /Stripe payment \(final step\)/i },
+      { status: "stripe_started", heading: /Stripe payment \(final step\)/i },
     ];
 
     for (const scenario of scenarios) {
@@ -432,6 +450,10 @@ describe("Onboarding flow", () => {
           onboarding_draft: {
             orgInfo: {
               name: "Acme HVAC",
+              phone: "(555) 123-4567",
+              addressOrServiceArea: "Austin metro",
+              contactName: "Alex Reyes",
+              contactEmail: "test@example.com",
               primaryCategory: "HVAC contractor",
               primaryLocationCity: "Austin",
               primaryLocationState: "TX",

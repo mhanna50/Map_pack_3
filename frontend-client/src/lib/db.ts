@@ -36,6 +36,7 @@ export async function listLocations(tenantId: string) {
 
 export async function getDashboardKpis(tenantId: string, locationId?: Nullable<string>) {
   const supabase = createClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const locationFilter = (query: PostgrestFilterBuilder<any, any, any, any>) =>
     locationId ? query.eq("location_id", locationId) : query;
 

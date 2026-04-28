@@ -88,6 +88,51 @@ def test_create_checkout_session_blocks_existing_active_subscription(monkeypatch
     assert created["called"] is False
 
 
+def test_create_checkout_session_maps_metadata_and_relative_redirects(monkeypatch):
+    _configure_billing_settings(monkeypatch)
+    monkeypatch.setattr(settings, "CLIENT_APP_URL", "https://app.example.test")
+    monkeypatch.setattr(settings, "STRIPE_SUCCESS_URL", "https://yourapp.com/payments/success")
+    monkeypatch.setattr(settings, "STRIPE_CANCEL_URL", "https://yourapp.com/payments/cancel")
+
+    monkeypatch.setattr(
+        billing_module.stripe.Customer,
+        "list",
+        lambda **kwargs: _FakeStripeList([SimpleNamespace(id="cus_123")]),
+    )
+    monkeypatch.setattr(
+        billing_module.stripe.Subscription,
+        "list",
+        lambda **kwargs: _FakeStripeList([]),
+    )
+
+    captured = {}
+
+    def _fake_checkout_create(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(id="cs_test_123", url="https://checkout.stripe.test/session")
+
+    monkeypatch.setattr(billing_module.stripe.checkout.Session, "create", _fake_checkout_create)
+
+    service = BillingService()
+    session = service.create_checkout_session(
+        email="Owner@Example.com",
+        company_name="Acme Corp",
+        plan="starter",
+        tenant_id="tenant-123",
+        user_id="user-123",
+        success_path="/onboarding?payment=success",
+        cancel_path="/onboarding?payment=canceled",
+    )
+
+    assert session.id == "cs_test_123"
+    assert captured["client_reference_id"] == "tenant-123"
+    assert captured["metadata"]["tenant_id"] == "tenant-123"
+    assert captured["metadata"]["user_id"] == "user-123"
+    assert captured["subscription_data"]["metadata"]["tenant_id"] == "tenant-123"
+    assert captured["success_url"] == "https://app.example.test/onboarding?payment=success&session_id=%7BCHECKOUT_SESSION_ID%7D"
+    assert captured["cancel_url"] == "https://app.example.test/onboarding?payment=canceled"
+
+
 def test_create_subscription_intent_allows_new_when_previous_subscription_canceled(monkeypatch):
     _configure_billing_settings(monkeypatch)
 

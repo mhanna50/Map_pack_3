@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Send, Filter, Phone, Mail } from "lucide-react";
-import { DashboardShell } from "@/components/dashboard/shell";
+import { DashboardShell } from "@/features/dashboard/components/shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
@@ -11,7 +11,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs } from "@/components/ui/tabs";
-import { useTenant } from "@/lib/tenant-context";
+import { useTenant } from "@/features/tenants/tenant-context";
 import { listReviewRequests } from "@/lib/db";
 import { format } from "@/lib/date-utils";
 

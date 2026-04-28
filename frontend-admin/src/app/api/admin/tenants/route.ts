@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchTenants, requireAdminUser } from "@/lib/adminDb";
+import { fetchTenants, requireAdminUser } from "@/features/admin/adminDb";
 
 export async function GET(request: NextRequest) {
   try {

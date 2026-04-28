@@ -14,14 +14,14 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { DashboardShell } from "@/components/dashboard/shell";
+import { DashboardShell } from "@/features/dashboard/components/shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { useTenant } from "@/lib/tenant-context";
+import { useTenant } from "@/features/tenants/tenant-context";
 import { listPostJobs, listPosts } from "@/lib/db";
 import { format } from "@/lib/date-utils";
 

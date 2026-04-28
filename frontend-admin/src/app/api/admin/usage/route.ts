@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchUsage, requireAdminUser } from "@/lib/adminDb";
+import { fetchUsage, requireAdminUser } from "@/features/admin/adminDb";
 
 export async function GET() {
   try {

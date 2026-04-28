@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cancelOnboardingInviteAndPurge, requireAdminUser } from "@/lib/adminDb";
+import { cancelOnboardingInviteAndPurge, requireAdminUser } from "@/features/admin/adminDb";
 
 function extractErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
