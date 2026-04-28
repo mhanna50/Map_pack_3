@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_staff
 from backend.app.db.session import get_db
-from backend.app.models.audit_log import AuditLog
-from backend.app.models.user import User
+from backend.app.models.operations.audit_log import AuditLog
+from backend.app.models.identity.user import User
 
 router = APIRouter(prefix="/admin/audit", tags=["admin_audit"])
 

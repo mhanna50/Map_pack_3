@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from backend.app.models.enums import OrganizationType
-from backend.app.models.location import Location
-from backend.app.models.location_settings import LocationSettings
-from backend.app.models.organization import Organization
-from backend.app.services.competitor_monitoring import CompetitorMonitoringService
+from backend.app.models.google_business.location import Location
+from backend.app.models.google_business.location_settings import LocationSettings
+from backend.app.models.identity.organization import Organization
+from backend.app.services.rank_tracking.competitor_monitoring import CompetitorMonitoringService
 
 
 def _create_location(db_session):

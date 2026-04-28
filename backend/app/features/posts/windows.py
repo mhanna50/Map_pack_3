@@ -7,7 +7,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.posting_window_stat import PostingWindowStat
+from backend.app.models.posts.posting_window_stat import PostingWindowStat
 
 POSTING_WINDOWS = [
     {"id": "morning", "label": "8-10am"},

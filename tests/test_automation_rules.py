@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from backend.app.models.action import Action
+from backend.app.models.automation.action import Action
 from backend.app.models.enums import (
     AutomationActionType,
     AutomationCondition,
@@ -9,10 +9,10 @@ from backend.app.models.enums import (
     PostStatus,
     PostType,
 )
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.models.post import Post
-from backend.app.services.automation_rules import AutomationRuleService
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.models.posts.post import Post
+from backend.app.services.automation.automation_rules import AutomationRuleService
 
 
 def _make_location(db_session):

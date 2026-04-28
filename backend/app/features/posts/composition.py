@@ -9,15 +9,15 @@ import httpx
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
-from backend.app.models.brand_voice import BrandVoice
+from backend.app.models.content.brand_voice import BrandVoice
 from backend.app.models.enums import PostType
-from backend.app.models.post import Post
-from backend.app.models.post_candidate import PostCandidate
-from backend.app.services.content_guardrails import ContentGuardrails
-from backend.app.services.gbp_sync import GbpSyncService
-from backend.app.services.media_selection import MediaSelector
-from backend.app.services.rotation import RotationEngine
-from backend.app.services.settings import SettingsService
+from backend.app.models.posts.post import Post
+from backend.app.models.posts.post_candidate import PostCandidate
+from backend.app.services.content.content_guardrails import ContentGuardrails
+from backend.app.services.google_business.gbp_sync import GbpSyncService
+from backend.app.services.media.media_selection import MediaSelector
+from backend.app.services.posts.rotation import RotationEngine
+from backend.app.services.shared.settings import SettingsService
 
 CTAS = [
     "Call today to schedule a consultation.",

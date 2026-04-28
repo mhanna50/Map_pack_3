@@ -10,16 +10,16 @@ from sqlalchemy.orm import Session
 from backend.app.api.deps import get_current_staff
 from backend.app.api.orgs import LocationResponse
 from backend.app.db.session import get_db
-from backend.app.models.alert import Alert
+from backend.app.models.operations.alert import Alert
 from backend.app.models.enums import AlertStatus, MembershipRole, OrganizationType
-from backend.app.models.invite import OrganizationInvite
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.models.user import User
-from backend.app.services.audit import log_audit
-from backend.app.services.impersonation import ImpersonationService
-from backend.app.services.invites import InviteService
-from backend.app.services.tenant_bridge import ensure_tenant_row
+from backend.app.models.identity.invite import OrganizationInvite
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.models.identity.user import User
+from backend.app.services.operations.audit import log_audit
+from backend.app.services.operations.impersonation import ImpersonationService
+from backend.app.services.onboarding.invites import InviteService
+from backend.app.services.onboarding.tenant_bridge import ensure_tenant_row
 
 router = APIRouter(prefix="/admin/orgs", tags=["admin_orgs"])
 

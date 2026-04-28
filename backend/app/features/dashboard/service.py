@@ -7,18 +7,18 @@ import uuid
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from backend.app.models.action import Action
-from backend.app.models.approval_request import ApprovalRequest
-from backend.app.models.dashboard_snapshot import DashboardSnapshot
+from backend.app.models.automation.action import Action
+from backend.app.models.automation.approval_request import ApprovalRequest
+from backend.app.models.operations.dashboard_snapshot import DashboardSnapshot
 from backend.app.models.enums import ActionStatus, ApprovalStatus, PostStatus
-from backend.app.models.location import Location
-from backend.app.models.membership import Membership
-from backend.app.models.organization import Organization
-from backend.app.models.post import Post
-from backend.app.models.review import Review
-from backend.app.models.visibility_score import VisibilityScore
-from backend.app.models.rank_snapshot import RankSnapshot
-from backend.app.models.media_asset import MediaAsset
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.membership import Membership
+from backend.app.models.identity.organization import Organization
+from backend.app.models.posts.post import Post
+from backend.app.models.reviews.review import Review
+from backend.app.models.rank_tracking.visibility_score import VisibilityScore
+from backend.app.models.rank_tracking.rank_snapshot import RankSnapshot
+from backend.app.models.media.media_asset import MediaAsset
 
 
 class DashboardService:

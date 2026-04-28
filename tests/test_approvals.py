@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from backend.app.models.approval_request import ApprovalRequest
+from backend.app.models.automation.approval_request import ApprovalRequest
 from backend.app.models.enums import ApprovalCategory, ApprovalStatus, OrganizationType, ReviewRating
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.models.review import Review
-from backend.app.services.approvals import ApprovalService
-from backend.app.services.reviews import ReviewService
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.models.reviews.review import Review
+from backend.app.services.automation.approvals import ApprovalService
+from backend.app.services.reviews.reviews import ReviewService
 
 
 def _setup_org_and_location(db_session):

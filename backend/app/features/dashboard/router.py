@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_user
 from backend.app.db.session import get_db
-from backend.app.services.dashboard import DashboardService
-from backend.app.services.settings import SettingsService
-from backend.app.models.alert import Alert
+from backend.app.services.operations.dashboard import DashboardService
+from backend.app.services.shared.settings import SettingsService
+from backend.app.models.operations.alert import Alert
 from backend.app.models.enums import AlertStatus
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -46,19 +46,19 @@ def dashboard_overview(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     merged_settings = None
+    resolved_organization_id = uuid.UUID(str(data["organization"]["id"]))
     if organization_id:
         merged_settings = settings_service.merged(
-            organization_id,
+            resolved_organization_id,
             location_id,
         )
-    alerts = _open_alerts(db, organization_id, location_id)
+    alerts = _open_alerts(db, resolved_organization_id, location_id)
     return DashboardOverviewResponse(**data, settings=merged_settings, alerts=alerts)
 
 
-def _open_alerts(db: Session, organization_id: uuid.UUID | None, location_id: uuid.UUID | None) -> list[dict]:
+def _open_alerts(db: Session, organization_id: uuid.UUID, location_id: uuid.UUID | None) -> list[dict]:
     query = db.query(Alert).filter(Alert.status != AlertStatus.RESOLVED)
-    if organization_id:
-        query = query.filter(Alert.organization_id == organization_id)
+    query = query.filter(Alert.organization_id == organization_id)
     if location_id:
         query = query.filter(Alert.location_id == location_id)
     return [

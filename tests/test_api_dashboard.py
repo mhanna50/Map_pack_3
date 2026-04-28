@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from backend.app.models.enums import MembershipRole, OrganizationType
-from backend.app.models.location import Location
-from backend.app.models.membership import Membership
-from backend.app.models.organization import Organization
-from backend.app.models.user import User
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.membership import Membership
+from backend.app.models.identity.organization import Organization
+from backend.app.models.identity.user import User
 
 
 def test_dashboard_overview_endpoint(api_client, db_session):

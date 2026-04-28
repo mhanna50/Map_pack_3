@@ -380,7 +380,7 @@ describe("Onboarding flow", () => {
     expect(stepTwoSave).toBeDefined();
   });
 
-  it("keeps Stripe as final step and routes to dashboard when completed", async () => {
+  it("keeps Stripe as final step and waits for webhook confirmation after checkout starts", async () => {
     const { mock: fetchMock, saveCalls } = makeFetchMock({
       claim: {
         ...defaultClaim(),
@@ -417,22 +417,29 @@ describe("Onboarding flow", () => {
     render(<OnboardingPage />);
 
     await screen.findByText(/Stripe payment \(final step\)/i);
-    await screen.findByText(/Payment received\./i);
+    await screen.findByText(/Waiting for webhook confirmation/i);
+    expect(screen.getByRole("button", { name: /Check payment status/i })).toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText(/Your full legal name/i), {
-      target: { value: "Alex Reyes" },
+    expect(replace).not.toHaveBeenCalledWith("/dashboard");
+    expect(saveCalls.find((call) => call.status === "completed")).toBeUndefined();
+  });
+
+  it("routes to dashboard when payment success returns with completed onboarding", async () => {
+    getSearchParam.mockImplementation((key: string) => (key === "payment" ? "success" : null));
+    const { mock: fetchMock } = makeFetchMock({
+      claim: {
+        ...defaultClaim(),
+        status: "completed",
+      },
     });
-    fireEvent.click(screen.getByRole("checkbox", { name: /I agree to these billing terms/i }));
+    global.fetch = fetchMock as unknown as typeof fetch;
 
-    fireEvent.click(screen.getByRole("button", { name: /Finish onboarding/i }));
+    render(<OnboardingPage />);
 
     await waitFor(() => {
       expect(replace).toHaveBeenCalledWith("/dashboard");
       expect(refresh).toHaveBeenCalled();
     });
-
-    const completionSave = saveCalls.find((call) => call.status === "completed");
-    expect(completionSave).toBeDefined();
   });
 
   it("resumes onboarding at the correct next step", async () => {

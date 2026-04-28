@@ -7,6 +7,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 const INVALID_ROLE_MESSAGE = "Invalid role. This account does not have admin access.";
+const safeLocalRedirect = (value: string | null | undefined): string =>
+  value && value.startsWith("/") && !value.startsWith("//") ? value : "/";
 
 export default function Page() {
   const router = useRouter();
@@ -37,7 +39,7 @@ export default function Page() {
       if (authError) {
         throw authError;
       }
-      const redirect = searchParams?.get("redirect") || "/";
+      const redirect = safeLocalRedirect(searchParams?.get("redirect"));
       router.push(redirect);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign in");

@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from backend.app.core.config import settings
-from backend.app.services.billing import BillingService
-from backend.app.services import billing as billing_module
+from backend.app.services.billing.billing import BillingService
+import backend.app.services.billing.billing as billing_module
 
 
 class _FakeStripeList:

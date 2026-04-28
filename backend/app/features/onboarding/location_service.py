@@ -3,8 +3,8 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from backend.app.models.enums import LocationStatus
-from backend.app.models.location import Location
-from backend.app.models.location_settings import LocationSettings
+from backend.app.models.google_business.location import Location
+from backend.app.models.google_business.location_settings import LocationSettings
 
 
 class LocationOnboardingService:
@@ -67,6 +67,7 @@ class LocationOnboardingService:
             )
             services = [primary_category] if primary_category else []
             settings = LocationSettings(
+                tenant_id=organization_id,
                 location_id=location.id,
                 services=services,
             )

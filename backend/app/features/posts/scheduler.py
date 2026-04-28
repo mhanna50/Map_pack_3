@@ -6,13 +6,13 @@ import uuid
 from sqlalchemy.orm import Session
 
 from backend.app.models.enums import PostStatus, PostType
-from backend.app.models.post_candidate import PostCandidate
-from backend.app.models.post import Post
-from backend.app.services.posts import PostService
-from backend.app.services.posting_windows import PostingWindowService, POSTING_WINDOWS
-from backend.app.models.location import Location
+from backend.app.models.posts.post_candidate import PostCandidate
+from backend.app.models.posts.post import Post
+from backend.app.services.posts.posts import PostService
+from backend.app.services.posts.posting_windows import PostingWindowService, POSTING_WINDOWS
+from backend.app.models.google_business.location import Location
 from zoneinfo import ZoneInfo
-from backend.app.services.settings import SettingsService
+from backend.app.services.shared.settings import SettingsService
 
 WINDOW_RANGES = {
     "morning": (time(8, 0), time(10, 0)),

@@ -9,10 +9,10 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_user, require_org_member
 from backend.app.db.session import get_db
-from backend.app.models.approval_request import ApprovalRequest
+from backend.app.models.automation.approval_request import ApprovalRequest
 from backend.app.models.enums import ApprovalCategory, ApprovalStatus
-from backend.app.services.approvals import ApprovalService
-from backend.app.services.access import AccessService
+from backend.app.services.automation.approvals import ApprovalService
+from backend.app.services.auth.access import AccessDeniedError, AccessService
 
 router = APIRouter(
     prefix="/approvals",
@@ -91,10 +91,12 @@ def list_approvals(
     location_id: uuid.UUID | None = Query(None),
     status_filter: ApprovalStatus | None = Query(None, alias="status"),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> list[ApprovalRequest]:
     service = ApprovalService(db)
     return service.list_requests(
         organization_id=organization_id,
+        organization_ids=AccessService(db).member_org_ids(current_user.id) if organization_id is None else None,
         location_id=location_id,
         status=status_filter,
     )
@@ -122,7 +124,10 @@ def approve_request(
 ) -> ApprovalRequest:
     service = ApprovalService(db)
     request = _get_request(db, approval_id)
-    AccessService(db).resolve_org(user_id=current_user.id, organization_id=request.organization_id)
+    try:
+        AccessService(db).resolve_org(user_id=current_user.id, organization_id=request.organization_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     return service.approve(
         request,
         approved_by=payload.user_id,
@@ -140,7 +145,10 @@ def reject_request(
 ) -> ApprovalRequest:
     service = ApprovalService(db)
     request = _get_request(db, approval_id)
-    AccessService(db).resolve_org(user_id=current_user.id, organization_id=request.organization_id)
+    try:
+        AccessService(db).resolve_org(user_id=current_user.id, organization_id=request.organization_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     return service.reject(request, rejected_by=payload.user_id, notes=payload.notes)
 
 
@@ -153,5 +161,8 @@ def rollback_request(
 ) -> ApprovalRequest:
     service = ApprovalService(db)
     request = _get_request(db, approval_id)
-    AccessService(db).resolve_org(user_id=current_user.id, organization_id=request.organization_id)
+    try:
+        AccessService(db).resolve_org(user_id=current_user.id, organization_id=request.organization_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     return service.rollback(request, initiated_by=payload.user_id, notes=payload.notes)

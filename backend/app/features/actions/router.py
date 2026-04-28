@@ -10,10 +10,10 @@ from sqlalchemy.orm import Session
 from backend.app.api.deps import get_current_user, require_org_member
 from backend.app.core.config import settings
 from backend.app.db.session import get_db
-from backend.app.models.action import Action
+from backend.app.models.automation.action import Action
 from backend.app.models.enums import ActionStatus, ActionType
-from backend.app.services.actions import ActionService
-from backend.app.services.access import AccessService
+from backend.app.services.automation.actions import ActionService
+from backend.app.services.auth.access import AccessService
 
 router = APIRouter(
     prefix="/actions",
@@ -95,6 +95,8 @@ def list_actions(
     query = db.query(Action)
     if organization_id:
         query = query.filter(Action.organization_id == organization_id)
+    else:
+        query = query.filter(Action.organization_id.in_(AccessService(db).member_org_ids(current_user.id)))
     if status_filter:
         query = query.filter(Action.status == status_filter)
     return query.order_by(Action.run_at.asc()).limit(250).all()

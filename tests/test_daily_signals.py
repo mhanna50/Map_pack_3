@@ -3,12 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from backend.app.models.enums import OrganizationType, PostStatus, PostType, ReviewRating
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.models.post import Post
-from backend.app.models.review import Review
-from backend.app.models.rank_snapshot import RankSnapshot
-from backend.app.services.daily_signals import DailySignalService
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.models.posts.post import Post
+from backend.app.models.reviews.review import Review
+from backend.app.models.rank_tracking.rank_snapshot import RankSnapshot
+from backend.app.services.content.daily_signals import DailySignalService
 
 
 def _setup(db_session):

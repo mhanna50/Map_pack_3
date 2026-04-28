@@ -11,17 +11,17 @@ from sqlalchemy.orm import Session
 from backend.app.api.deps import get_current_user
 from backend.app.core.config import settings
 from backend.app.db.session import get_db
-from backend.app.models.connected_account import ConnectedAccount
+from backend.app.models.google_business.connected_account import ConnectedAccount
 from backend.app.models.enums import LocationStatus, ProviderType
-from backend.app.models.user import User
-from backend.app.services.access import AccessDeniedError, AccessService
-from backend.app.services.connected_accounts import ConnectedAccountService
-from backend.app.services.google import (
+from backend.app.models.identity.user import User
+from backend.app.services.auth.access import AccessDeniedError, AccessService
+from backend.app.services.google_business.connected_accounts import ConnectedAccountService
+from backend.app.services.google_business.google import (
     GoogleBusinessClient,
     GoogleOAuthService,
     OAuthStateSigner,
 )
-from backend.app.services.location_onboarding import LocationOnboardingService
+from backend.app.services.onboarding.location_onboarding import LocationOnboardingService
 
 DEFAULT_GBP_SCOPES = [
     "https://www.googleapis.com/auth/business.manage",

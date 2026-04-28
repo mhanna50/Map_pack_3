@@ -5,7 +5,7 @@ import re
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.media_asset import MediaAsset
+from backend.app.models.media.media_asset import MediaAsset
 
 GENERAL_PHOTO_TAGS = {
     "team",

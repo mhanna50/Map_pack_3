@@ -10,12 +10,12 @@ from sqlalchemy.orm import Session
 from backend.app.api.deps import get_current_user, require_org_member
 from backend.app.db.session import get_db
 from backend.app.models.enums import ActionType, LocationStatus
-from backend.app.models.location import Location
-from backend.app.models.location_settings import LocationSettings
-from backend.app.services.actions import ActionService
-from backend.app.services.audit import log_audit
-from backend.app.services.gbp_connections import GbpConnectionService, GbpLocationSyncService
-from backend.app.services.google import GoogleBusinessClient, GoogleOAuthService, OAuthStateSigner
+from backend.app.models.google_business.location import Location
+from backend.app.models.google_business.location_settings import LocationSettings
+from backend.app.services.automation.actions import ActionService
+from backend.app.services.operations.audit import log_audit
+from backend.app.services.google_business.gbp_connections import GbpConnectionService, GbpLocationSyncService
+from backend.app.services.google_business.google import GoogleBusinessClient, GoogleOAuthService, OAuthStateSigner
 from backend.app.api.orgs import LocationResponse, LocationSettingsPayload
 
 router = APIRouter(
@@ -173,7 +173,7 @@ def update_location_details(
             for key, value in settings_data.items():
                 setattr(location.settings, key, value)
         else:
-            db.add(LocationSettings(location_id=location.id, **settings_data))
+            db.add(LocationSettings(tenant_id=location.tenant_id, location_id=location.id, **settings_data))
     db.add(location)
     db.commit()
     db.refresh(location)

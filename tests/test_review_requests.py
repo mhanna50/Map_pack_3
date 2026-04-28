@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from backend.app.models.enums import OrganizationType
-from backend.app.models.organization import Organization
-from backend.app.services.review_requests import ReviewRequestService
+from backend.app.models.identity.organization import Organization
+from backend.app.services.reviews.review_requests import ReviewRequestService
 
 
 def _setup(db_session):

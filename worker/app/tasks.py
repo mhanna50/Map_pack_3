@@ -8,12 +8,12 @@ from celery.utils.log import get_task_logger
 from .celery_app import celery_app
 from backend.app.core.config import settings
 from backend.app.db.session import SessionLocal
-from backend.app.models.action import Action
+from backend.app.models.automation.action import Action
 from backend.app.models.enums import ActionStatus, ActionType
-from backend.app.models.organization import Organization
-from backend.app.services.gbp_connections import GbpConnectionService
-from backend.app.services.actions import ActionExecutor, ActionService
-from backend.app.services.keyword_strategy import KeywordCampaignSchedulerService
+from backend.app.models.identity.organization import Organization
+from backend.app.services.google_business.gbp_connections import GbpConnectionService
+from backend.app.services.automation.actions import ActionExecutor, ActionService
+from backend.app.services.rank_tracking.keyword_strategy import KeywordCampaignSchedulerService
 
 logger = get_task_logger(__name__)
 

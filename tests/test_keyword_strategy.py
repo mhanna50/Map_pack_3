@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from backend.app.models.action import Action
+from backend.app.models.automation.action import Action
 from backend.app.models.enums import ActionType, LocationStatus, MembershipRole, OrganizationType
-from backend.app.models.location import Location
-from backend.app.models.location_settings import LocationSettings
-from backend.app.models.membership import Membership
-from backend.app.models.organization import Organization
-from backend.app.models.user import User
-from backend.app.models.selected_keyword import SelectedKeyword
-from backend.app.models.geo_grid_scan import GeoGridScan
-from backend.app.models.gbp_post_keyword_mapping import GbpPostKeywordMapping
-from backend.app.services.keyword_strategy import KeywordCampaignService, KeywordCampaignSchedulerService
+from backend.app.models.google_business.location import Location
+from backend.app.models.google_business.location_settings import LocationSettings
+from backend.app.models.identity.membership import Membership
+from backend.app.models.identity.organization import Organization
+from backend.app.models.identity.user import User
+from backend.app.models.rank_tracking.selected_keyword import SelectedKeyword
+from backend.app.models.rank_tracking.geo_grid_scan import GeoGridScan
+from backend.app.models.rank_tracking.gbp_post_keyword_mapping import GbpPostKeywordMapping
+from backend.app.services.rank_tracking.keyword_strategy import KeywordCampaignService, KeywordCampaignSchedulerService
 
 
 def _seed_location(db_session):

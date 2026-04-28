@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 
 from backend.app.api import deps
-from backend.app.models.user import User
+from backend.app.models.identity.user import User
 
 
 class _Verifier:

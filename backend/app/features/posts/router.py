@@ -10,10 +10,10 @@ from sqlalchemy.orm import Session
 from backend.app.api.deps import get_current_user, require_org_member
 from backend.app.db.session import get_db
 from backend.app.models.enums import PostStatus, PostType
-from backend.app.models.media_asset import MediaAsset
-from backend.app.models.post import Post
-from backend.app.services.posts import PostService
-from backend.app.services.access import AccessService
+from backend.app.models.media.media_asset import MediaAsset
+from backend.app.models.posts.post import Post
+from backend.app.services.posts.posts import PostService
+from backend.app.services.auth.access import AccessDeniedError, AccessService
 
 router = APIRouter(
     prefix="/posts",
@@ -118,10 +118,11 @@ def list_posts(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> list[Post]:
-    # Membership already enforced by require_org_member when org_id/location_id present
     query = db.query(Post).order_by(Post.scheduled_at.desc().nullslast())
     if organization_id:
         query = query.filter(Post.organization_id == organization_id)
+    else:
+        query = query.filter(Post.organization_id.in_(AccessService(db).member_org_ids(current_user.id)))
     if location_id:
         query = query.filter(Post.location_id == location_id)
     return query.limit(100).all()
@@ -141,7 +142,10 @@ def update_post_status(
     post = db.get(Post, post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    AccessService(db).resolve_org(user_id=current_user.id, organization_id=post.organization_id)
+    try:
+        AccessService(db).resolve_org(user_id=current_user.id, organization_id=post.organization_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     service = PostService(db)
     service.validate_scope(
         organization_id=post.organization_id,
@@ -165,7 +169,10 @@ def attach_media(
     post = db.get(Post, post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    AccessService(db).resolve_org(user_id=current_user.id, organization_id=post.organization_id)
+    try:
+        AccessService(db).resolve_org(user_id=current_user.id, organization_id=post.organization_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     asset = db.get(MediaAsset, payload.media_asset_id)
     if not asset:
         raise HTTPException(status_code=404, detail="Media asset not found")

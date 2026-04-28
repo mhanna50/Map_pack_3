@@ -6,6 +6,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/client";
 
+const safeLocalRedirect = (value: string | null | undefined): string =>
+  value && value.startsWith("/") && !value.startsWith("//") ? value : "/dashboard";
+
 export default function Page() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -27,7 +30,7 @@ export default function Page() {
       if (authError) {
         throw authError;
       }
-      const redirect = searchParams?.get("redirect") || "/dashboard";
+      const redirect = safeLocalRedirect(searchParams?.get("redirect"));
       router.push(redirect);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign up");

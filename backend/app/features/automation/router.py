@@ -10,17 +10,17 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_user, require_org_member
 from backend.app.db.session import get_db
-from backend.app.models.automation_rule import AutomationRule
-from backend.app.models.rule_simulation import RuleSimulation
+from backend.app.models.automation.automation_rule import AutomationRule
+from backend.app.models.automation.rule_simulation import RuleSimulation
 from backend.app.models.enums import (
     ActionType,
     AutomationActionType,
     AutomationCondition,
     AutomationTriggerType,
 )
-from backend.app.services.actions import ActionService
-from backend.app.services.automation_rules import AutomationRuleService
-from backend.app.services.access import AccessService
+from backend.app.services.automation.actions import ActionService
+from backend.app.services.automation.automation_rules import AutomationRuleService
+from backend.app.services.auth.access import AccessService
 
 router = APIRouter(
     prefix="/automation",

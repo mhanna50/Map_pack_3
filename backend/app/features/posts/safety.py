@@ -6,9 +6,9 @@ import uuid
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.models.post import Post
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.models.posts.post import Post
 
 
 class PostingSafetyService:

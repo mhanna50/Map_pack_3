@@ -4,11 +4,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from backend.app.models.approval_request import ApprovalRequest
+from backend.app.models.automation.approval_request import ApprovalRequest
 from backend.app.models.enums import OrganizationType, PostStatus, PostType
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.services.posts import PostService
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.services.posts.posts import PostService
 
 
 class StubActionService:

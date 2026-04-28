@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_user, require_org_member
 from backend.app.db.session import get_db
-from backend.app.services.access import AccessService
-from backend.app.services.keyword_strategy import KeywordCampaignService
+from backend.app.services.auth.access import AccessService
+from backend.app.services.rank_tracking.keyword_strategy import KeywordCampaignService
 
 router = APIRouter(
     prefix="/keyword-strategy",
@@ -168,7 +168,7 @@ def get_keyword_cycle(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     service = KeywordCampaignService(db)
-    from backend.app.models.keyword_campaign_cycle import KeywordCampaignCycle
+    from backend.app.models.rank_tracking.keyword_campaign_cycle import KeywordCampaignCycle
 
     row = db.get(KeywordCampaignCycle, cycle_id)
     if not row or row.organization_id != organization_id:

@@ -6,8 +6,8 @@ import uuid
 from sqlalchemy.orm import Session
 
 from backend.app.models.enums import PhotoRequestStatus, PendingChangeStatus
-from backend.app.models.media_upload_request import MediaUploadRequest
-from backend.app.models.photo_request import PhotoRequest
+from backend.app.models.media.media_upload_request import MediaUploadRequest
+from backend.app.models.media.photo_request import PhotoRequest
 
 
 class PhotoRequestService:

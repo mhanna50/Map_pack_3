@@ -6,12 +6,12 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.attribute_template import AttributeTemplate
-from backend.app.models.listing_audit import ListingAudit
-from backend.app.models.pending_change import PendingChange
+from backend.app.models.google_business.attribute_template import AttributeTemplate
+from backend.app.models.google_business.listing_audit import ListingAudit
+from backend.app.models.google_business.pending_change import PendingChange
 from backend.app.models.enums import PendingChangeStatus, PendingChangeType
-from backend.app.models.service_template import ServiceTemplate
-from backend.app.services.validators import assert_location_in_org
+from backend.app.models.google_business.service_template import ServiceTemplate
+from backend.app.services.shared.validators import assert_location_in_org
 
 
 class ListingOptimizationService:

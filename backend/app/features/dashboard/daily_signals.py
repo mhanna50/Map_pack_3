@@ -7,13 +7,13 @@ from statistics import mean, pstdev
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from backend.app.models.daily_signal import DailySignal
-from backend.app.models.location import Location
-from backend.app.models.media_asset import MediaAsset
-from backend.app.models.post import Post
-from backend.app.models.review import Review
-from backend.app.models.rank_snapshot import RankSnapshot
-from backend.app.models.gbp_connection import GbpConnection
+from backend.app.models.content.daily_signal import DailySignal
+from backend.app.models.google_business.location import Location
+from backend.app.models.media.media_asset import MediaAsset
+from backend.app.models.posts.post import Post
+from backend.app.models.reviews.review import Review
+from backend.app.models.rank_tracking.rank_snapshot import RankSnapshot
+from backend.app.models.google_business.gbp_connection import GbpConnection
 
 
 class DailySignalService:

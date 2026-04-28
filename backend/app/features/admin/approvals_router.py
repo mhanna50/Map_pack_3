@@ -10,10 +10,10 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_staff
 from backend.app.db.session import get_db
-from backend.app.models.approval_request import ApprovalRequest
+from backend.app.models.automation.approval_request import ApprovalRequest
 from backend.app.models.enums import ApprovalCategory, ApprovalStatus
-from backend.app.models.user import User
-from backend.app.services.approvals import ApprovalService
+from backend.app.models.identity.user import User
+from backend.app.services.automation.approvals import ApprovalService
 
 router = APIRouter(prefix="/admin/approvals", tags=["admin_approvals"])
 

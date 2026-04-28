@@ -6,9 +6,9 @@ import uuid
 from sqlalchemy.orm import Session
 
 from backend.app.models.enums import ReviewRating, ReviewStatus
-from backend.app.models.review import Review
-from backend.app.models.review_reply import ReviewReply
-from backend.app.services.approvals import ApprovalService
+from backend.app.models.reviews.review import Review
+from backend.app.models.reviews.review_reply import ReviewReply
+from backend.app.services.automation.approvals import ApprovalService
 
 
 class ReviewService:

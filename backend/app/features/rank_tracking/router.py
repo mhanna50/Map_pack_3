@@ -9,12 +9,12 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_user, require_org_member
 from backend.app.db.session import get_db
-from backend.app.models.geo_grid_point import GeoGridPoint
-from backend.app.models.location_keyword import LocationKeyword
-from backend.app.models.rank_snapshot import RankSnapshot
-from backend.app.models.visibility_score import VisibilityScore
-from backend.app.services.rank_tracking import RankTrackingService
-from backend.app.services.access import AccessService
+from backend.app.models.rank_tracking.geo_grid_point import GeoGridPoint
+from backend.app.models.rank_tracking.location_keyword import LocationKeyword
+from backend.app.models.rank_tracking.rank_snapshot import RankSnapshot
+from backend.app.models.rank_tracking.visibility_score import VisibilityScore
+from backend.app.services.rank_tracking.rank_tracking import RankTrackingService
+from backend.app.services.auth.access import AccessService
 
 router = APIRouter(
     prefix="/rankings",

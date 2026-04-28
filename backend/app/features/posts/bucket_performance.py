@@ -5,7 +5,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.bucket_performance import BucketPerformance, DEFAULT_TOPIC_KEY
+from backend.app.models.content.bucket_performance import BucketPerformance, DEFAULT_TOPIC_KEY
 
 
 class BucketPerformanceService:

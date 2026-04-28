@@ -8,13 +8,13 @@ import httpx
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
-from backend.app.models.contact import Contact
+from backend.app.models.reviews.contact import Contact
 from backend.app.models.enums import ReviewRequestStatus, ActionType
-from backend.app.models.job import Job
-from backend.app.models.review_request import ReviewRequest
-from backend.app.services.actions import ActionService
-from backend.app.services.audit import AuditService
-from backend.app.services.notifications import NotificationService
+from backend.app.models.operations.job import Job
+from backend.app.models.reviews.review_request import ReviewRequest
+from backend.app.services.automation.actions import ActionService
+from backend.app.services.operations.audit import AuditService
+from backend.app.services.operations.notifications import NotificationService
 
 logger = logging.getLogger(__name__)
 

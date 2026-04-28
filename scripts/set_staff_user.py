@@ -14,7 +14,7 @@ from sqlalchemy import text
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from backend.app.db.session import SessionLocal
-from backend.app.models.user import User
+from backend.app.models.identity.user import User
 
 
 def main() -> None:

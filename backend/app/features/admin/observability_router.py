@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_staff
 from backend.app.db.session import get_db
-from backend.app.models.user import User
-from backend.app.services.observability import ObservabilityService
+from backend.app.models.identity.user import User
+from backend.app.services.operations.observability import ObservabilityService
 
 router = APIRouter(prefix="/admin/observability", tags=["admin_observability"])
 

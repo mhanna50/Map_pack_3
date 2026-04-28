@@ -5,7 +5,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.rate_limit_state import RateLimitState
+from backend.app.models.operations.rate_limit_state import RateLimitState
 
 
 class RateLimitError(Exception):

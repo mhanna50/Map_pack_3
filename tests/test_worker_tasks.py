@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from backend.app.models.action import Action as ActionModel
+from backend.app.models.automation.action import Action as ActionModel
 from backend.app.models.enums import (
     ActionStatus,
     ActionType,
@@ -14,13 +14,13 @@ from backend.app.models.enums import (
     LocationStatus,
     OrganizationType,
 )
-from backend.app.models.organization import Organization
-from backend.app.models.location import Location
-from backend.app.models.location_settings import LocationSettings
-from backend.app.services.media_management import MediaManagementService
-from backend.app.services.competitor_monitoring import CompetitorMonitoringService
-from backend.app.services.automation_rules import AutomationRuleService
-from backend.app.services.actions import ActionService
+from backend.app.models.identity.organization import Organization
+from backend.app.models.google_business.location import Location
+from backend.app.models.google_business.location_settings import LocationSettings
+from backend.app.services.media.media_management import MediaManagementService
+from backend.app.services.rank_tracking.competitor_monitoring import CompetitorMonitoringService
+from backend.app.services.automation.automation_rules import AutomationRuleService
+from backend.app.services.automation.actions import ActionService
 from worker.app import tasks as worker_tasks
 
 

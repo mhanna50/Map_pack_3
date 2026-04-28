@@ -25,9 +25,9 @@ from backend.app.db.base import Base
 from backend.app.db.session import get_db
 from backend.app.main import app as fastapi_app
 from backend.app.models import *  # noqa: F401,F403
-from backend.app.services.encryption import get_encryption_service
+from backend.app.services.shared.encryption import get_encryption_service
 from backend.app.api.deps import get_current_user
-from backend.app.models.user import User
+from backend.app.models.identity.user import User
 from worker.app import tasks as worker_tasks
 
 fernet_module = pytest.importorskip("cryptography.fernet")

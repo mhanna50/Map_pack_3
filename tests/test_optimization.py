@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from backend.app.models.attribute_template import AttributeTemplate
+from backend.app.models.google_business.attribute_template import AttributeTemplate
 from backend.app.models.enums import OrganizationType
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.models.service_template import ServiceTemplate
-from backend.app.services.listing_optimization import ListingOptimizationService
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.models.google_business.service_template import ServiceTemplate
+from backend.app.services.google_business.listing_optimization import ListingOptimizationService
 
 
 def _org_location(db_session):

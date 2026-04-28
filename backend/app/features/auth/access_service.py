@@ -4,9 +4,9 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.membership import Membership
-from backend.app.models.organization import Organization
-from backend.app.models.user import User
+from backend.app.models.identity.membership import Membership
+from backend.app.models.identity.organization import Organization
+from backend.app.models.identity.user import User
 
 
 class AccessDeniedError(PermissionError):
@@ -60,6 +60,9 @@ class AccessService:
             .all()
         )
         return [membership.organization for membership in memberships]
+
+    def member_org_ids(self, user_id: uuid.UUID) -> list[uuid.UUID]:
+        return [organization.id for organization in self.member_orgs(user_id)]
 
     def _membership_for_user(
         self,

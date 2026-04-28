@@ -7,20 +7,20 @@ import uuid
 from sqlalchemy.orm import Session
 
 from backend.app.models.enums import ActionType
-from backend.app.models.geo_grid_point import GeoGridPoint
-from backend.app.models.location_keyword import LocationKeyword
-from backend.app.models.rank_snapshot import RankSnapshot
-from backend.app.models.visibility_score import VisibilityScore
-from backend.app.services.validators import assert_location_in_org
+from backend.app.models.rank_tracking.geo_grid_point import GeoGridPoint
+from backend.app.models.rank_tracking.location_keyword import LocationKeyword
+from backend.app.models.rank_tracking.rank_snapshot import RankSnapshot
+from backend.app.models.rank_tracking.visibility_score import VisibilityScore
+from backend.app.services.shared.validators import assert_location_in_org
 if TYPE_CHECKING:
-    from backend.app.services.actions import ActionService
+    from backend.app.services.automation.actions import ActionService
 
 
 class RankTrackingService:
     def __init__(self, db: Session, action_service: "ActionService | None" = None) -> None:
         self.db = db
         if action_service is None:
-            from backend.app.services.actions import ActionService
+            from backend.app.services.automation.actions import ActionService
 
             action_service = ActionService(db)
         self.action_service = action_service

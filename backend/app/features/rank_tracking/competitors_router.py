@@ -9,10 +9,10 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_user, require_org_member
 from backend.app.db.session import get_db
-from backend.app.models.competitor_profile import CompetitorProfile
-from backend.app.models.competitor_snapshot import CompetitorSnapshot
-from backend.app.services.competitor_monitoring import CompetitorMonitoringService
-from backend.app.services.access import AccessService
+from backend.app.models.rank_tracking.competitor_profile import CompetitorProfile
+from backend.app.models.rank_tracking.competitor_snapshot import CompetitorSnapshot
+from backend.app.services.rank_tracking.competitor_monitoring import CompetitorMonitoringService
+from backend.app.services.auth.access import AccessService
 
 router = APIRouter(
     prefix="/competitors",

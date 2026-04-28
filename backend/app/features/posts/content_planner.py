@@ -6,14 +6,14 @@ from typing import Iterable
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.content_plan import ContentPlan
+from backend.app.models.content.content_plan import ContentPlan
 from backend.app.models.enums import ContentPlanStatus
-from backend.app.models.location import Location
-from backend.app.services.post_candidates import PostCandidateService
-from backend.app.services.post_composition import PostCompositionService
-from backend.app.services.post_scheduler import PostSchedulerService
-from backend.app.services.post_jobs import PostJobService
-from backend.app.services.audit import AuditService
+from backend.app.models.google_business.location import Location
+from backend.app.services.posts.post_candidates import PostCandidateService
+from backend.app.services.posts.post_composition import PostCompositionService
+from backend.app.services.posts.post_scheduler import PostSchedulerService
+from backend.app.services.posts.post_jobs import PostJobService
+from backend.app.services.operations.audit import AuditService
 
 
 class ContentPlannerService:

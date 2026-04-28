@@ -6,7 +6,7 @@ import uuid
 from sqlalchemy.orm import Session
 
 from backend.app.models.enums import PostStatus
-from backend.app.models.post import Post
+from backend.app.models.posts.post import Post
 
 
 class AutoScheduler:

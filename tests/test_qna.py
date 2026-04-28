@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from backend.app.models.enums import OrganizationType, QnaStatus
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.services.qna import QnaService, QUESTION_LIBRARY
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.services.google_business.qna import QnaService, QUESTION_LIBRARY
 
 
 def _org_and_location(db_session):

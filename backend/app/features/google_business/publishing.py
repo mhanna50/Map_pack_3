@@ -6,13 +6,13 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.post import Post
-from backend.app.models.review import Review
+from backend.app.models.posts.post import Post
+from backend.app.models.reviews.review import Review
 from backend.app.models.enums import PostStatus
-from backend.app.services.audit import log_audit
-from backend.app.services.gbp_connections import GbpConnectionService
-from backend.app.services.google import GoogleBusinessClient, GoogleOAuthService
-from backend.app.services.rate_limits import RateLimitService, RateLimitError
+from backend.app.services.operations.audit import log_audit
+from backend.app.services.google_business.gbp_connections import GbpConnectionService
+from backend.app.services.google_business.google import GoogleBusinessClient, GoogleOAuthService
+from backend.app.services.operations.rate_limits import RateLimitService, RateLimitError
 from backend.app.core.config import settings
 
 

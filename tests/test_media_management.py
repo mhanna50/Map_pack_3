@@ -2,16 +2,16 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from backend.app.models.action import Action
+from backend.app.models.automation.action import Action
 from backend.app.models.enums import (
     MediaStatus,
     MediaType,
     OrganizationType,
     PendingChangeStatus,
 )
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.services.media_management import MediaManagementService
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.services.media.media_management import MediaManagementService
 
 
 def _setup_org_and_location(db_session):

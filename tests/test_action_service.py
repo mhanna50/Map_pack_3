@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from backend.app.models.enums import ActionStatus, ActionType, OrganizationType
-from backend.app.models.organization import Organization
-from backend.app.services.actions import ActionService
+from backend.app.models.identity.organization import Organization
+from backend.app.services.automation.actions import ActionService
 
 
 def test_action_lifecycle_retry_and_dead_letter(db_session):
@@ -84,7 +84,7 @@ def test_legacy_action_path_ensures_tenant_row(db_session, monkeypatch):
         captured["slug"] = slug
         captured["plan_tier"] = plan_tier
 
-    monkeypatch.setattr("backend.app.services.actions.ensure_tenant_row", _spy_ensure_tenant_row)
+    monkeypatch.setattr("backend.app.services.automation.actions.ensure_tenant_row", _spy_ensure_tenant_row)
 
     service._ensure_legacy_tenant_row(org.id)
 

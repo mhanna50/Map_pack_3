@@ -4,8 +4,8 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.connected_account import ConnectedAccount
-from backend.app.models.location import Location
+from backend.app.models.google_business.connected_account import ConnectedAccount
+from backend.app.models.google_business.location import Location
 
 
 def assert_location_in_org(db: Session, *, location_id: uuid.UUID, organization_id: uuid.UUID) -> Location:

@@ -5,8 +5,8 @@ from typing import cast
 
 from backend.app.core.config import settings
 from backend.app.models.enums import OrganizationType
-from backend.app.models.organization import Organization
-from backend.app.services.google import GoogleBusinessClient, GoogleOAuthService
+from backend.app.models.identity.organization import Organization
+from backend.app.services.google_business.google import GoogleBusinessClient, GoogleOAuthService
 from pydantic import AnyHttpUrl
 
 

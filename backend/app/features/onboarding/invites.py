@@ -9,14 +9,14 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
 from backend.app.models.enums import MembershipRole
-from backend.app.models.invite import OrganizationInvite
-from backend.app.models.membership import Membership
-from backend.app.models.organization import Organization
-from backend.app.models.user import User
-from backend.app.services.audit import log_audit
-from backend.app.services.notifications import NotificationService
-from backend.app.services.passwords import PasswordService
-from backend.app.services.tenant_bridge import ensure_tenant_row
+from backend.app.models.identity.invite import OrganizationInvite
+from backend.app.models.identity.membership import Membership
+from backend.app.models.identity.organization import Organization
+from backend.app.models.identity.user import User
+from backend.app.services.operations.audit import log_audit
+from backend.app.services.operations.notifications import NotificationService
+from backend.app.services.auth.passwords import PasswordService
+from backend.app.services.onboarding.tenant_bridge import ensure_tenant_row
 
 
 class InviteService:

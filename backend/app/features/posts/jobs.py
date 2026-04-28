@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy.orm import Session
 from typing import TYPE_CHECKING
 
-from backend.app.models.content_plan import ContentPlan
+from backend.app.models.content.content_plan import ContentPlan
 from backend.app.models.enums import (
     ContentPlanStatus,
     PostJobStatus,
@@ -16,19 +16,19 @@ from backend.app.models.enums import (
     ActionType,
     AlertSeverity,
 )
-from backend.app.models.post import Post
-from backend.app.models.post_job import PostJob
-from backend.app.models.post_attempt import PostAttempt
-from backend.app.models.gbp_post_keyword_mapping import GbpPostKeywordMapping
-from backend.app.services.audit import AuditService
-from backend.app.services.posts import PostService
-from backend.app.services.rate_limits import RateLimitError, RateLimitService
-from backend.app.services.posting_safety import PostingSafetyService
-from backend.app.services.gbp_publishing import GbpPublishingService
-from backend.app.services.alerts import AlertService
+from backend.app.models.posts.post import Post
+from backend.app.models.posts.post_job import PostJob
+from backend.app.models.posts.post_attempt import PostAttempt
+from backend.app.models.rank_tracking.gbp_post_keyword_mapping import GbpPostKeywordMapping
+from backend.app.services.operations.audit import AuditService
+from backend.app.services.posts.posts import PostService
+from backend.app.services.operations.rate_limits import RateLimitError, RateLimitService
+from backend.app.services.posts.posting_safety import PostingSafetyService
+from backend.app.services.google_business.gbp_publishing import GbpPublishingService
+from backend.app.services.operations.alerts import AlertService
 
 if TYPE_CHECKING:
-    from backend.app.services.actions import ActionService
+    from backend.app.services.automation.actions import ActionService
 
 
 class PostJobService:
@@ -42,7 +42,7 @@ class PostJobService:
         self.safety = PostingSafetyService(db)
         self.publisher = GbpPublishingService(db)
         if action_service is None:
-            from backend.app.services.actions import ActionService as ActionServiceImpl
+            from backend.app.services.automation.actions import ActionService as ActionServiceImpl
 
             self.action_service = ActionServiceImpl(db)
         else:

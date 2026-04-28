@@ -10,11 +10,11 @@ from sqlalchemy.orm import Session
 from backend.app.api.deps import get_current_user, require_org_member
 from backend.app.db.session import get_db
 from backend.app.models.enums import MediaStatus, MediaType, PendingChangeStatus
-from backend.app.models.media_album import MediaAlbum
-from backend.app.models.media_asset import MediaAsset
-from backend.app.models.media_upload_request import MediaUploadRequest
-from backend.app.services.media_management import MediaManagementService
-from backend.app.services.access import AccessService
+from backend.app.models.media.media_album import MediaAlbum
+from backend.app.models.media.media_asset import MediaAsset
+from backend.app.models.media.media_upload_request import MediaUploadRequest
+from backend.app.services.media.media_management import MediaManagementService
+from backend.app.services.auth.access import AccessDeniedError, AccessService
 
 router = APIRouter(
     prefix="/media",
@@ -182,10 +182,12 @@ def list_media_requests(
     location_id: uuid.UUID | None = None,
     status: PendingChangeStatus | None = Query(None),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> list[MediaUploadRequest]:
     service = MediaManagementService(db)
     return service.list_upload_requests(
         organization_id=organization_id,
+        organization_ids=AccessService(db).member_org_ids(current_user.id) if organization_id is None else None,
         location_id=location_id,
         status=status,
     )
@@ -200,10 +202,15 @@ def approve_media_asset(
     asset_id: uuid.UUID,
     payload: MediaAssetApprovalRequest | None = None,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> MediaAsset:
     asset = db.get(MediaAsset, asset_id)
     if not asset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+    try:
+        AccessService(db).resolve_org(user_id=current_user.id, organization_id=asset.organization_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     service = MediaManagementService(db)
     return service.approve_media(asset, reviewer_id=payload.reviewer_id if payload else None)
 
@@ -215,10 +222,12 @@ def list_media_assets(
     status: MediaStatus | None = Query(None),
     album_id: uuid.UUID | None = None,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> list[MediaAsset]:
     service = MediaManagementService(db)
     return service.list_assets(
         organization_id=organization_id,
+        organization_ids=AccessService(db).member_org_ids(current_user.id) if organization_id is None else None,
         location_id=location_id,
         status=status,
         album_id=album_id,

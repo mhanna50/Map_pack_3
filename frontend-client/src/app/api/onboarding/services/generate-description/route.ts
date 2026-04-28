@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
 
 type ServiceDescriptionRequest = {
   service_name?: unknown;
@@ -11,6 +13,27 @@ type ServiceDescriptionRequest = {
 
 const asTrimmedString = (value: unknown): string =>
   typeof value === "string" ? value.trim() : "";
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+
+const hasAuthenticatedUser = async (): Promise<boolean> => {
+  if (!supabaseUrl || !supabaseAnonKey) return false;
+  const cookieStore = await cookies();
+  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      get(name) {
+        return cookieStore.get(name)?.value;
+      },
+      set() {},
+      remove() {},
+    },
+  });
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return Boolean(user?.id);
+};
 
 const normalizeTone = (value: string): string => {
   const normalized = value.toLowerCase();
@@ -87,6 +110,10 @@ const generateWithOpenAi = async (
 };
 
 export async function POST(request: NextRequest) {
+  if (!(await hasAuthenticatedUser())) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
   let body: ServiceDescriptionRequest;
   try {
     body = (await request.json()) as ServiceDescriptionRequest;

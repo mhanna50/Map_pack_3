@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from backend.app.models.enums import MediaType, OrganizationType
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.services.media_management import MediaManagementService
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.services.media.media_management import MediaManagementService
 
 
 def _create_org_and_location(db_session):

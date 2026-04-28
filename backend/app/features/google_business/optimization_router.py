@@ -7,11 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from backend.app.services.access import AccessService
+from backend.app.services.auth.access import AccessService
 from backend.app.api.deps import get_current_user, require_org_member
 from backend.app.db.session import get_db
-from backend.app.models.listing_audit import ListingAudit
-from backend.app.services.listing_optimization import ListingOptimizationService
+from backend.app.models.google_business.listing_audit import ListingAudit
+from backend.app.services.google_business.listing_optimization import ListingOptimizationService
 
 router = APIRouter(
     prefix="/optimization",

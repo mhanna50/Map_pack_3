@@ -8,11 +8,11 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_user
 from backend.app.db.session import get_db
-from backend.app.models.membership import Membership
+from backend.app.models.identity.membership import Membership
 from backend.app.models.enums import MembershipRole
-from backend.app.models.user import User
-from backend.app.services.invites import InviteService
-from backend.app.services.access import AccessService
+from backend.app.models.identity.user import User
+from backend.app.services.onboarding.invites import InviteService
+from backend.app.services.auth.access import AccessService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

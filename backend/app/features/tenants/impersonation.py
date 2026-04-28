@@ -8,8 +8,8 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.impersonation_session import ImpersonationSession
-from backend.app.services.audit import log_audit
+from backend.app.models.identity.impersonation_session import ImpersonationSession
+from backend.app.services.operations.audit import log_audit
 
 
 class ImpersonationService:

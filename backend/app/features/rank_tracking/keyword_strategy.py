@@ -12,24 +12,24 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.action import Action
-from backend.app.models.campaign_job_run import CampaignJobRun
+from backend.app.models.automation.action import Action
+from backend.app.models.rank_tracking.campaign_job_run import CampaignJobRun
 from backend.app.models.enums import ActionType, LocationStatus
-from backend.app.models.gbp_post_keyword_mapping import GbpPostKeywordMapping
-from backend.app.models.gbp_optimization_action import GbpOptimizationAction
-from backend.app.models.geo_grid_scan import GeoGridScan
-from backend.app.models.geo_grid_scan_point import GeoGridScanPoint
-from backend.app.models.keyword_candidate import KeywordCandidate
-from backend.app.models.keyword_campaign_cycle import KeywordCampaignCycle
-from backend.app.models.keyword_dashboard_aggregate import KeywordDashboardAggregate
-from backend.app.models.keyword_score import KeywordScore
-from backend.app.models.location import Location
-from backend.app.models.location_settings import LocationSettings
-from backend.app.models.organization import Organization
-from backend.app.models.selected_keyword import SelectedKeyword
-from backend.app.services.settings import SettingsService
-from backend.app.services.validators import assert_location_in_org
-from backend.app.services.keyword_strategy_providers import (
+from backend.app.models.rank_tracking.gbp_post_keyword_mapping import GbpPostKeywordMapping
+from backend.app.models.rank_tracking.gbp_optimization_action import GbpOptimizationAction
+from backend.app.models.rank_tracking.geo_grid_scan import GeoGridScan
+from backend.app.models.rank_tracking.geo_grid_scan_point import GeoGridScanPoint
+from backend.app.models.rank_tracking.keyword_candidate import KeywordCandidate
+from backend.app.models.rank_tracking.keyword_campaign_cycle import KeywordCampaignCycle
+from backend.app.models.rank_tracking.keyword_dashboard_aggregate import KeywordDashboardAggregate
+from backend.app.models.rank_tracking.keyword_score import KeywordScore
+from backend.app.models.google_business.location import Location
+from backend.app.models.google_business.location_settings import LocationSettings
+from backend.app.models.identity.organization import Organization
+from backend.app.models.rank_tracking.selected_keyword import SelectedKeyword
+from backend.app.services.shared.settings import SettingsService
+from backend.app.services.shared.validators import assert_location_in_org
+from backend.app.services.rank_tracking.keyword_strategy_providers import (
     GeoGridProvider,
     HeuristicKeywordDataProvider,
     KeywordDataProvider,
@@ -167,7 +167,7 @@ class KeywordCampaignService:
     ) -> None:
         self.db = db
         self.settings = SettingsService(db)
-        from backend.app.services.actions import ActionService
+        from backend.app.services.automation.actions import ActionService
 
         self.action_service = ActionService(db)
         self.keyword_data_provider = keyword_data_provider or HeuristicKeywordDataProvider()
@@ -1138,7 +1138,12 @@ class KeywordCampaignService:
     ) -> None:
         values = [item.keyword for item in sorted(selected_keywords, key=lambda row: row.rank_order)]
         if not location.settings:
-            location.settings = LocationSettings(location_id=location.id, keywords=values, settings_json={})
+            location.settings = LocationSettings(
+                tenant_id=location.tenant_id,
+                location_id=location.id,
+                keywords=values,
+                settings_json={},
+            )
         else:
             location.settings.keywords = values
             settings_json = dict(location.settings.settings_json or {})
@@ -2037,7 +2042,7 @@ class KeywordCampaignService:
 class KeywordCampaignSchedulerService:
     def __init__(self, db: Session) -> None:
         self.db = db
-        from backend.app.services.actions import ActionService
+        from backend.app.services.automation.actions import ActionService
 
         self.action_service = ActionService(db)
 

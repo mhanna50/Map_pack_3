@@ -3,12 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from backend.app.models.enums import OrganizationType, PostStatus, PostType, ReviewRating
-from backend.app.models.location import Location
-from backend.app.models.location_settings import LocationSettings
-from backend.app.models.organization import Organization
-from backend.app.models.post import Post
-from backend.app.models.review import Review
-from backend.app.services.competitor_monitoring import CompetitorMonitoringService
+from backend.app.models.google_business.location import Location
+from backend.app.models.google_business.location_settings import LocationSettings
+from backend.app.models.identity.organization import Organization
+from backend.app.models.posts.post import Post
+from backend.app.models.reviews.review import Review
+from backend.app.services.rank_tracking.competitor_monitoring import CompetitorMonitoringService
 
 
 def _make_location(db_session):

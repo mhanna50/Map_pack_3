@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from backend.app.models.daily_signal import DailySignal
+from backend.app.models.content.daily_signal import DailySignal
 from backend.app.models.enums import OrganizationType
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.services.post_candidates import PostCandidateService
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.services.posts.post_candidates import PostCandidateService
 
 
 def _setup(db_session):

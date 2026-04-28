@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from backend.app.models.action import Action
-from backend.app.models.approval_request import ApprovalRequest
+from backend.app.models.automation.action import Action
+from backend.app.models.automation.approval_request import ApprovalRequest
 from backend.app.models.enums import (
     ActionStatus,
     ActionType,
@@ -15,15 +15,15 @@ from backend.app.models.enums import (
     PostType,
     ReviewRating,
 )
-from backend.app.models.location import Location
-from backend.app.models.membership import Membership
-from backend.app.models.organization import Organization
-from backend.app.models.post import Post
-from backend.app.models.review import Review
-from backend.app.models.user import User
-from backend.app.models.visibility_score import VisibilityScore
-from backend.app.models.location_keyword import LocationKeyword
-from backend.app.services.dashboard import DashboardService
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.membership import Membership
+from backend.app.models.identity.organization import Organization
+from backend.app.models.posts.post import Post
+from backend.app.models.reviews.review import Review
+from backend.app.models.identity.user import User
+from backend.app.models.rank_tracking.visibility_score import VisibilityScore
+from backend.app.models.rank_tracking.location_keyword import LocationKeyword
+from backend.app.services.operations.dashboard import DashboardService
 
 
 def _setup_context(db_session):

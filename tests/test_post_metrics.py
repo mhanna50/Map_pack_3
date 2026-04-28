@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from backend.app.models.bucket_performance import BucketPerformance
+from backend.app.models.content.bucket_performance import BucketPerformance
 from backend.app.models.enums import OrganizationType, PostStatus, PostType
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.models.post import Post
-from backend.app.models.posting_window_stat import PostingWindowStat
-from backend.app.services.post_metrics import PostMetricsService
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.models.posts.post import Post
+from backend.app.models.posts.posting_window_stat import PostingWindowStat
+from backend.app.services.posts.post_metrics import PostMetricsService
 
 
 def _make_post(db_session):

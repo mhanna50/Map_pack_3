@@ -3,13 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from backend.app.models.enums import MediaType, OrganizationType
-from backend.app.models.media_asset import MediaAsset
-from backend.app.models.post_rotation_memory import PostRotationMemory
-from backend.app.models.organization import Organization
-from backend.app.models.location import Location
-from backend.app.services.captions import CaptionGenerator
-from backend.app.services.media_selection import MediaSelector
-from backend.app.services.rotation import RotationEngine
+from backend.app.models.media.media_asset import MediaAsset
+from backend.app.models.posts.post_rotation_memory import PostRotationMemory
+from backend.app.models.identity.organization import Organization
+from backend.app.models.google_business.location import Location
+from backend.app.services.content.captions import CaptionGenerator
+from backend.app.services.media.media_selection import MediaSelector
+from backend.app.services.posts.rotation import RotationEngine
 
 
 def _org_location(db_session):

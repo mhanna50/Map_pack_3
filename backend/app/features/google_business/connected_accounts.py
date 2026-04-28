@@ -6,9 +6,9 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.connected_account import ConnectedAccount
+from backend.app.models.google_business.connected_account import ConnectedAccount
 from backend.app.models.enums import ProviderType
-from backend.app.services.encryption import get_encryption_service
+from backend.app.services.shared.encryption import get_encryption_service
 
 
 class ConnectedAccountService:

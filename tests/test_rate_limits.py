@@ -4,9 +4,9 @@ import uuid
 
 import pytest
 
-from backend.app.models.organization import Organization
-from backend.app.models.location import Location
-from backend.app.services.rate_limits import RateLimitService, RateLimitError
+from backend.app.models.identity.organization import Organization
+from backend.app.models.google_business.location import Location
+from backend.app.services.operations.rate_limits import RateLimitService, RateLimitError
 
 
 def test_rate_limit_service_enforces_window(db_session):

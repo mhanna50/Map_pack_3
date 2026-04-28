@@ -6,7 +6,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.job import Job
+from backend.app.models.operations.job import Job
 
 
 class JobService:

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from backend.app.models.organization import Organization
-from backend.app.models.location import Location
-from backend.app.models.content_plan import ContentPlan
+from backend.app.models.identity.organization import Organization
+from backend.app.models.google_business.location import Location
+from backend.app.models.content.content_plan import ContentPlan
 from backend.app.models.enums import ContentPlanStatus
-from backend.app.services.post_jobs import PostJobService
+from backend.app.services.posts.post_jobs import PostJobService
 
 
 def _setup(db_session):

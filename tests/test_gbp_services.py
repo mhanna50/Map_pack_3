@@ -3,12 +3,12 @@ from __future__ import annotations
 import uuid
 
 from backend.app.models.enums import OrganizationType, PostStatus, PostType, ReviewRating
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.models.post import Post
-from backend.app.models.review import Review
-from backend.app.services.gbp_publishing import GbpPublishingService
-from backend.app.services.gbp_sync import GbpSyncService
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.models.posts.post import Post
+from backend.app.models.reviews.review import Review
+from backend.app.services.google_business.gbp_publishing import GbpPublishingService
+from backend.app.services.google_business.gbp_sync import GbpSyncService
 
 
 class _FakeClient:

@@ -3,7 +3,7 @@
 from sqlalchemy import text
 
 from backend.app.db.session import engine
-from backend.app.models.dashboard_snapshot import DashboardSnapshot
+from backend.app.models.operations.dashboard_snapshot import DashboardSnapshot
 
 
 def upgrade():

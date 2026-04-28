@@ -8,12 +8,12 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_staff
 from backend.app.db.session import get_db
-from backend.app.models.user import User
-from backend.app.services.automation_settings import (
+from backend.app.models.identity.user import User
+from backend.app.services.automation.automation_settings import (
     AUTOMATION_DEFINITIONS,
     AutomationSettingsService,
 )
-from backend.app.services.jobs import JobService
+from backend.app.services.operations.jobs import JobService
 
 router = APIRouter(prefix="/admin/orgs", tags=["admin_automations"])
 

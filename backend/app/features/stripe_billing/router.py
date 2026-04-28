@@ -12,12 +12,12 @@ from sqlalchemy.orm import Session
 
 from backend.app.db.session import get_db
 from backend.app.api.deps import get_current_staff
-from backend.app.services.billing import BillingService
-from backend.app.services.provisioning import ClientProvisioningService
-from backend.app.models.organization import Organization
-from backend.app.models.membership import Membership
-from backend.app.models.user import User
-from backend.app.models.billing_subscription import BillingSubscription
+from backend.app.services.billing.billing import BillingService
+from backend.app.services.onboarding.provisioning import ClientProvisioningService
+from backend.app.models.identity.organization import Organization
+from backend.app.models.identity.membership import Membership
+from backend.app.models.identity.user import User
+from backend.app.models.billing.billing_subscription import BillingSubscription
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)

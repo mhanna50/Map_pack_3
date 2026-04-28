@@ -51,12 +51,12 @@ type CompletionChecks = {
   hasBusinessInfo: boolean;
 };
 
-const hasCompletedBusinessInfo = (status: unknown, tenantBusinessName: unknown): boolean => {
-  const normalized = normalizeStatus(status);
-  if ((ONBOARDING_STATUS_RANK[normalized] ?? -1) >= ONBOARDING_STATUS_RANK.stripe_pending) {
-    return true;
+const hasCompletedBusinessInfo = (_status: unknown, tenantBusinessName: unknown): boolean => {
+  if (typeof tenantBusinessName !== "string") {
+    return false;
   }
-  return typeof tenantBusinessName === "string" && tenantBusinessName.trim().length > 1;
+  const normalizedName = tenantBusinessName.trim().toLowerCase();
+  return normalizedName.length > 1 && normalizedName !== "new client";
 };
 
 async function verifyTenantCompletion(

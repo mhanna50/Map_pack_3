@@ -8,14 +8,14 @@ import uuid
 from sqlalchemy.orm import Session
 
 from backend.app.models.enums import ActionType, QnaStatus
-from backend.app.models.qna_entry import QnaEntry
-from backend.app.services.validators import (
+from backend.app.models.google_business.qna_entry import QnaEntry
+from backend.app.services.shared.validators import (
     assert_location_in_org,
     assert_connected_account_in_org,
 )
 
 if TYPE_CHECKING:
-    from backend.app.services.actions import ActionService
+    from backend.app.services.automation.actions import ActionService
 
 QUESTION_LIBRARY = {
     "default": [
@@ -129,7 +129,7 @@ class QnaService:
         if not qna.scheduled_at:
             return
         if not self.action_service:
-            from backend.app.services.actions import ActionService
+            from backend.app.services.automation.actions import ActionService
 
             self.action_service = ActionService(self.db)
         self.action_service.schedule_action(

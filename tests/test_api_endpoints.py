@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 import uuid
 
 from backend.app.models.enums import MembershipRole, OrganizationType
-from backend.app.models.membership import Membership
-from backend.app.models.organization import Organization
-from backend.app.models.user import User
+from backend.app.models.identity.membership import Membership
+from backend.app.models.identity.organization import Organization
+from backend.app.models.identity.user import User
 
 
 def test_create_org_and_locations(api_client):

@@ -5,7 +5,7 @@ from typing import Iterable
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.post_rotation_memory import PostRotationMemory
+from backend.app.models.posts.post_rotation_memory import PostRotationMemory
 
 
 class RotationEngine:

@@ -2,8 +2,8 @@
 
 from backend.app.db.base import Base
 from backend.app.db.session import engine
-from backend.app.models.automation_rule import AutomationRule
-from backend.app.models.rule_simulation import RuleSimulation
+from backend.app.models.automation.automation_rule import AutomationRule
+from backend.app.models.automation.rule_simulation import RuleSimulation
 
 
 def upgrade():

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from backend.app.models.action import Action
+from backend.app.models.automation.action import Action
 from backend.app.models.enums import ActionType, OrganizationType, PostStatus, PostType
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.models.post import Post
-from backend.app.services.actions import ActionExecutor
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.models.posts.post import Post
+from backend.app.services.automation.actions import ActionExecutor
 
 
 def _setup_post(db_session):

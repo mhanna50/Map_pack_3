@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from backend.app.models.enums import ApprovalStatus, OrganizationType, ReviewRating, ReviewStatus
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.models.review import Review
-from backend.app.models.user import User
-from backend.app.services.approvals import ApprovalService
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.models.reviews.review import Review
+from backend.app.models.identity.user import User
+from backend.app.services.automation.approvals import ApprovalService
 
 
 def _setup_context(db_session):

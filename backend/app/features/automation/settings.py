@@ -7,9 +7,9 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.org_automation_settings import OrgAutomationSettings
-from backend.app.services.jobs import JobService
-from backend.app.services.audit import log_audit
+from backend.app.models.automation.org_automation_settings import OrgAutomationSettings
+from backend.app.services.operations.jobs import JobService
+from backend.app.services.operations.audit import log_audit
 
 
 AUTOMATION_DEFINITIONS: dict[str, dict[str, Any]] = {

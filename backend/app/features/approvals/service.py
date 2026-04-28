@@ -5,12 +5,12 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.approval_request import ApprovalRequest
+from backend.app.models.automation.approval_request import ApprovalRequest
 from backend.app.models.enums import ApprovalCategory, ApprovalStatus, ReviewRating, ReviewStatus
-from backend.app.models.review import Review
-from backend.app.models.review_reply import ReviewReply
-from backend.app.services.audit import AuditService
-from backend.app.services.validators import assert_location_in_org
+from backend.app.models.reviews.review import Review
+from backend.app.models.reviews.review_reply import ReviewReply
+from backend.app.services.operations.audit import AuditService
+from backend.app.services.shared.validators import assert_location_in_org
 
 
 class ApprovalService:
@@ -63,12 +63,15 @@ class ApprovalService:
         self,
         *,
         organization_id: uuid.UUID | None = None,
+        organization_ids: list[uuid.UUID] | None = None,
         location_id: uuid.UUID | None = None,
         status: ApprovalStatus | None = None,
     ) -> list[ApprovalRequest]:
         query = self.db.query(ApprovalRequest)
         if organization_id:
             query = query.filter(ApprovalRequest.organization_id == organization_id)
+        elif organization_ids is not None:
+            query = query.filter(ApprovalRequest.organization_id.in_(organization_ids))
         if location_id:
             query = query.filter(ApprovalRequest.location_id == location_id)
         if status:

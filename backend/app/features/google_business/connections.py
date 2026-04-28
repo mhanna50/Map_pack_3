@@ -7,10 +7,10 @@ import uuid
 from sqlalchemy.orm import Session
 
 from backend.app.models.enums import GbpConnectionStatus, LocationStatus
-from backend.app.models.gbp_connection import GbpConnection
-from backend.app.models.location import Location
-from backend.app.services.encryption import get_encryption_service
-from backend.app.services.google import GoogleBusinessClient, GoogleOAuthService
+from backend.app.models.google_business.gbp_connection import GbpConnection
+from backend.app.models.google_business.location import Location
+from backend.app.services.shared.encryption import get_encryption_service
+from backend.app.services.google_business.google import GoogleBusinessClient, GoogleOAuthService
 
 
 class GbpConnectionService:

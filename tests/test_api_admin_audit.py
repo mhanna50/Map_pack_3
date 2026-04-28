@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 
 from backend.app.models.enums import OrganizationType
-from backend.app.models.organization import Organization
-from backend.app.models.user import User
-from backend.app.services.audit import log_audit
+from backend.app.models.identity.organization import Organization
+from backend.app.models.identity.user import User
+from backend.app.services.operations.audit import log_audit
 
 
 def _setup(db_session):

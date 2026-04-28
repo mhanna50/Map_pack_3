@@ -257,6 +257,59 @@ const buildOptionalPendingFields = (
   return update;
 };
 
+const ACTIVE_BILLING_STATUSES = new Set(["active", "trialing"]);
+
+async function verifyCompletionRequirements(
+  svc: SupabaseClient,
+  tenantId: string,
+  body: Record<string, unknown>,
+  existing: Record<string, unknown> | null,
+): Promise<{ ok: boolean; missing: string[] }> {
+  const [
+    { data: billingRows, error: billingErr },
+    { data: accountRows, error: accountErr },
+    { data: locationRows, error: locationErr },
+    { data: gbpRows, error: gbpErr },
+    { data: tenantRows, error: tenantErr },
+  ] = await Promise.all([
+    svc.from("billing_subscriptions").select("status").eq("tenant_id", tenantId).limit(20),
+    svc.from("connected_accounts").select("id").eq("tenant_id", tenantId).limit(1),
+    svc
+      .from("locations")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .not("google_location_id", "is", null)
+      .limit(1),
+    svc.from("gbp_connections").select("status").eq("tenant_id", tenantId).limit(20),
+    svc.from("tenants").select("business_name").eq("tenant_id", tenantId).limit(1),
+  ]);
+
+  if (billingErr) console.warn("[onboarding/save] completion_billing_check_failed", { tenantId, billingErr });
+  if (accountErr) console.warn("[onboarding/save] completion_account_check_failed", { tenantId, accountErr });
+  if (locationErr) console.warn("[onboarding/save] completion_location_check_failed", { tenantId, locationErr });
+  if (gbpErr) console.warn("[onboarding/save] completion_gbp_check_failed", { tenantId, gbpErr });
+  if (tenantErr) console.warn("[onboarding/save] completion_tenant_check_failed", { tenantId, tenantErr });
+
+  const hasActiveBilling = (billingRows ?? []).some((row) =>
+    ACTIVE_BILLING_STATUSES.has(String(row.status ?? "").trim().toLowerCase()),
+  );
+  const hasConnectedGbp =
+    (accountRows ?? []).length > 0 ||
+    (locationRows ?? []).length > 0 ||
+    (gbpRows ?? []).some((row) => String(row.status ?? "").trim().toLowerCase() === "connected");
+  const businessName =
+    asString(body.business_name) ??
+    asString(existing?.business_name) ??
+    asString(tenantRows?.[0]?.business_name);
+  const hasBusinessInfo = Boolean(businessName && businessName.toLowerCase() !== "new client");
+
+  const missing: string[] = [];
+  if (!hasActiveBilling) missing.push("active_billing");
+  if (!hasConnectedGbp) missing.push("google_business_profile");
+  if (!hasBusinessInfo) missing.push("business_info");
+  return { ok: missing.length === 0, missing };
+}
+
 export async function POST(request: NextRequest) {
   if (!url || !anonKey || !serviceKey) {
     return NextResponse.json({ error: "Supabase keys not configured" }, { status: 500 });
@@ -535,6 +588,39 @@ export async function POST(request: NextRequest) {
       },
       { status: 409 },
     );
+  }
+  const requestedCompletionStatus = normalizeOnboardingStatus(requestedStatus);
+  if (requestedCompletionStatus === "completed" || requestedCompletionStatus === "activated") {
+    const completionTenantId =
+      tenantIdFromPayload ?? existingTenantId ?? pickTenantIdFromRows(profileRows) ?? pickTenantIdFromRows(membershipRows);
+    if (!completionTenantId) {
+      return NextResponse.json(
+        {
+          error: "Cannot complete onboarding before tenant is linked.",
+          code: "onboarding_completion_blocked",
+          missing: ["tenant"],
+        },
+        { status: 409 },
+      );
+    }
+    const completion = await verifyCompletionRequirements(svc, completionTenantId, body, existingRecord);
+    if (!completion.ok) {
+      console.warn("[onboarding/save] completion_blocked", {
+        userId: user.id,
+        email,
+        step: clientStepLabel,
+        tenantId: completionTenantId,
+        missing: completion.missing,
+      });
+      return NextResponse.json(
+        {
+          error: "Cannot complete onboarding until Stripe payment, Google Business Profile, and business info are confirmed.",
+          code: "onboarding_completion_blocked",
+          missing: completion.missing,
+        },
+        { status: 409 },
+      );
+    }
   }
   const merged: Record<string, unknown> = {
     email,

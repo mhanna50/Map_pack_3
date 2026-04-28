@@ -5,12 +5,12 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from backend.app.models.action import Action
-from backend.app.models.alert import Alert
+from backend.app.models.automation.action import Action
+from backend.app.models.operations.alert import Alert
 from backend.app.models.enums import ActionStatus, ActionType, AlertStatus, PostJobStatus
-from backend.app.models.post import Post
-from backend.app.models.post_job import PostJob
-from backend.app.models.rate_limit_state import RateLimitState
+from backend.app.models.posts.post import Post
+from backend.app.models.posts.post_job import PostJob
+from backend.app.models.operations.rate_limit_state import RateLimitState
 
 
 class ObservabilityService:

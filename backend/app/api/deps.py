@@ -10,10 +10,10 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.app.db.session import get_db
-from backend.app.models.user import User
-from backend.app.models.location import Location
-from backend.app.services.access import AccessDeniedError, AccessService
-from backend.app.services.supabase_auth import SupabaseTokenVerifier
+from backend.app.models.identity.user import User
+from backend.app.models.google_business.location import Location
+from backend.app.services.auth.access import AccessDeniedError, AccessService
+from backend.app.services.auth.supabase_auth import SupabaseTokenVerifier
 
 _token_verifier: SupabaseTokenVerifier | None = None
 logger = logging.getLogger("uvicorn.error")

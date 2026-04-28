@@ -34,22 +34,6 @@ const ONBOARDING_STATUS_RANK: Record<string, number> = {
   activated: 6,
   canceled: -1,
 };
-const ONBOARDING_AUTH_STORAGE_PREFIX = "map-pack-client-auth:onboarding";
-
-const buildOnboardingAuthStorageKey = (inviteEmail: string | null, inviteToken: string | null): string | null => {
-  if (!inviteEmail && !inviteToken) {
-    return null;
-  }
-  if (inviteEmail) {
-    return `${ONBOARDING_AUTH_STORAGE_PREFIX}:email:${inviteEmail}`;
-  }
-  const tokenPrefix = (inviteToken ?? "")
-    .slice(0, 24)
-    .replace(/[^a-z0-9_-]/gi, "")
-    .toLowerCase();
-  return `${ONBOARDING_AUTH_STORAGE_PREFIX}:token:${tokenPrefix || "invite"}`;
-};
-
 const buildScopedKey = (baseKey: string, scope: string) => `${baseKey}:${scope}`;
 type LocationInput = {
   city: string;
@@ -356,7 +340,6 @@ function OnboardingContent() {
   const [agreementAccepted, setAgreementAccepted] = useState(false);
   const [agreementSignature, setAgreementSignature] = useState("");
   const [agreementError, setAgreementError] = useState<string | null>(null);
-  const [finalizingOnboarding, setFinalizingOnboarding] = useState(false);
   const [loadingClaimStatus, setLoadingClaimStatus] = useState(true);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
   const [orgInfo, setOrgInfo] = useState<OrgInfoState>(defaultOrgInfo);
@@ -385,14 +368,7 @@ function OnboardingContent() {
   const inviteToken = searchParams?.get("token") ?? null;
   const oauthStatusFromQuery = searchParams?.get("oauth");
   const [authBootstrapComplete, setAuthBootstrapComplete] = useState(false);
-  const onboardingAuthStorageKey = useMemo(
-    () => buildOnboardingAuthStorageKey(inviteEmailFromQuery, inviteToken),
-    [inviteEmailFromQuery, inviteToken],
-  );
-  const authClient = useMemo(
-    () => createClient(onboardingAuthStorageKey ? { storageKey: onboardingAuthStorageKey } : undefined),
-    [onboardingAuthStorageKey],
-  );
+  const authClient = useMemo(() => createClient(), []);
   const getScopedAccessToken = useCallback(async () => getAccessToken(authClient), [authClient]);
 
   const buildOnboardingDraft = useCallback(
@@ -1738,28 +1714,10 @@ function OnboardingContent() {
         await startStripeCheckout(organizationId);
         return;
       }
-      setFinalizingOnboarding(true);
-      try {
-        await saveProgress({
-          business_name: orgInfo.name.trim(),
-          first_name: orgInfo.firstName.trim(),
-          last_name: orgInfo.lastName.trim(),
-          status: "completed",
-          tenant_id: organizationId ?? undefined,
-          onboarding_draft: buildOnboardingDraft({ googleConnected: true }),
-          agreement_signature: agreementSignature.trim() || undefined,
-          agreement_accepted: agreementAccepted,
-          agreement_signed_at: agreementAccepted && agreementSignature.trim() ? new Date().toISOString() : undefined,
-          password_set: Boolean(passwordSetAt),
-          password_set_at: passwordSetAt,
-        });
-        setOnboardingStatus("completed");
-        router.replace("/dashboard");
+      if (typeof window !== "undefined") {
+        window.location.reload();
+      } else {
         router.refresh();
-      } catch (error) {
-        setProgressError(normalizeClientError(error, "Unable to finalize onboarding"));
-      } finally {
-        setFinalizingOnboarding(false);
       }
       return;
     }
@@ -2447,8 +2405,8 @@ function OnboardingContent() {
               {stripeLoading ? (
                 <p className="text-sm text-slate-600">Opening Stripe Checkout…</p>
               ) : stripeStarted ? (
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                  Payment received. Your subscription is active and you can finish onboarding.
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                  Stripe Checkout has started. After payment completes, dashboard access unlocks when the webhook confirms an active subscription.
                 </div>
               ) : (
                 <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
@@ -2486,8 +2444,8 @@ function OnboardingContent() {
                 {agreementError && <p className="text-sm text-rose-600">{agreementError}</p>}
               </div>
               <div className="flex items-center gap-2 text-sm text-slate-600">
-                <span className={`h-2 w-2 rounded-full ${stripeStarted ? "bg-emerald-500" : "bg-amber-500"}`} />
-                <span>{stripeStarted ? "Payment successful" : "Awaiting payment"}</span>
+                <span className={`h-2 w-2 rounded-full ${stripeStarted ? "bg-amber-500" : "bg-slate-400"}`} />
+                <span>{stripeStarted ? "Waiting for webhook confirmation" : "Awaiting payment"}</span>
               </div>
             </div>
           )}
@@ -2512,16 +2470,13 @@ function OnboardingContent() {
               nextDisabled ||
               creatingOrg ||
               savingProgress ||
-              finalizingOnboarding ||
               connectingGoogleLocation ||
               (currentStep === 2 && stripeLoading)
             }
           >
             {currentStep === 2
-              ? finalizingOnboarding
-                ? "Finishing…"
-                : stripeStarted
-                  ? "Finish onboarding"
+              ? stripeStarted
+                  ? "Check payment status"
                   : stripeLoading
                     ? "Opening Stripe…"
                     : "Continue to Stripe"

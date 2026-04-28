@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from backend.app.models.alert import Alert
+from backend.app.models.operations.alert import Alert
 from backend.app.models.enums import AlertSeverity, AlertStatus, OrganizationType
-from backend.app.models.organization import Organization
-from backend.app.models.user import User
+from backend.app.models.identity.organization import Organization
+from backend.app.models.identity.user import User
 
 
 def _setup(db_session):

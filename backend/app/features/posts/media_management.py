@@ -8,22 +8,22 @@ import re
 from sqlalchemy.orm import Session
 
 from backend.app.models.enums import ActionType, MediaStatus, MediaType, PendingChangeStatus
-from backend.app.models.media_album import MediaAlbum
-from backend.app.models.media_asset import MediaAsset
-from backend.app.models.media_upload_request import MediaUploadRequest
-from backend.app.models.client_upload import ClientUpload
-from backend.app.services.media_selection import MediaSelector
-from backend.app.services.validators import assert_location_in_org
+from backend.app.models.media.media_album import MediaAlbum
+from backend.app.models.media.media_asset import MediaAsset
+from backend.app.models.media.media_upload_request import MediaUploadRequest
+from backend.app.models.media.client_upload import ClientUpload
+from backend.app.services.media.media_selection import MediaSelector
+from backend.app.services.shared.validators import assert_location_in_org
 
 if TYPE_CHECKING:
-    from backend.app.services.actions import ActionService
+    from backend.app.services.automation.actions import ActionService
 
 
 class MediaManagementService:
     def __init__(self, db: Session, action_service: "ActionService" | None = None) -> None:
         self.db = db
         if action_service is None:
-            from backend.app.services.actions import ActionService as ActionServiceImpl
+            from backend.app.services.automation.actions import ActionService as ActionServiceImpl
 
             self.action_service = ActionServiceImpl(db)
         else:
@@ -203,6 +203,7 @@ class MediaManagementService:
         self,
         *,
         organization_id: uuid.UUID | None = None,
+        organization_ids: list[uuid.UUID] | None = None,
         location_id: uuid.UUID | None = None,
         status: MediaStatus | None = None,
         album_id: uuid.UUID | None = None,
@@ -210,6 +211,8 @@ class MediaManagementService:
         query = self.db.query(MediaAsset)
         if organization_id:
             query = query.filter(MediaAsset.organization_id == organization_id)
+        elif organization_ids is not None:
+            query = query.filter(MediaAsset.organization_id.in_(organization_ids))
         if location_id:
             query = query.filter(MediaAsset.location_id == location_id)
         if status:
@@ -222,12 +225,15 @@ class MediaManagementService:
         self,
         *,
         organization_id: uuid.UUID | None = None,
+        organization_ids: list[uuid.UUID] | None = None,
         location_id: uuid.UUID | None = None,
         status: PendingChangeStatus | None = None,
     ) -> list[MediaUploadRequest]:
         query = self.db.query(MediaUploadRequest)
         if organization_id:
             query = query.filter(MediaUploadRequest.organization_id == organization_id)
+        elif organization_ids is not None:
+            query = query.filter(MediaUploadRequest.organization_id.in_(organization_ids))
         if location_id:
             query = query.filter(MediaUploadRequest.location_id == location_id)
         if status:

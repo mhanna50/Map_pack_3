@@ -16,24 +16,24 @@ from backend.app.models.enums import (
     ReviewRating,
     ReviewStatus,
 )
-from backend.app.models.listing_audit import ListingAudit
-from backend.app.models.media_asset import MediaAsset
-from backend.app.models.post import Post
-from backend.app.models.review import Review
-from backend.app.models.automation_rule import AutomationRule
-from backend.app.models.rule_simulation import RuleSimulation
-from backend.app.services.audit import AuditService
-from backend.app.services.validators import assert_location_in_org
+from backend.app.models.google_business.listing_audit import ListingAudit
+from backend.app.models.media.media_asset import MediaAsset
+from backend.app.models.posts.post import Post
+from backend.app.models.reviews.review import Review
+from backend.app.models.automation.automation_rule import AutomationRule
+from backend.app.models.automation.rule_simulation import RuleSimulation
+from backend.app.services.operations.audit import AuditService
+from backend.app.services.shared.validators import assert_location_in_org
 
 if TYPE_CHECKING:
-    from backend.app.services.actions import ActionService
+    from backend.app.services.automation.actions import ActionService
 
 
 class AutomationRuleService:
     def __init__(self, db: Session, action_service: "ActionService" | None = None) -> None:
         self.db = db
         if action_service is None:
-            from backend.app.services.actions import ActionService as ActionServiceImpl
+            from backend.app.services.automation.actions import ActionService as ActionServiceImpl
 
             self.action_service = ActionServiceImpl(db)
         else:
@@ -41,7 +41,7 @@ class AutomationRuleService:
         self.audit = AuditService(db)
 
     def validate_rule_access(self, rule: AutomationRule, user_id: uuid.UUID) -> None:
-        from backend.app.services.access import AccessService
+        from backend.app.services.auth.access import AccessService
 
         access = AccessService(self.db)
         access.resolve_org(user_id=user_id, organization_id=rule.organization_id)

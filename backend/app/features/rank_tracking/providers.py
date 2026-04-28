@@ -10,9 +10,9 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.location import Location
-from backend.app.models.post import Post
-from backend.app.models.rank_snapshot import RankSnapshot
+from backend.app.models.google_business.location import Location
+from backend.app.models.posts.post import Post
+from backend.app.models.rank_tracking.rank_snapshot import RankSnapshot
 
 
 @dataclass(frozen=True)

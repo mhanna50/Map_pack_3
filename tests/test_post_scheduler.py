@@ -3,11 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from backend.app.models.enums import OrganizationType, PostStatus, PostType
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.models.post_candidate import PostCandidate
-from backend.app.models.post import Post
-from backend.app.services.post_scheduler import PostSchedulerService
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.models.posts.post_candidate import PostCandidate
+from backend.app.models.posts.post import Post
+from backend.app.services.posts.post_scheduler import PostSchedulerService
 
 
 def _setup(db_session):

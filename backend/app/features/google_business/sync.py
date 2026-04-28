@@ -6,12 +6,12 @@ import uuid
 from sqlalchemy.orm import Session
 
 from backend.app.models.enums import MediaStatus, MediaType, ReviewRating, ReviewStatus
-from backend.app.models.location import Location
-from backend.app.models.media_asset import MediaAsset
-from backend.app.models.post import Post
-from backend.app.models.review import Review
-from backend.app.services.gbp_connections import GbpConnectionService
-from backend.app.services.google import GoogleBusinessClient, GoogleOAuthService
+from backend.app.models.google_business.location import Location
+from backend.app.models.media.media_asset import MediaAsset
+from backend.app.models.posts.post import Post
+from backend.app.models.reviews.review import Review
+from backend.app.services.google_business.gbp_connections import GbpConnectionService
+from backend.app.services.google_business.google import GoogleBusinessClient, GoogleOAuthService
 
 
 class GbpSyncService:

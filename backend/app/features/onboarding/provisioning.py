@@ -5,13 +5,13 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.membership import Membership
-from backend.app.models.organization import Organization
-from backend.app.models.user import User
+from backend.app.models.identity.membership import Membership
+from backend.app.models.identity.organization import Organization
+from backend.app.models.identity.user import User
 from backend.app.models.enums import MembershipRole, OrganizationType
-from backend.app.services.notifications import NotificationService
-from backend.app.services.onboarding_tokens import OnboardingTokenSigner
-from backend.app.services.tenant_bridge import ensure_tenant_row
+from backend.app.services.operations.notifications import NotificationService
+from backend.app.services.onboarding.onboarding_tokens import OnboardingTokenSigner
+from backend.app.services.onboarding.tenant_bridge import ensure_tenant_row
 from backend.app.core.config import settings
 
 logger = logging.getLogger(__name__)

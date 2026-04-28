@@ -6,8 +6,8 @@ from backend.app.models.enums import (
     AutomationTriggerType,
     OrganizationType,
 )
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
 
 
 def _setup(db_session):

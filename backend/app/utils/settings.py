@@ -7,8 +7,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.org_settings import OrgSettings
-from backend.app.models.location_settings import LocationSettings
+from backend.app.models.google_business.org_settings import OrgSettings
+from backend.app.models.google_business.location_settings import LocationSettings
 
 
 DEFAULT_SETTINGS = {

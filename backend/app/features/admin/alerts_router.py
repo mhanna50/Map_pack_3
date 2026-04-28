@@ -9,10 +9,10 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_staff
 from backend.app.db.session import get_db
-from backend.app.models.alert import Alert
+from backend.app.models.operations.alert import Alert
 from backend.app.models.enums import AlertSeverity, AlertStatus
-from backend.app.models.user import User
-from backend.app.services.alerts import AlertService
+from backend.app.models.identity.user import User
+from backend.app.services.operations.alerts import AlertService
 
 router = APIRouter(prefix="/admin/alerts", tags=["admin_alerts"])
 

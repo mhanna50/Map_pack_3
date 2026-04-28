@@ -7,25 +7,25 @@ import uuid
 from sqlalchemy.orm import Session
 
 from backend.app.models.enums import ActionType, PostStatus, PostType, ApprovalCategory
-from backend.app.models.location import Location
-from backend.app.models.post import Post
-from backend.app.models.post_media_attachment import PostMediaAttachment
-from backend.app.models.post_variant import PostVariant
-from backend.app.models.media_asset import MediaAsset
-from backend.app.services.validators import (
+from backend.app.models.google_business.location import Location
+from backend.app.models.posts.post import Post
+from backend.app.models.posts.post_media_attachment import PostMediaAttachment
+from backend.app.models.posts.post_variant import PostVariant
+from backend.app.models.media.media_asset import MediaAsset
+from backend.app.services.shared.validators import (
     assert_location_in_org,
     assert_connected_account_in_org,
 )
-from backend.app.services.captions import CaptionGenerator
-from backend.app.services.media_selection import MediaSelector
-from backend.app.services.rotation import RotationEngine
-from backend.app.services.scheduling import AutoScheduler
-from backend.app.services.posting_safety import PostingSafetyService
-from backend.app.services.approvals import ApprovalService
-from backend.app.services.settings import SettingsService
+from backend.app.services.content.captions import CaptionGenerator
+from backend.app.services.media.media_selection import MediaSelector
+from backend.app.services.posts.rotation import RotationEngine
+from backend.app.services.posts.scheduling import AutoScheduler
+from backend.app.services.posts.posting_safety import PostingSafetyService
+from backend.app.services.automation.approvals import ApprovalService
+from backend.app.services.shared.settings import SettingsService
 
 if TYPE_CHECKING:
-    from backend.app.services.actions import ActionService
+    from backend.app.services.automation.actions import ActionService
 
 
 class PostService:
@@ -232,7 +232,7 @@ class PostService:
         if not post.scheduled_at:
             return
         if not self.action_service:
-            from backend.app.services.actions import ActionService
+            from backend.app.services.automation.actions import ActionService
 
             self.action_service = ActionService(self.db)
         self.action_service.schedule_action(

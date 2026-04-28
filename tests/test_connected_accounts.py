@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from backend.app.models.enums import OrganizationType
-from backend.app.models.organization import Organization
-from backend.app.services.connected_accounts import ConnectedAccountService
+from backend.app.models.identity.organization import Organization
+from backend.app.services.google_business.connected_accounts import ConnectedAccountService
 
 
 def test_connected_account_encryption_and_refresh(db_session):

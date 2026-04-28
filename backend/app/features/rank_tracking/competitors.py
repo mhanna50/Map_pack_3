@@ -7,28 +7,28 @@ from typing import Any, Sequence, TYPE_CHECKING
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from backend.app.models.competitor_profile import CompetitorProfile
-from backend.app.models.competitor_snapshot import CompetitorSnapshot
-from backend.app.models.connected_account import ConnectedAccount
+from backend.app.models.rank_tracking.competitor_profile import CompetitorProfile
+from backend.app.models.rank_tracking.competitor_snapshot import CompetitorSnapshot
+from backend.app.models.google_business.connected_account import ConnectedAccount
 from backend.app.models.enums import ActionType, CompetitorSource, PostType
-from backend.app.models.location import Location
-from backend.app.models.location_settings import LocationSettings
-from backend.app.models.media_asset import MediaAsset
-from backend.app.models.post import Post
-from backend.app.models.review import Review
-from backend.app.services.connected_accounts import ConnectedAccountService
-from backend.app.services.google import GoogleBusinessClient, GoogleOAuthService
-from backend.app.services.validators import assert_location_in_org
+from backend.app.models.google_business.location import Location
+from backend.app.models.google_business.location_settings import LocationSettings
+from backend.app.models.media.media_asset import MediaAsset
+from backend.app.models.posts.post import Post
+from backend.app.models.reviews.review import Review
+from backend.app.services.google_business.connected_accounts import ConnectedAccountService
+from backend.app.services.google_business.google import GoogleBusinessClient, GoogleOAuthService
+from backend.app.services.shared.validators import assert_location_in_org
 
 if TYPE_CHECKING:
-    from backend.app.services.actions import ActionService
+    from backend.app.services.automation.actions import ActionService
 
 
 class CompetitorMonitoringService:
     def __init__(self, db: Session, action_service: "ActionService" | None = None) -> None:
         self.db = db
         if action_service is None:
-            from backend.app.services.actions import ActionService as ActionServiceImpl
+            from backend.app.services.automation.actions import ActionService as ActionServiceImpl
 
             self.action_service = ActionServiceImpl(db)
         else:

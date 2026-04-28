@@ -2,7 +2,7 @@
 
 from backend.app.db.base import Base
 from backend.app.db.session import engine
-from backend.app.models.approval_request import ApprovalRequest
+from backend.app.models.automation.approval_request import ApprovalRequest
 
 
 def upgrade():

@@ -2,8 +2,8 @@
 
 from backend.app.db.base import Base
 from backend.app.db.session import engine
-from backend.app.models.competitor_profile import CompetitorProfile
-from backend.app.models.competitor_snapshot import CompetitorSnapshot
+from backend.app.models.rank_tracking.competitor_profile import CompetitorProfile
+from backend.app.models.rank_tracking.competitor_snapshot import CompetitorSnapshot
 
 
 def upgrade():

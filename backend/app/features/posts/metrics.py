@@ -5,10 +5,10 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.post import Post
-from backend.app.models.post_metrics_daily import PostMetricsDaily
-from backend.app.services.bucket_performance import BucketPerformanceService
-from backend.app.services.posting_windows import PostingWindowService
+from backend.app.models.posts.post import Post
+from backend.app.models.posts.post_metrics_daily import PostMetricsDaily
+from backend.app.services.content.bucket_performance import BucketPerformanceService
+from backend.app.services.posts.posting_windows import PostingWindowService
 
 
 class PostMetricsService:

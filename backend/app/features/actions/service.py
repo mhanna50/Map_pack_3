@@ -6,42 +6,43 @@ import logging
 from typing import Any, Callable
 import uuid
 
-from sqlalchemy import inspect, select, text
+from sqlalchemy import bindparam, inspect, select, text
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.exc import DataError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
-from backend.app.models.action import Action
+from backend.app.models.automation.action import Action
 from backend.app.models.enums import ActionStatus, ActionType, PostStatus, QnaStatus, AlertSeverity
-from backend.app.models.post import Post
-from backend.app.models.qna_entry import QnaEntry
-from backend.app.services.audit import AuditService
-from backend.app.services.posts import PostService
-from backend.app.services.qna import QnaService
-from backend.app.services.rank_tracking import RankTrackingService
-from backend.app.services.media_management import MediaManagementService
-from backend.app.services.competitor_monitoring import CompetitorMonitoringService
-from backend.app.services.automation_rules import AutomationRuleService
-from backend.app.services.gbp_publishing import GbpPublishingService
-from backend.app.services.gbp_sync import GbpSyncService
-from backend.app.services.daily_signals import DailySignalService
-from backend.app.services.post_candidates import PostCandidateService
-from backend.app.services.post_composition import PostCompositionService
-from backend.app.services.post_scheduler import PostSchedulerService
-from backend.app.services.post_metrics import PostMetricsService
-from backend.app.services.content_planner import ContentPlannerService
-from backend.app.services.post_jobs import PostJobService
-from backend.app.services.keyword_strategy import KeywordCampaignService
-from backend.app.models.location import Location
-from backend.app.models.post_job import PostJob
-from backend.app.models.gbp_connection import GbpConnection
-from backend.app.models.organization import Organization
-from backend.app.services.gbp_connections import GbpConnectionService
-from backend.app.services.alerts import AlertService
-from backend.app.services.google import GoogleOAuthService
-from backend.app.models.media_upload_request import MediaUploadRequest
-from backend.app.services.tenant_bridge import ensure_tenant_row
-from backend.app.services.validators import assert_location_in_org, assert_connected_account_in_org
+from backend.app.models.posts.post import Post
+from backend.app.models.google_business.qna_entry import QnaEntry
+from backend.app.services.operations.audit import AuditService
+from backend.app.services.posts.posts import PostService
+from backend.app.services.google_business.qna import QnaService
+from backend.app.services.rank_tracking.rank_tracking import RankTrackingService
+from backend.app.services.media.media_management import MediaManagementService
+from backend.app.services.rank_tracking.competitor_monitoring import CompetitorMonitoringService
+from backend.app.services.automation.automation_rules import AutomationRuleService
+from backend.app.services.google_business.gbp_publishing import GbpPublishingService
+from backend.app.services.google_business.gbp_sync import GbpSyncService
+from backend.app.services.content.daily_signals import DailySignalService
+from backend.app.services.posts.post_candidates import PostCandidateService
+from backend.app.services.posts.post_composition import PostCompositionService
+from backend.app.services.posts.post_scheduler import PostSchedulerService
+from backend.app.services.posts.post_metrics import PostMetricsService
+from backend.app.services.content.content_planner import ContentPlannerService
+from backend.app.services.posts.post_jobs import PostJobService
+from backend.app.services.rank_tracking.keyword_strategy import KeywordCampaignService
+from backend.app.models.google_business.location import Location
+from backend.app.models.posts.post_job import PostJob
+from backend.app.models.google_business.gbp_connection import GbpConnection
+from backend.app.models.identity.organization import Organization
+from backend.app.services.google_business.gbp_connections import GbpConnectionService
+from backend.app.services.operations.alerts import AlertService
+from backend.app.services.google_business.google import GoogleOAuthService
+from backend.app.models.media.media_upload_request import MediaUploadRequest
+from backend.app.services.onboarding.tenant_bridge import ensure_tenant_row
+from backend.app.services.shared.validators import assert_location_in_org, assert_connected_account_in_org
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +164,9 @@ class ActionService:
         if self._actions_has_tenant_id_cache is not None:
             return self._actions_has_tenant_id_cache
         bind = self.db.get_bind()
+        if not bind or bind.dialect.name != "postgresql":
+            self._actions_has_tenant_id_cache = False
+            return self._actions_has_tenant_id_cache
         inspector = inspect(bind)
         columns = inspector.get_columns("actions")
         self._actions_has_tenant_id_cache = any(column.get("name") == "tenant_id" for column in columns)
@@ -227,8 +231,7 @@ class ActionService:
     ) -> Action:
         self._ensure_legacy_tenant_row(organization_id)
         action_id = uuid.uuid4()
-        self.db.execute(
-            text(
+        stmt = text(
                 """
                 INSERT INTO actions (
                     organization_id,
@@ -266,7 +269,15 @@ class ActionService:
                     :id
                 )
                 """
-            ),
+            ).bindparams(
+                bindparam("organization_id", type_=PGUUID(as_uuid=True)),
+                bindparam("tenant_id", type_=PGUUID(as_uuid=True)),
+                bindparam("location_id", type_=PGUUID(as_uuid=True)),
+                bindparam("connected_account_id", type_=PGUUID(as_uuid=True)),
+                bindparam("id", type_=PGUUID(as_uuid=True)),
+            )
+        self.db.execute(
+            stmt,
             {
                 "organization_id": organization_id,
                 "tenant_id": organization_id,

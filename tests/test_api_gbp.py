@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import uuid
 from backend.app.core.config import settings
-from backend.app.models.action import Action
+from backend.app.models.automation.action import Action
 from backend.app.models.enums import LocationStatus, OrganizationType
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.services.google import OAuthStateSigner, GoogleOAuthService, GoogleBusinessClient
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.services.google_business.google import OAuthStateSigner, GoogleOAuthService, GoogleBusinessClient
 
 
 def _setup_org(db_session) -> Organization:

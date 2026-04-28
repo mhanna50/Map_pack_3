@@ -9,7 +9,7 @@ import os
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.alert import Alert
+from backend.app.models.operations.alert import Alert
 from backend.app.models.enums import AlertSeverity, AlertStatus
 from backend.app.core.config import settings
 try:

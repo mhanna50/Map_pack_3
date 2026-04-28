@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from backend.app.models.enums import OrganizationType
-from backend.app.models.organization import Organization
-from backend.app.models.user import User
-from backend.app.services.automation_settings import AUTOMATION_DEFINITIONS
-from backend.app.services.jobs import JobService
+from backend.app.models.identity.organization import Organization
+from backend.app.models.identity.user import User
+from backend.app.services.automation.automation_settings import AUTOMATION_DEFINITIONS
+from backend.app.services.operations.jobs import JobService
 
 
 def _setup(db_session):

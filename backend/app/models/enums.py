@@ -1,6 +1,10 @@
 from enum import Enum
 
 
+def enum_values(enum_cls):
+    return [member.value for member in enum_cls]
+
+
 class OrganizationType(str, Enum):
     AGENCY = "agency"
     BUSINESS = "business"

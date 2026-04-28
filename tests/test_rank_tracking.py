@@ -5,9 +5,9 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
 
 from backend.app.models.enums import OrganizationType
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.services.rank_tracking import RankTrackingService
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.services.rank_tracking.rank_tracking import RankTrackingService
 
 
 def _org_location(db_session):

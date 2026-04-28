@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from backend.app.db.session import SessionLocal
-from backend.app.models.organization import Organization
+from backend.app.models.identity.organization import Organization
 
 
 def main() -> None:

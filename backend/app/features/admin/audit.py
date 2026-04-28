@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.audit_log import AuditLog
+from backend.app.models.operations.audit_log import AuditLog
 
 
 class AuditService:

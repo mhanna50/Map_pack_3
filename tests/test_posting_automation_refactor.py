@@ -2,20 +2,20 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from backend.app.models.brand_voice import BrandVoice
+from backend.app.models.content.brand_voice import BrandVoice
 from backend.app.models.enums import MediaType, OrganizationType, PostStatus, PostType
-from backend.app.models.location import Location
-from backend.app.models.location_settings import LocationSettings
-from backend.app.models.media_asset import MediaAsset
-from backend.app.models.organization import Organization
-from backend.app.models.post import Post
-from backend.app.models.post_candidate import PostCandidate
-from backend.app.services.content_guardrails import ContentGuardrails
-from backend.app.services.gbp_sync import GbpSyncService
-from backend.app.services.media_management import MediaManagementService
-from backend.app.services.media_selection import MediaSelector
-from backend.app.services.post_composition import PostCompositionService
-from backend.app.services.post_scheduler import PostSchedulerService
+from backend.app.models.google_business.location import Location
+from backend.app.models.google_business.location_settings import LocationSettings
+from backend.app.models.media.media_asset import MediaAsset
+from backend.app.models.identity.organization import Organization
+from backend.app.models.posts.post import Post
+from backend.app.models.posts.post_candidate import PostCandidate
+from backend.app.services.content.content_guardrails import ContentGuardrails
+from backend.app.services.google_business.gbp_sync import GbpSyncService
+from backend.app.services.media.media_management import MediaManagementService
+from backend.app.services.media.media_selection import MediaSelector
+from backend.app.services.posts.post_composition import PostCompositionService
+from backend.app.services.posts.post_scheduler import PostSchedulerService
 
 
 def _setup_org_location(

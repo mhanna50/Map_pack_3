@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from backend.app.models.competitor_profile import CompetitorProfile
-from backend.app.models.connected_account import ConnectedAccount
+from backend.app.models.rank_tracking.competitor_profile import CompetitorProfile
+from backend.app.models.google_business.connected_account import ConnectedAccount
 from backend.app.models.enums import OrganizationType, ProviderType
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.services.competitor_monitoring import CompetitorMetricsFetcher
-from backend.app.services.encryption import get_encryption_service
-from backend.app.services.google import GoogleBusinessClient
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.services.rank_tracking.competitor_monitoring import CompetitorMetricsFetcher
+from backend.app.services.shared.encryption import get_encryption_service
+from backend.app.services.google_business.google import GoogleBusinessClient
 
 
 def _setup_location_with_account(db_session):

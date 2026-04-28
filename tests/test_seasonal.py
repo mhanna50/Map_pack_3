@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from backend.app.services.seasonal import SeasonalPlanner
+from backend.app.services.content.seasonal import SeasonalPlanner
 
 
 def test_seasonal_planner_detects_holiday():

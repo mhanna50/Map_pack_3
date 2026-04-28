@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from backend.app.models.action import Action
-from backend.app.models.alert import Alert
+from backend.app.models.automation.action import Action
+from backend.app.models.operations.alert import Alert
 from backend.app.models.enums import (
     ActionStatus,
     ActionType,
@@ -13,10 +13,10 @@ from backend.app.models.enums import (
     PostStatus,
     PostType,
 )
-from backend.app.models.location import Location
-from backend.app.models.organization import Organization
-from backend.app.models.post import Post
-from backend.app.services.observability import ObservabilityService
+from backend.app.models.google_business.location import Location
+from backend.app.models.identity.organization import Organization
+from backend.app.models.posts.post import Post
+from backend.app.services.operations.observability import ObservabilityService
 
 
 def _org_and_location(db_session):

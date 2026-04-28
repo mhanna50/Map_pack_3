@@ -10,9 +10,9 @@ from sqlalchemy.orm import Session
 from backend.app.api.deps import get_current_user, require_org_member
 from backend.app.db.session import get_db
 from backend.app.models.enums import QnaStatus
-from backend.app.models.qna_entry import QnaEntry
-from backend.app.services.qna import QnaService
-from backend.app.services.access import AccessService
+from backend.app.models.google_business.qna_entry import QnaEntry
+from backend.app.services.google_business.qna import QnaService
+from backend.app.services.auth.access import AccessDeniedError, AccessService
 
 router = APIRouter(
     prefix="/qna",
@@ -82,6 +82,8 @@ def list_qna(
     query = db.query(QnaEntry)
     if organization_id:
         query = query.filter(QnaEntry.organization_id == organization_id)
+    else:
+        query = query.filter(QnaEntry.organization_id.in_(AccessService(db).member_org_ids(current_user.id)))
     if location_id:
         query = query.filter(QnaEntry.location_id == location_id)
     return query.order_by(QnaEntry.scheduled_at.desc().nullslast()).limit(100).all()
@@ -101,7 +103,10 @@ def update_qna_status(
     qna = db.get(QnaEntry, qna_id)
     if not qna:
         raise HTTPException(status_code=404, detail="Q&A not found")
-    AccessService(db).resolve_org(user_id=current_user.id, organization_id=qna.organization_id)
+    try:
+        AccessService(db).resolve_org(user_id=current_user.id, organization_id=qna.organization_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     # ensure membership in owning org and consistent scope
     service = QnaService(db)
     service.validate_scope(
