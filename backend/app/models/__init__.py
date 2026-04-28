@@ -5,6 +5,7 @@ from .automation.location_automation_settings import LocationAutomationSettings
 from .automation.org_automation_settings import OrgAutomationSettings
 from .automation.rule_simulation import RuleSimulation
 from .billing.billing_subscription import BillingSubscription
+from .billing.stripe_webhook_event import StripeWebhookEvent
 from .content.brand_voice import BrandVoice
 from .content.bucket_performance import BucketPerformance
 from .content.content_item import ContentItem
@@ -71,6 +72,7 @@ __all__ = [
     "AuditLog",
     "Alert",
     "BillingSubscription",
+    "StripeWebhookEvent",
     "ConnectedAccount",
     "Location",
     "LocationSettings",

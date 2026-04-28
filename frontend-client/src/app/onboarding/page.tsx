@@ -2398,7 +2398,7 @@ function OnboardingContent() {
             <div className="space-y-4">
               <h2 className="text-xl font-semibold">Stripe payment (final step)</h2>
               <p className="text-sm text-slate-600">
-                You are signing up for the Map Pack 3 service plan at <span className="font-semibold">$5/month</span>.
+                You are signing up for the Map Pack 3 starter plan at <span className="font-semibold">$75/month</span>.
               </p>
               <p className="text-sm text-slate-600">Sign the agreement, continue to Stripe Checkout, then return here after payment is confirmed.</p>
               {stripeError && <p className="text-sm text-rose-600">{stripeError}</p>}
@@ -2415,7 +2415,7 @@ function OnboardingContent() {
               )}
               <div className="space-y-3 rounded-2xl border border-slate-200 p-4">
                 <p className="text-sm text-slate-700">
-                  By signing below, you agree to recurring billing of <span className="font-semibold">$5/month</span> for this service until canceled.
+                  By signing below, you agree to recurring billing of <span className="font-semibold">$75/month</span> for this service until canceled.
                 </p>
                 <label className="block">
                   <span className="text-sm text-slate-600">Typed signature (full name)</span>

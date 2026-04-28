@@ -37,13 +37,18 @@ class Settings(BaseSettings):
     SUPABASE_JWT_SECRET: str = ""
 
     STRIPE_SECRET_KEY: str = ""
+    STRIPE_API_VERSION: str = "2026-02-25.clover"
     STRIPE_PRICE_ID: str = ""
     STRIPE_PRICE_ID_STARTER: str = ""
     STRIPE_PRICE_ID_PRO: str = ""
     STRIPE_PRICE_ID_AGENCY: str = ""
+    STRIPE_PRICE_ID_GROWTH_ADDON: str = ""
+    STRIPE_PRICE_ID_AUTHORITY_ADDON: str = ""
     STRIPE_PRICE_AMOUNT_STARTER: int | None = None
     STRIPE_PRICE_AMOUNT_PRO: int | None = None
     STRIPE_PRICE_AMOUNT_AGENCY: int | None = None
+    STRIPE_PRICE_AMOUNT_GROWTH_ADDON: int | None = None
+    STRIPE_PRICE_AMOUNT_AUTHORITY_ADDON: int | None = None
     STRIPE_PRICE_AMOUNT: int | None = None
     STRIPE_PRICE_CURRENCY: str = "usd"
     STRIPE_PRICE_INTERVAL: str = "month"

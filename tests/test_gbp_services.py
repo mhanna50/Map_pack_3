@@ -68,6 +68,35 @@ def test_gbp_publishing_service(db_session):
     assert post.publish_result["name"].endswith("/posts/1")
 
 
+def test_gbp_publish_post_is_idempotent_after_success(db_session):
+    org = Organization(name="GBP Idempotent Org", org_type=OrganizationType.AGENCY)
+    db_session.add(org)
+    db_session.flush()
+    location = Location(name="HQ", organization_id=org.id, timezone="UTC", google_location_id="locations/123")
+    db_session.add(location)
+    db_session.flush()
+    post = Post(
+        organization_id=org.id,
+        location_id=location.id,
+        body="This is a real caption for idempotency testing. Contact us today to schedule a consultation.",
+        post_type=PostType.UPDATE,
+        status=PostStatus.SCHEDULED,
+    )
+    db_session.add(post)
+    db_session.commit()
+
+    service = GbpPublishingService(db_session)
+    fake_client = _FakeClient()
+    service._client = lambda org_id: fake_client  # type: ignore[method-assign]
+
+    first = service.publish_post(post)
+    second = service.publish_post(post)
+
+    assert first["name"].endswith("/posts/1")
+    assert second["name"].endswith("/posts/1")
+    assert len(fake_client.published) == 1
+
+
 def test_gbp_sync_service(db_session):
     org = Organization(name="Sync Org", org_type=OrganizationType.AGENCY)
     db_session.add(org)

@@ -8,7 +8,7 @@ import uuid
 
 from sqlalchemy import bindparam, inspect, select, text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
-from sqlalchemy.exc import DataError, SQLAlchemyError
+from sqlalchemy.exc import DataError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
@@ -80,6 +80,10 @@ class ActionService:
             if run_at.tzinfo is None
             else run_at.astimezone(timezone.utc)
         )
+        if dedupe_key:
+            existing = self._get_by_dedupe_key(dedupe_key)
+            if existing:
+                return existing
         self._ensure_action_type_enum_value(action_type.value)
         try:
             action = self._persist_action(
@@ -93,6 +97,13 @@ class ActionService:
                 dedupe_key=dedupe_key,
                 priority=priority,
             )
+        except IntegrityError:
+            self.db.rollback()
+            if dedupe_key:
+                existing = self._get_by_dedupe_key(dedupe_key)
+                if existing:
+                    return existing
+            raise
         except DataError as exc:
             if not self._is_missing_action_type_enum_error(exc, action_type.value):
                 raise
@@ -118,6 +129,13 @@ class ActionService:
             metadata={"action_type": action_type.value},
         )
         return action
+
+    def _get_by_dedupe_key(self, dedupe_key: str) -> Action | None:
+        return (
+            self.db.query(Action)
+            .filter(Action.dedupe_key == dedupe_key)
+            .one_or_none()
+        )
 
     def _persist_action(
         self,
@@ -469,27 +487,38 @@ class ActionExecutor:
         post: Post | None = self.db.get(Post, uuid.UUID(post_id)) if post_id else None
         if not post:
             return {"status": "missing_post"}
-        try:
-            self.post_service.safety.ensure_not_paused(
+        if post.status == PostStatus.PUBLISHED or post.published_at or post.external_post_id:
+            return {"status": "already_published", "payload": action.payload}
+        if post.status not in {PostStatus.SCHEDULED, PostStatus.QUEUED}:
+            original_status = post.status.value
+            self.audit.log(
+                action="post.publish_blocked",
                 organization_id=post.organization_id,
                 location_id=post.location_id,
+                entity_type="post",
+                entity_id=str(post.id),
+                metadata={"reason": f"Post status {original_status} is not publishable"},
             )
+            return {"status": "blocked", "reason": f"Post status {original_status} is not publishable"}
+        if post.status != PostStatus.QUEUED:
+            self.post_service.update_post_status(post, PostStatus.QUEUED)
+        try:
+            result = self.gbp_publisher.publish_post(post)
         except ValueError as exc:
             self.post_service.update_post_status(post, PostStatus.CANCELLED)
             self.audit.log(
-                action="post.publish_paused",
+                action="post.publish_blocked",
                 organization_id=post.organization_id,
                 location_id=post.location_id,
                 entity_type="post",
                 entity_id=str(post.id),
                 metadata={"reason": str(exc)},
             )
-            return {"status": "paused", "reason": str(exc)}
-        self.post_service.update_post_status(post, PostStatus.QUEUED)
-        result = self.gbp_publisher.publish_post(post)
-        self.post_service.update_post_status(post, PostStatus.PUBLISHED)
-        metrics = result.get("metrics") if isinstance(result, dict) else None
-        self.post_metrics.record_publish_outcome(post, metrics)
+            return {"status": "blocked", "reason": str(exc)}
+        if not (isinstance(result, dict) and result.get("skipped")):
+            self.post_service.update_post_status(post, PostStatus.PUBLISHED)
+            metrics = result.get("metrics") if isinstance(result, dict) else None
+            self.post_metrics.record_publish_outcome(post, metrics)
         return {"status": "published", "payload": action.payload, "result": result}
 
     def _handle_publish_qna(self, action: Action) -> dict[str, Any]:

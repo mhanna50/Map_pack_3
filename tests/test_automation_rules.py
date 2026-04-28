@@ -41,9 +41,13 @@ def test_inactivity_rule_triggers_action(db_session):
 
     results = service.trigger_due_rules(organization_id=org.id, location_id=location.id)
     assert len(results) == 1
-    actions = db_session.query(Action).all()
+    actions = (
+        db_session.query(Action)
+        .filter(Action.organization_id == org.id)
+        .filter(Action.payload["rule_id"].astext == str(rule.id))
+        .all()
+    )
     assert actions
-    assert actions[0].payload["rule_id"] == str(rule.id)
 
 
 def test_simulation_reflects_recent_activity(db_session):

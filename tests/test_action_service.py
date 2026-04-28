@@ -69,6 +69,29 @@ def test_mark_success_records_results(db_session):
     assert due_action.error is None
 
 
+def test_schedule_action_returns_existing_dedupe_key(db_session):
+    org = Organization(name="Dedupe Org", org_type=OrganizationType.AGENCY)
+    db_session.add(org)
+    db_session.commit()
+
+    service = ActionService(db_session)
+    run_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+    first = service.schedule_action(
+        organization_id=org.id,
+        action_type=ActionType.PLAN_CONTENT,
+        run_at=run_at,
+        dedupe_key=f"plan-content:{org.id}:slot",
+    )
+    second = service.schedule_action(
+        organization_id=org.id,
+        action_type=ActionType.PLAN_CONTENT,
+        run_at=run_at + timedelta(minutes=1),
+        dedupe_key=f"plan-content:{org.id}:slot",
+    )
+
+    assert second.id == first.id
+
+
 def test_legacy_action_path_ensures_tenant_row(db_session, monkeypatch):
     org = Organization(name="Legacy Tenant Org", org_type=OrganizationType.BUSINESS)
     db_session.add(org)

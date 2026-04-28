@@ -29,7 +29,7 @@ class PostSchedulerService:
         self.post_service = PostService(db)
         self.settings = SettingsService(db)
 
-    def schedule(self, candidate_id: uuid.UUID) -> PostCandidate:
+    def schedule(self, candidate_id: uuid.UUID, *, queue_publish_action: bool = True) -> PostCandidate:
         candidate = self.db.get(PostCandidate, candidate_id)
         if not candidate:
             raise ValueError("Post candidate not found")
@@ -77,9 +77,12 @@ class PostSchedulerService:
             topic_tags=topic_tags,
             media_asset_id=candidate.media_asset_id,
             window_id=window["id"],
+            schedule_publish_action=queue_publish_action,
         )
         candidate.status = PostStatus.SCHEDULED
         candidate.window_id = window["id"]
+        reason["post_id"] = str(post.id)
+        candidate.reason_json = reason
         self.db.add(candidate)
         self.db.commit()
         self.db.refresh(candidate)

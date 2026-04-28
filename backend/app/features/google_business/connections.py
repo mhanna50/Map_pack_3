@@ -75,7 +75,7 @@ class GbpConnectionService:
         refresh_callback: Callable[[str], dict[str, Any]],
     ) -> str:
         if not connection.encrypted_access_token:
-            raise ValueError("GBP connection missing access token")
+            raise ValueError("Google account is disconnected; reconnect Google Business Profile")
         decrypt = self.encryptor.decrypt
         access_token = decrypt(connection.encrypted_access_token)
         expires_at = connection.access_token_expires_at or datetime.now(timezone.utc)
@@ -85,8 +85,13 @@ class GbpConnectionService:
         if expires_at - now > timedelta(seconds=60):
             return access_token
         if not connection.encrypted_refresh_token:
-            raise ValueError("Cannot refresh GBP token without refresh_token")
-        payload = refresh_callback(decrypt(connection.encrypted_refresh_token))
+            self._mark_expired(connection)
+            raise ValueError("Google authorization expired; reconnect Google Business Profile")
+        try:
+            payload = refresh_callback(decrypt(connection.encrypted_refresh_token))
+        except Exception as exc:  # noqa: BLE001
+            self._mark_expired(connection)
+            raise ValueError("Google authorization expired; reconnect Google Business Profile") from exc
         access_token = payload["access_token"]
         expires_in = payload.get("expires_in", 3600)
         new_refresh = payload.get("refresh_token")
@@ -98,6 +103,28 @@ class GbpConnectionService:
         self.db.commit()
         self.db.refresh(connection)
         return access_token
+
+    def disconnect(self, organization_id: uuid.UUID) -> GbpConnection | None:
+        connection = self.get_by_org(organization_id)
+        if not connection:
+            return None
+        connection.status = GbpConnectionStatus.DISCONNECTED
+        connection.encrypted_access_token = None
+        connection.encrypted_refresh_token = None
+        connection.access_token_expires_at = None
+        metadata = connection.metadata_json or {}
+        metadata["disconnected_at"] = datetime.now(timezone.utc).isoformat()
+        connection.metadata_json = metadata
+        self.db.add(connection)
+        self.db.commit()
+        self.db.refresh(connection)
+        return connection
+
+    def _mark_expired(self, connection: GbpConnection) -> None:
+        connection.status = GbpConnectionStatus.EXPIRED
+        self.db.add(connection)
+        self.db.commit()
+        self.db.refresh(connection)
 
 
 class GbpLocationSyncService:

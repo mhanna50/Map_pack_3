@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy.orm import Session
 
 from backend.app.models.google_business.connected_account import ConnectedAccount
-from backend.app.models.enums import ProviderType
+from backend.app.models.enums import LocationStatus, ProviderType
 from backend.app.services.shared.encryption import get_encryption_service
 
 
@@ -89,18 +89,23 @@ class ConnectedAccountService:
         """
         decrypt = self.encryptor.decrypt
         if not account.encrypted_access_token:
-            raise ValueError("Connected account is missing an access token")
+            raise ValueError("Google account is disconnected; reconnect Google Business Profile")
         access_token = decrypt(account.encrypted_access_token)
         expires_at = account.access_token_expires_at or datetime.now(timezone.utc)
+        if expires_at.tzinfo is None or expires_at.tzinfo.utcoffset(expires_at) is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
 
         if expires_at - now > timedelta(seconds=60):
             return access_token
 
         if not account.encrypted_refresh_token:
-            raise ValueError("Cannot refresh Google token without refresh_token")
+            raise ValueError("Google authorization expired; reconnect Google Business Profile")
 
-        refresh_payload = refresh_callback(decrypt(account.encrypted_refresh_token))
+        try:
+            refresh_payload = refresh_callback(decrypt(account.encrypted_refresh_token))
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError("Google authorization expired; reconnect Google Business Profile") from exc
         access_token = refresh_payload["access_token"]
         expires_in = refresh_payload.get("expires_in", 3600)
         new_refresh = refresh_payload.get("refresh_token")
@@ -114,3 +119,18 @@ class ConnectedAccountService:
         self.db.refresh(account)
 
         return access_token
+
+    def disconnect_google_account(self, account: ConnectedAccount) -> ConnectedAccount:
+        account.encrypted_access_token = None
+        account.encrypted_refresh_token = None
+        account.access_token_expires_at = None
+        metadata = account.metadata_json or {}
+        metadata["disconnected_at"] = datetime.now(timezone.utc).isoformat()
+        account.metadata_json = metadata
+        for location in account.locations:
+            location.status = LocationStatus.DISCONNECTED
+            self.db.add(location)
+        self.db.add(account)
+        self.db.commit()
+        self.db.refresh(account)
+        return account

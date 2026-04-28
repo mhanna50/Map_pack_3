@@ -18,6 +18,7 @@ from backend.app.models.identity.organization import Organization
 from backend.app.models.identity.membership import Membership
 from backend.app.models.identity.user import User
 from backend.app.models.billing.billing_subscription import BillingSubscription
+from backend.app.models.billing.stripe_webhook_event import StripeWebhookEvent
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,7 @@ class CheckoutRequest(BaseModel):
     email: EmailStr
     company_name: str = Field(..., min_length=2)
     plan: str = Field(default="starter", examples=["starter", "pro"])
+    addons: list[str] = Field(default_factory=list)
     tenant_id: uuid.UUID | None = None
     user_id: uuid.UUID | None = None
     success_path: str | None = None
@@ -70,6 +72,7 @@ class CheckoutLinkRequest(BaseModel):
     email: EmailStr
     company_name: str = Field(..., min_length=2)
     plan: str = Field(default="starter", examples=["starter", "pro"])
+    addons: list[str] = Field(default_factory=list)
 
 
 class CheckoutLinkResponse(BaseModel):
@@ -82,6 +85,7 @@ class SubscriptionRequest(BaseModel):
     email: EmailStr
     company_name: str = Field(..., min_length=2)
     plan: str = Field(default="starter", examples=["starter", "pro"])
+    addons: list[str] = Field(default_factory=list)
 
 
 class SubscriptionResponse(BaseModel):
@@ -104,6 +108,7 @@ def create_checkout_session(payload: CheckoutRequest) -> CheckoutResponse:
             email=payload.email,
             company_name=payload.company_name,
             plan=payload.plan,
+            addons=payload.addons,
             tenant_id=str(payload.tenant_id) if payload.tenant_id else None,
             user_id=str(payload.user_id) if payload.user_id else None,
             success_path=payload.success_path,
@@ -127,6 +132,7 @@ def send_checkout_link(
             email=payload.email,
             company_name=payload.company_name,
             plan=payload.plan,
+            addons=payload.addons,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -144,6 +150,7 @@ def create_subscription(payload: SubscriptionRequest) -> SubscriptionResponse:
             email=payload.email,
             company_name=payload.company_name,
             plan=payload.plan,
+            addons=payload.addons,
         )
     except ValueError as exc:
         logger.warning("Stripe subscribe failed for %s (%s): %s", payload.email, payload.plan, exc)
@@ -165,7 +172,11 @@ async def stripe_webhook(
         logger.error("Stripe webhook verification failed: %s", exc)
         raise HTTPException(status_code=400, detail="Invalid webhook signature") from exc
     event_type = event["type"]
+    event_id = str(event.get("id") or "")
     logger.info("Stripe webhook received: %s", event_type)
+    if event_id and not _record_stripe_webhook_event_once(db, event_id=event_id, event_type=event_type, event=event):
+        logger.info("Skipping duplicate Stripe webhook event %s (%s)", event_id, event_type)
+        return {"received": True}
     if event_type == "checkout.session.completed":
         session_data = event["data"]["object"]
         checkout_data = billing.extract_checkout_data(session_data)
@@ -293,10 +304,29 @@ def _update_org_status(
     # Active when subscription is active/trialing; inactive otherwise
     active_statuses = {"active", "trialing"}
     org_active = subscription_status in active_statuses
+
+    existing_tenant_subscription = db.query(BillingSubscription).filter_by(tenant_id=org.id).one_or_none()
+    if _is_stale_subscription_update(
+        existing_tenant_subscription,
+        incoming_subscription_id=subscription_id,
+        incoming_status=subscription_status,
+    ):
+        logger.warning(
+            "Ignoring stale Stripe subscription update tenant=%s incoming=%s status=%s current=%s current_status=%s",
+            org.id,
+            subscription_id,
+            subscription_status,
+            existing_tenant_subscription.stripe_subscription_id,
+            existing_tenant_subscription.status,
+        )
+        return
+
     metadata = org.metadata_json or {}
     metadata["subscription_id"] = subscription_id
     if subscription_metadata.get("plan"):
         metadata["plan"] = subscription_metadata.get("plan")
+    if subscription_metadata.get("addons"):
+        metadata["addons"] = subscription_metadata.get("addons")
     if subscription_metadata.get("tenant_id"):
         metadata["tenant_id"] = subscription_metadata.get("tenant_id")
     if stripe_subscription_status:
@@ -315,13 +345,13 @@ def _update_org_status(
 
     # Upsert billing_subscriptions record for tracking.
     # We keep one row per org (tenant_id is unique in production schema).
-    sub = db.query(BillingSubscription).filter_by(tenant_id=org.id).one_or_none()
+    sub = existing_tenant_subscription
     if not sub:
         sub = db.query(BillingSubscription).filter_by(stripe_subscription_id=subscription_id).one_or_none()
     if not sub:
         sub = BillingSubscription(tenant_id=org.id)
     customer = subscription.get("customer")
-    plan_name = subscription.get("items", {}).get("data", [{}])[0].get("price", {}).get("nickname") or metadata.get("plan")
+    plan_name = metadata.get("plan") or subscription.get("items", {}).get("data", [{}])[0].get("price", {}).get("nickname")
 
     def assign_subscription_fields(target: BillingSubscription, resolved_status: str | None) -> None:
         target.stripe_subscription_id = subscription_id
@@ -392,6 +422,49 @@ def _update_org_status(
             db.rollback()
             logger.exception("Unable to upsert billing subscription for org %s after DataError fallback", org.id)
             return
+
+
+def _record_stripe_webhook_event_once(
+    db: Session,
+    *,
+    event_id: str,
+    event_type: str,
+    event: dict,
+) -> bool:
+    if db.get(StripeWebhookEvent, event_id):
+        return False
+    db.add(
+        StripeWebhookEvent(
+            event_id=event_id,
+            event_type=event_type,
+            metadata_json={
+                "api_version": event.get("api_version"),
+                "livemode": event.get("livemode"),
+            },
+        )
+    )
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return False
+    return True
+
+
+def _is_stale_subscription_update(
+    existing: BillingSubscription | None,
+    *,
+    incoming_subscription_id: str,
+    incoming_status: str | None,
+) -> bool:
+    if not existing or not existing.stripe_subscription_id:
+        return False
+    if existing.stripe_subscription_id == incoming_subscription_id:
+        return False
+    active_statuses = {"active", "trialing"}
+    existing_active = str(existing.status or "").lower() in active_statuses
+    incoming_active = str(incoming_status or "").lower() in active_statuses
+    return existing_active and not incoming_active
 
 
 def _sync_tenant_subscription_state(

@@ -15,7 +15,14 @@ from backend.app.models.google_business.location_settings import LocationSetting
 from backend.app.services.automation.actions import ActionService
 from backend.app.services.operations.audit import log_audit
 from backend.app.services.google_business.gbp_connections import GbpConnectionService, GbpLocationSyncService
-from backend.app.services.google_business.google import GoogleBusinessClient, GoogleOAuthService, OAuthStateSigner
+from backend.app.services.google_business.google import (
+    GoogleBusinessClient,
+    GoogleOAuthService,
+    OAuthStateSigner,
+    normalize_granted_gbp_scopes,
+    validate_google_oauth_redirect_uri,
+    validate_gbp_oauth_scopes,
+)
 from backend.app.api.orgs import LocationResponse, LocationSettingsPayload
 
 router = APIRouter(
@@ -23,9 +30,6 @@ router = APIRouter(
     tags=["organizations"],
     dependencies=[Depends(get_current_user), Depends(require_org_member)],
 )
-
-GBP_DEFAULT_SCOPES = ["https://www.googleapis.com/auth/business.manage"]
-
 
 class GbpConnectStartRequest(BaseModel):
     scopes: list[str] | None = None
@@ -41,14 +45,15 @@ def gbp_connect_start(
     organization_id: uuid.UUID,
     payload: GbpConnectStartRequest | None = None,
 ) -> GbpConnectStartResponse:
-    scopes = payload.scopes or GBP_DEFAULT_SCOPES
+    scopes = validate_gbp_oauth_scopes(payload.scopes if payload else None)
+    redirect_uri = validate_google_oauth_redirect_uri(payload.redirect_uri if payload else None)
     signer = OAuthStateSigner()
-    state = signer.encode({"org_id": str(organization_id)})
+    state = signer.encode({"org_id": str(organization_id), "redirect_uri": redirect_uri})
     oauth = GoogleOAuthService()
     url = oauth.build_authorization_url(
         state=state,
         scopes=scopes,
-        redirect_uri=payload.redirect_uri if payload else None,
+        redirect_uri=redirect_uri,
     )
     return GbpConnectStartResponse(authorization_url=url)
 
@@ -71,11 +76,11 @@ def gbp_connect_callback(
     if decoded.get("org_id") != str(organization_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mismatched organization in OAuth state")
     oauth = GoogleOAuthService()
-    token_data = oauth.exchange_code_for_tokens(code=code)
+    redirect_uri = validate_google_oauth_redirect_uri(decoded.get("redirect_uri"))
+    token_data = oauth.exchange_code_for_tokens(code=code, redirect_uri=redirect_uri)
     access_token = token_data["access_token"]
     refresh_token = token_data.get("refresh_token")
-    scopes_value = token_data.get("scope")
-    scopes = scopes_value.split(" ") if isinstance(scopes_value, str) else scopes_value or GBP_DEFAULT_SCOPES
+    scopes = normalize_granted_gbp_scopes(token_data.get("scope"))
     client = GoogleBusinessClient(access_token)
     accounts = client.list_accounts()
     if not accounts:
@@ -96,6 +101,25 @@ def gbp_connect_callback(
         organization_id=organization_id,
         google_account_email=connection.google_account_email,
         status=connection.status.value,
+    )
+
+
+class GbpDisconnectResponse(BaseModel):
+    organization_id: uuid.UUID
+    status: str
+    disconnected: bool
+
+
+@router.delete("/gbp/connect", response_model=GbpDisconnectResponse)
+def gbp_disconnect(
+    organization_id: uuid.UUID,
+    db: Session = Depends(get_db),
+) -> GbpDisconnectResponse:
+    connection = GbpConnectionService(db).disconnect(organization_id)
+    return GbpDisconnectResponse(
+        organization_id=organization_id,
+        status=connection.status.value if connection else "disconnected",
+        disconnected=True,
     )
 
 

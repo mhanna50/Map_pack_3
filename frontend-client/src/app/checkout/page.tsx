@@ -2,9 +2,63 @@
 
 import { FormEvent, Suspense, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
-const SINGLE_PLAN = "starter";
+
+const PLAN_OPTIONS = {
+  starter: { label: "Starter", price: "$75/month" },
+  pro: { label: "Pro", price: "$99/month" },
+  agency: { label: "Agency", price: "$149/month" },
+} as const;
+
+const PLAN_ALIASES: Record<string, keyof typeof PLAN_OPTIONS> = {
+  starter: "starter",
+  "75": "starter",
+  base_75: "starter",
+  pro: "pro",
+  standard: "pro",
+  "99": "pro",
+  base_99: "pro",
+  agency: "agency",
+  premium: "agency",
+  "149": "agency",
+  base_149: "agency",
+  all_in: "agency",
+  "all-in": "agency",
+};
+
+const ADDON_OPTIONS = {
+  growth_add_on: { label: "Growth Add-On", price: "$49/month" },
+  authority_add_on: { label: "Authority Add-On", price: "$129/month" },
+} as const;
+
+const ADDON_ALIASES: Record<string, keyof typeof ADDON_OPTIONS> = {
+  growth: "growth_add_on",
+  growth_addon: "growth_add_on",
+  growth_add_on: "growth_add_on",
+  authority: "authority_add_on",
+  authority_addon: "authority_add_on",
+  authority_add_on: "authority_add_on",
+};
+
+function normalizeKey(value: string) {
+  return value.trim().toLowerCase().replaceAll(" ", "_").replaceAll("-", "_");
+}
+
+function normalizePlan(value: string | null): keyof typeof PLAN_OPTIONS {
+  if (!value) return "starter";
+  return PLAN_ALIASES[normalizeKey(value)] ?? "starter";
+}
+
+function normalizeAddons(value: string | null): Array<keyof typeof ADDON_OPTIONS> {
+  const selected: Array<keyof typeof ADDON_OPTIONS> = [];
+  for (const raw of value?.split(",") ?? []) {
+    const addon = ADDON_ALIASES[normalizeKey(raw)];
+    if (addon && !selected.includes(addon)) selected.push(addon);
+  }
+  return selected;
+}
 
 export default function CheckoutPage() {
   return (
@@ -15,6 +69,9 @@ export default function CheckoutPage() {
 }
 
 function CheckoutContent() {
+  const searchParams = useSearchParams();
+  const selectedPlan = normalizePlan(searchParams.get("plan"));
+  const selectedAddons = normalizeAddons(searchParams.get("addons"));
   const [email, setEmail] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +91,8 @@ function CheckoutContent() {
         body: JSON.stringify({
           email: email.trim(),
           company_name: companyName.trim(),
-          plan: SINGLE_PLAN,
+          plan: selectedPlan,
+          addons: selectedAddons,
         }),
       });
       if (!response.ok) {
@@ -91,7 +149,18 @@ function CheckoutContent() {
             />
           </label>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-            Service plan: <span className="font-semibold capitalize">{SINGLE_PLAN}</span>
+            Service plan:{" "}
+            <span className="font-semibold">
+              {PLAN_OPTIONS[selectedPlan].label} ({PLAN_OPTIONS[selectedPlan].price})
+            </span>
+            {selectedAddons.length > 0 && (
+              <span className="mt-1 block">
+                Add-ons:{" "}
+                {selectedAddons
+                  .map((addon) => `${ADDON_OPTIONS[addon].label} (${ADDON_OPTIONS[addon].price})`)
+                  .join(", ")}
+              </span>
+            )}
           </div>
           <button
             type="submit"

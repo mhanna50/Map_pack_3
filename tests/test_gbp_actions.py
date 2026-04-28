@@ -58,6 +58,35 @@ def test_action_executor_publish_post_uses_gbp_service(db_session, monkeypatch):
     assert called["post_id"] == post.id
 
 
+def test_action_executor_does_not_publish_draft_post(db_session):
+    org, location, post = _setup_post(db_session)
+    post.status = PostStatus.DRAFT
+    db_session.add(post)
+    action = Action(
+        organization_id=org.id,
+        location_id=location.id,
+        action_type=ActionType.PUBLISH_GBP_POST,
+        status="pending",
+        run_at=datetime.now(timezone.utc),
+        payload={"post_id": str(post.id)},
+    )
+    db_session.add(action)
+    db_session.commit()
+
+    executor = ActionExecutor(db_session)
+
+    class StubPublisher:
+        def publish_post(self, p):
+            raise AssertionError("Draft posts must not be sent to Google")
+
+    executor.gbp_publisher = StubPublisher()
+
+    result = executor._handle_publish_post(action)
+    db_session.refresh(post)
+    assert result["status"] == "blocked"
+    assert post.status == PostStatus.DRAFT
+
+
 def test_action_executor_sync_reviews(db_session, monkeypatch):
     org, location, _ = _setup_post(db_session)
     action = Action(

@@ -89,7 +89,7 @@ class ContentPlannerService:
         self.db.add(plan)
         self.db.commit()
         self.db.refresh(plan)
-        scheduled = self.scheduler.schedule(candidate.id)
+        scheduled = self.scheduler.schedule(candidate.id, queue_publish_action=False)
         scheduled_time = self.scheduler._resolve_datetime(  # noqa: SLF001
             candidate.candidate_date,
             scheduled.window_id or "morning",

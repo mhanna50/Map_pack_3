@@ -89,6 +89,42 @@ def test_bucket_cooldown_enforced(db_session):
         )
 
 
+def test_similar_content_reuse_is_blocked(db_session):
+    org, location = _setup_location(db_session)
+    service = _service(db_session)
+    now = datetime.now(timezone.utc)
+    first = (
+        "Our local service team helps property owners plan dependable maintenance with clear communication. "
+        "Contact us today to schedule a consultation."
+    )
+    second = (
+        "Our local service team helps property owners plan dependable maintenance with clear communication. "
+        "Contact us today to book a consultation."
+    )
+    service.create_post(
+        organization_id=org.id,
+        location_id=location.id,
+        connected_account_id=None,
+        post_type=PostType.UPDATE,
+        base_prompt=first,
+        scheduled_at=now,
+        context={},
+        bucket="service",
+    )
+
+    with pytest.raises(ValueError, match="too similar|Same post content"):
+        service.create_post(
+            organization_id=org.id,
+            location_id=location.id,
+            connected_account_id=None,
+            post_type=PostType.UPDATE,
+            base_prompt=second,
+            scheduled_at=now + timedelta(days=3),
+            context={},
+            bucket="faq",
+        )
+
+
 def test_pricing_language_requires_approval(db_session):
     org, location = _setup_location(db_session)
     service = _service(db_session)
@@ -151,6 +187,25 @@ def test_location_cap_override_enforced(db_session):
             post_type=PostType.UPDATE,
             base_prompt="Second",
             scheduled_at=now + timedelta(days=1),
+            context={},
+            bucket="general",
+        )
+
+
+def test_zero_posting_cap_blocks_post_creation(db_session):
+    org, location = _setup_location(db_session)
+    location.posting_cap_per_week = 0
+    db_session.add(location)
+    db_session.commit()
+
+    with pytest.raises(ValueError):
+        _service(db_session).create_post(
+            organization_id=org.id,
+            location_id=location.id,
+            connected_account_id=None,
+            post_type=PostType.UPDATE,
+            base_prompt="Blocked by cap",
+            scheduled_at=datetime.now(timezone.utc),
             context={},
             bucket="general",
         )

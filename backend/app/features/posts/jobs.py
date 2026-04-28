@@ -9,9 +9,7 @@ from typing import TYPE_CHECKING
 
 from backend.app.models.content.content_plan import ContentPlan
 from backend.app.models.enums import (
-    ContentPlanStatus,
     PostJobStatus,
-    PostStatus,
     PostType,
     ActionType,
     AlertSeverity,
@@ -22,7 +20,7 @@ from backend.app.models.posts.post_attempt import PostAttempt
 from backend.app.models.rank_tracking.gbp_post_keyword_mapping import GbpPostKeywordMapping
 from backend.app.services.operations.audit import AuditService
 from backend.app.services.posts.posts import PostService
-from backend.app.services.operations.rate_limits import RateLimitError, RateLimitService
+from backend.app.services.operations.rate_limits import RateLimitError
 from backend.app.services.posts.posting_safety import PostingSafetyService
 from backend.app.services.google_business.gbp_publishing import GbpPublishingService
 from backend.app.services.operations.alerts import AlertService
@@ -37,7 +35,6 @@ class PostJobService:
     def __init__(self, db: Session, action_service: "ActionService | None" = None) -> None:
         self.db = db
         self.audit = AuditService(db)
-        self.rate_limits = RateLimitService(db)
         self.post_service = PostService(db, action_service=action_service)
         self.safety = PostingSafetyService(db)
         self.publisher = GbpPublishingService(db)
@@ -92,6 +89,10 @@ class PostJobService:
         job = self.db.get(PostJob, job_id)
         if not job:
             return {"status": "missing_job"}
+        if job.status in {PostJobStatus.SUCCEEDED, PostJobStatus.SKIPPED, PostJobStatus.NEEDS_CLIENT_INPUT}:
+            return {"status": job.status.value}
+        if job.status == PostJobStatus.FAILED and job.attempts >= job.max_attempts:
+            return {"status": "failed", "error": job.error}
         attempt = PostAttempt(
             post_job_id=job.id,
             status=PostJobStatus.RUNNING,
@@ -102,12 +103,9 @@ class PostJobService:
         try:
             job.status = PostJobStatus.RUNNING
             job.locked_at = datetime.now(timezone.utc)
+            job.attempts += 1
             self.db.add(job)
             self.db.commit()
-            self.rate_limits.check_and_increment(
-                organization_id=job.organization_id,
-                location_id=job.location_id,
-            )
             # safety: ensure org/location not paused
             self.safety.ensure_not_paused(
                 organization_id=job.organization_id,
@@ -139,29 +137,31 @@ class PostJobService:
                 )
                 return {"status": "needs_client_input", "reason": "photo_required"}
             result = self.publisher.publish_post(post)
-            job.status = PostJobStatus.SUCCEEDED
+            job.status = PostJobStatus.SKIPPED if isinstance(result, dict) and result.get("skipped") else PostJobStatus.SUCCEEDED
             job.result_json = result
-            attempt.status = PostJobStatus.SUCCEEDED
+            attempt.status = job.status
             attempt.finished_at = datetime.now(timezone.utc)
-            self._mark_mapping_status(post=post, status="published")
+            if job.status == PostJobStatus.SUCCEEDED:
+                self._mark_mapping_status(post=post, status="published")
             self.db.add(job)
             self.db.add(attempt)
             self.db.commit()
             self.audit.log(
-                action="post_job.succeeded",
+                action="post_job.succeeded" if job.status == PostJobStatus.SUCCEEDED else "post_job.skipped",
                 organization_id=job.organization_id,
                 location_id=job.location_id,
                 entity_type="post_job",
                 entity_id=str(job.id),
                 metadata={"post_id": str(post.id)},
             )
-            return {"status": "succeeded", "post_id": str(post.id)}
+            return {"status": job.status.value, "post_id": str(post.id)}
         except RateLimitError as exc:
             job.status = PostJobStatus.RATE_LIMITED
             job.error = "rate_limited"
             attempt.status = PostJobStatus.RATE_LIMITED
             attempt.error = "rate_limited"
-            job.run_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+            attempt.finished_at = datetime.now(timezone.utc)
+            job.run_at = datetime.now(timezone.utc) + timedelta(seconds=exc.retry_after_seconds)
             self.db.add(job)
             self.db.add(attempt)
             self.db.commit()
@@ -172,34 +172,44 @@ class PostJobService:
                 organization_id=job.organization_id,
                 location_id=job.location_id,
             )
-            return {"status": "rate_limited", "retry_after": exc.retry_after_seconds}
+            raise
         except Exception as exc:  # noqa: BLE001
-            job.status = PostJobStatus.FAILED
             job.error = str(exc)
-            attempt.status = PostJobStatus.FAILED
             attempt.error = str(exc)
             attempt.finished_at = datetime.now(timezone.utc)
+            if job.attempts >= job.max_attempts:
+                job.status = PostJobStatus.FAILED
+                attempt.status = PostJobStatus.FAILED
+            else:
+                job.status = PostJobStatus.QUEUED
+                attempt.status = PostJobStatus.FAILED
             self.db.add(job)
             self.db.add(attempt)
             self.db.commit()
-            return {"status": "failed", "error": str(exc)}
+            if job.status == PostJobStatus.FAILED:
+                return {"status": "failed", "error": str(exc)}
+            raise
 
     def _ensure_post(self, job: PostJob) -> Post:
-        # idempotency: reuse existing published/queued post by dedupe key
-        existing = (
-            self.db.query(Post)
-            .filter(Post.organization_id == job.organization_id)
-            .filter(Post.location_id == job.location_id)
-            .filter(Post.bucket == (job.content_plan.reason_json or {}).get("selected_bucket"))
-            .order_by(Post.created_at.desc())
-            .first()
-        )
-        if existing and existing.status == PostStatus.PUBLISHED:
-            job.status = PostJobStatus.SKIPPED
-            self.db.add(job)
-            self.db.commit()
-            return existing
         plan = job.content_plan
+        candidate = plan.candidate if plan and plan.candidate else None
+        candidate_reason = candidate.reason_json if candidate and candidate.reason_json else {}
+        existing_post_id = candidate_reason.get("post_id")
+        if existing_post_id:
+            existing = self.db.get(Post, uuid.UUID(str(existing_post_id)))
+            if existing:
+                return existing
+        if candidate and candidate.fingerprint:
+            existing = (
+                self.db.query(Post)
+                .filter(Post.organization_id == job.organization_id)
+                .filter(Post.location_id == job.location_id)
+                .filter(Post.fingerprint == candidate.fingerprint)
+                .order_by(Post.created_at.desc())
+                .first()
+            )
+            if existing:
+                return existing
         caption = ""
         bucket = None
         media_asset_id = None
@@ -208,9 +218,11 @@ class PostJobService:
         if plan:
             bucket = (plan.reason_json or {}).get("selected_bucket")
             caption = plan.reason_json.get("summary") if plan.reason_json else ""
-            if plan.candidate and plan.candidate.media_asset_id:
-                media_asset_id = plan.candidate.media_asset_id
-            candidate_reason = plan.candidate.reason_json if plan.candidate and plan.candidate.reason_json else {}
+            if candidate:
+                bucket = candidate.bucket or bucket
+                caption = candidate.proposed_caption or caption
+                if candidate.media_asset_id:
+                    media_asset_id = candidate.media_asset_id
             requested_type = str(candidate_reason.get("post_type") or "update").lower()
             try:
                 post_type = PostType(requested_type)
@@ -226,12 +238,19 @@ class PostJobService:
             connected_account_id=None,
             post_type=post_type,
             base_prompt=caption or "Automated GBP update",
-            scheduled_at=datetime.now(timezone.utc),
+            scheduled_at=job.run_at or datetime.now(timezone.utc),
             context=plan.reason_json if plan else {},
             bucket=bucket,
             topic_tags=topic_tags,
             media_asset_id=media_asset_id,
+            window_id=candidate.window_id if candidate else plan.window_id if plan else None,
+            schedule_publish_action=False,
         )
+        if candidate:
+            candidate_reason["post_id"] = str(post.id)
+            candidate.reason_json = candidate_reason
+            self.db.add(candidate)
+            self.db.commit()
         if plan and plan.candidate_id:
             self._attach_mapping_to_post(
                 organization_id=job.organization_id,

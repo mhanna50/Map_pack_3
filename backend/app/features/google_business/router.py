@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import AnyHttpUrl, BaseModel, Field, ConfigDict
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_user
-from backend.app.core.config import settings
 from backend.app.db.session import get_db
 from backend.app.models.google_business.connected_account import ConnectedAccount
 from backend.app.models.enums import LocationStatus, ProviderType
@@ -17,35 +15,17 @@ from backend.app.models.identity.user import User
 from backend.app.services.auth.access import AccessDeniedError, AccessService
 from backend.app.services.google_business.connected_accounts import ConnectedAccountService
 from backend.app.services.google_business.google import (
+    DEFAULT_GBP_SCOPES,
     GoogleBusinessClient,
     GoogleOAuthService,
     OAuthStateSigner,
+    normalize_granted_gbp_scopes,
+    validate_google_oauth_redirect_uri,
+    validate_gbp_oauth_scopes,
 )
 from backend.app.services.onboarding.location_onboarding import LocationOnboardingService
 
-DEFAULT_GBP_SCOPES = [
-    "https://www.googleapis.com/auth/business.manage",
-]
-
 router = APIRouter(prefix="/google", tags=["google"])
-
-
-def _validate_redirect_uri(redirect_uri: AnyHttpUrl | None) -> str | None:
-    if not redirect_uri:
-        return None
-    requested = str(redirect_uri)
-    requested_parts = urlsplit(requested)
-    client_parts = urlsplit(str(settings.CLIENT_APP_URL))
-    allowed_origins = {(client_parts.scheme, client_parts.netloc)}
-    if settings.GOOGLE_OAUTH_REDIRECT_URI:
-        configured_parts = urlsplit(str(settings.GOOGLE_OAUTH_REDIRECT_URI))
-        allowed_origins.add((configured_parts.scheme, configured_parts.netloc))
-    if (requested_parts.scheme, requested_parts.netloc) not in allowed_origins:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Google OAuth redirect URI is not allowed",
-        )
-    return requested
 
 
 class OAuthStartRequest(BaseModel):
@@ -67,19 +47,21 @@ def start_oauth(
 ) -> OAuthStartResponse:
     access = AccessService(db)
     try:
-        _, organization = access.resolve_org(user_id=current_user.id, organization_id=payload.organization_id)
+        access.resolve_org(user_id=current_user.id, organization_id=payload.organization_id)
     except AccessDeniedError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     signer = OAuthStateSigner()
+    redirect_uri = validate_google_oauth_redirect_uri(str(payload.redirect_uri) if payload.redirect_uri else None)
     state_payload = {
         "organization_id": str(payload.organization_id),
         "nonce": str(uuid.uuid4()),
+        "redirect_uri": redirect_uri,
     }
     state = signer.encode(state_payload)
     oauth = GoogleOAuthService()
-    redirect_uri = _validate_redirect_uri(payload.redirect_uri)
+    scopes = validate_gbp_oauth_scopes(payload.scopes)
     authorization_url = oauth.build_authorization_url(
-        state=state, scopes=DEFAULT_GBP_SCOPES, redirect_uri=redirect_uri
+        state=state, scopes=scopes, redirect_uri=redirect_uri
     )
     return OAuthStartResponse(authorization_url=authorization_url, state=state)
 
@@ -113,22 +95,26 @@ def oauth_callback(
 ) -> OAuthCallbackResponse:
     signer = OAuthStateSigner()
     decoded = signer.decode(payload.state)
-    organization_id = uuid.UUID(decoded["organization_id"])
+    try:
+        organization_id = uuid.UUID(str(decoded["organization_id"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OAuth state parameter") from exc
+    redirect_uri = validate_google_oauth_redirect_uri(str(payload.redirect_uri) if payload.redirect_uri else None)
+    expected_redirect_uri = decoded.get("redirect_uri")
+    if expected_redirect_uri and redirect_uri != expected_redirect_uri:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mismatched OAuth redirect URI")
     access = AccessService(db)
     try:
-        _, organization = access.resolve_org(user_id=current_user.id, organization_id=organization_id)
+        access.resolve_org(user_id=current_user.id, organization_id=organization_id)
     except AccessDeniedError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     oauth = GoogleOAuthService()
-    redirect_uri = _validate_redirect_uri(payload.redirect_uri)
     token_data = oauth.exchange_code_for_tokens(code=payload.code, redirect_uri=redirect_uri)
     access_token = token_data["access_token"]
     refresh_token = token_data.get("refresh_token")
     expires_in = token_data.get("expires_in", 3600)
-    scopes = token_data.get("scope", "").split()
-    if not scopes:
-        scopes = DEFAULT_GBP_SCOPES
+    scopes = normalize_granted_gbp_scopes(token_data.get("scope"))
 
     client = GoogleBusinessClient(access_token)
     accounts_payload = client.list_accounts()
@@ -218,9 +204,12 @@ def list_remote_locations(
     def refresh_callback(refresh_token: str) -> dict[str, Any]:
         return oauth.refresh_access_token(refresh_token)
 
-    access_token = account_service.ensure_access_token(
-        account, refresh_callback=refresh_callback
-    )
+    try:
+        access_token = account_service.ensure_access_token(
+            account, refresh_callback=refresh_callback
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     client = GoogleBusinessClient(access_token)
     locations = client.list_locations(account.external_account_id)
     return [
@@ -276,9 +265,12 @@ def connect_location(
     def refresh_callback(refresh_token: str) -> dict[str, Any]:
         return oauth.refresh_access_token(refresh_token)
 
-    access_token = account_service.ensure_access_token(
-        account, refresh_callback=refresh_callback
-    )
+    try:
+        access_token = account_service.ensure_access_token(
+            account, refresh_callback=refresh_callback
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     client = GoogleBusinessClient(access_token)
     location_payload = client.get_location(payload.location_name)
 
@@ -290,3 +282,24 @@ def connect_location(
     )
 
     return location
+
+
+class DisconnectAccountResponse(BaseModel):
+    id: uuid.UUID
+    disconnected: bool
+
+
+@router.delete("/accounts/{account_id}", response_model=DisconnectAccountResponse)
+def disconnect_account(
+    account_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> DisconnectAccountResponse:
+    account = _get_connected_account(db, account_id)
+    access = AccessService(db)
+    try:
+        access.resolve_org(user_id=current_user.id, organization_id=account.organization_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    ConnectedAccountService(db).disconnect_google_account(account)
+    return DisconnectAccountResponse(id=account.id, disconnected=True)

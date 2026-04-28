@@ -71,18 +71,22 @@ class PostService:
         topic_tags: list[str] | None = None,
         media_asset_id: uuid.UUID | None = None,
         window_id: str | None = None,
+        schedule_publish_action: bool = True,
     ) -> Post:
         scheduled_time = scheduled_at or self.scheduler.next_post_time(
             organization_id=organization_id, location_id=location_id
         )
         merged_settings = self.settings.merged(organization_id, location_id)
+        fingerprint = self._fingerprint(base_prompt, bucket, topic_tags or [])
         self.safety.validate(
             organization_id=organization_id,
             location_id=location_id,
             scheduled_at=scheduled_time,
             bucket=bucket,
+            body=base_prompt,
+            fingerprint=fingerprint,
+            window_id=window_id,
         )
-        fingerprint = self._fingerprint(base_prompt, bucket, topic_tags or [])
         existing = (
             self.db.query(Post)
             .filter(Post.organization_id == organization_id, Post.location_id == location_id)
@@ -149,7 +153,7 @@ class PostService:
                 proposal={"caption": base_prompt},
                 severity="warning",
             )
-        elif scheduled_time:
+        elif scheduled_time and schedule_publish_action:
             self._schedule_publish_action(post)
 
         self.db.commit()
@@ -254,6 +258,4 @@ class PostService:
     def _fingerprint(text: str, bucket: str | None, topic_tags: list[str]) -> str:
         import hashlib
         base = " ".join(text.lower().split())
-        extra = "|".join(sorted(topic_tags)) if topic_tags else ""
-        payload = f"{base}|{bucket or ''}|{extra}"
-        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+        return hashlib.sha256(base.encode("utf-8")).hexdigest()[:32]

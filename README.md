@@ -37,6 +37,7 @@ Automation platform for agencies that need to manage and grow multiple Google Bu
    - Automatically adds missing GBP services  
    - Updates attributes based on category + competitor data  
    - Keeps listings complete and optimized
+   - then does monhtly gbp audit based on keyword research (by rank and average cost)
 
 7. **Photo & Media Management**  
    - Requests photos from the business through client dashboards  
@@ -60,6 +61,7 @@ Automation platform for agencies that need to manage and grow multiple Google Bu
 11. **Performance Dashboard**  
     - Rankings, review velocity, post engagement, visibility scores  
     - Surfaces insights + alerts for agency operators and clients
+    
 
 12. **Multi-Client / Multi-Location Support**  
     - One dashboard per agency with tenant isolation  
@@ -162,10 +164,11 @@ When a client completes a Stripe Checkout payment, the backend provisions their 
 
 ### 1) Stripe setup
 
-1. Create a Product + Price in Stripe and copy the price ID.
+1. Create Stripe Products + recurring monthly Prices for each base plan and add-on.
 2. Set these environment variables (see `.env.example`):
    - `STRIPE_SECRET_KEY`
-   - `STRIPE_PRICE_ID` (or per-plan: `STRIPE_PRICE_ID_STARTER`, `STRIPE_PRICE_ID_PRO`, `STRIPE_PRICE_ID_AGENCY`)
+   - Base plans: `STRIPE_PRICE_ID_STARTER` ($75), `STRIPE_PRICE_ID_PRO` ($99), `STRIPE_PRICE_ID_AGENCY` ($149)
+   - Add-ons: `STRIPE_PRICE_ID_GROWTH_ADDON` ($49) and `STRIPE_PRICE_ID_AUTHORITY_ADDON` ($129)
    - `STRIPE_WEBHOOK_SECRET`
    - `STRIPE_SUCCESS_URL`
    - `STRIPE_CANCEL_URL`
@@ -173,7 +176,13 @@ When a client completes a Stripe Checkout payment, the backend provisions their 
    - `https://<your-backend-domain>/api/billing/webhook`
 4. Subscribe the webhook to:
    - `checkout.session.completed`
-   - `invoice.paid` (if you later add subscriptions)
+   - `invoice.paid`
+   - `invoice.payment_failed`
+   - `customer.subscription.created`
+   - `customer.subscription.updated`
+   - `customer.subscription.deleted`
+   - `customer.subscription.paused`
+   - `customer.subscription.resumed`
 
 Local testing tip (optional): use the Stripe CLI to forward webhooks to your local API.
 

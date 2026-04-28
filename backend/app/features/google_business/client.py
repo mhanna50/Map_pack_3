@@ -1,28 +1,94 @@
 from __future__ import annotations
 
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
 
 import httpx
 from fastapi import HTTPException, status
-from itsdangerous import BadSignature, URLSafeSerializer
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from backend.app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+GBP_REQUIRED_SCOPE = "https://www.googleapis.com/auth/business.manage"
+DEFAULT_GBP_SCOPES = [GBP_REQUIRED_SCOPE]
+FRONTEND_GOOGLE_CALLBACK_PATH = "/onboarding/google/callback"
+GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS = 15 * 60
+
+
+def validate_gbp_oauth_scopes(scopes: list[str] | None) -> list[str]:
+    requested = [scope.strip() for scope in scopes or [] if scope and scope.strip()]
+    if not requested:
+        return list(DEFAULT_GBP_SCOPES)
+    unsupported = sorted(set(requested) - {GBP_REQUIRED_SCOPE})
+    if unsupported:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported Google OAuth scope requested",
+        )
+    return list(DEFAULT_GBP_SCOPES)
+
+
+def normalize_granted_gbp_scopes(scope_value: Any) -> list[str]:
+    if isinstance(scope_value, str):
+        granted = set(scope_value.split())
+    elif isinstance(scope_value, list):
+        granted = {str(scope).strip() for scope in scope_value if str(scope).strip()}
+    else:
+        granted = set(DEFAULT_GBP_SCOPES)
+    if GBP_REQUIRED_SCOPE not in granted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google authorization is missing the Business Profile scope",
+        )
+    return list(DEFAULT_GBP_SCOPES)
+
+
+def validate_google_oauth_redirect_uri(redirect_uri: str | None) -> str | None:
+    if not redirect_uri:
+        return None
+    requested = redirect_uri.strip()
+    allowed = set()
+    if settings.GOOGLE_OAUTH_REDIRECT_URI:
+        allowed.add(str(settings.GOOGLE_OAUTH_REDIRECT_URI).rstrip("/"))
+    if settings.CLIENT_APP_URL:
+        allowed.add(f"{str(settings.CLIENT_APP_URL).rstrip('/')}{FRONTEND_GOOGLE_CALLBACK_PATH}")
+    if requested.rstrip("/") not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google OAuth redirect URI is not allowed",
+        )
+    return requested
 
 
 class OAuthStateSigner:
     def __init__(self) -> None:
-        self.serializer = URLSafeSerializer(
+        self.serializer = URLSafeTimedSerializer(
             settings.ENCRYPTION_KEY, salt="google-oauth-state"
         )
 
     def encode(self, payload: dict[str, Any]) -> str:
-        return self.serializer.dumps(payload)
+        data = dict(payload)
+        data.setdefault("issued_at", datetime.now(timezone.utc).isoformat())
+        return self.serializer.dumps(data)
 
     def decode(self, token: str) -> dict[str, Any]:
         try:
-            return self.serializer.loads(token)
+            payload = self.serializer.loads(
+                token,
+                max_age=GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS,
+            )
+            if not isinstance(payload, dict):
+                raise BadSignature("OAuth state payload must be an object")
+            return payload
+        except SignatureExpired as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="OAuth state parameter expired",
+            ) from exc
         except BadSignature as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -54,6 +120,7 @@ class GoogleOAuthService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="GOOGLE_OAUTH_REDIRECT_URI is not configured",
             )
+        scopes = validate_gbp_oauth_scopes(scopes)
         params = {
             "client_id": settings.GOOGLE_CLIENT_ID,
             "redirect_uri": redirect,
@@ -71,6 +138,11 @@ class GoogleOAuthService:
     ) -> dict[str, Any]:
         self._require_client_secret()
         redirect = redirect_uri or settings.GOOGLE_OAUTH_REDIRECT_URI
+        if not redirect:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="GOOGLE_OAUTH_REDIRECT_URI is not configured",
+            )
         data = {
             "code": code,
             "client_id": settings.GOOGLE_CLIENT_ID,
@@ -105,9 +177,14 @@ class GoogleOAuthService:
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
+                logger.warning(
+                    "Google OAuth request failed status=%s url=%s",
+                    exc.response.status_code,
+                    url,
+                )
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"Google OAuth error: {exc.response.text}",
+                    detail="Google OAuth request failed",
                 ) from exc
             return response.json()
 
@@ -217,7 +294,12 @@ class GoogleBusinessClient:
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
+            logger.warning(
+                "Google Business API request failed status=%s url=%s",
+                exc.response.status_code,
+                str(exc.request.url) if exc.request else "",
+            )
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Google Business API error: {exc.response.text}",
+                detail="Google Business API request failed",
             ) from exc

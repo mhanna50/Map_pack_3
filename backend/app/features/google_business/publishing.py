@@ -12,8 +12,9 @@ from backend.app.models.enums import PostStatus
 from backend.app.services.operations.audit import log_audit
 from backend.app.services.google_business.gbp_connections import GbpConnectionService
 from backend.app.services.google_business.google import GoogleBusinessClient, GoogleOAuthService
-from backend.app.services.operations.rate_limits import RateLimitService, RateLimitError
+from backend.app.services.operations.rate_limits import RateLimitService
 from backend.app.core.config import settings
+from backend.app.services.posts.posting_safety import PostingSafetyService
 
 
 class GbpPublishingService:
@@ -26,8 +27,26 @@ class GbpPublishingService:
         self.connections = GbpConnectionService(db)
         self.oauth = GoogleOAuthService()
         self.rate_limits = RateLimitService(db, limit_per_window=settings.RATE_LIMIT_PER_HOUR)
+        self.safety = PostingSafetyService(db)
 
     def publish_post(self, post: Post) -> dict[str, Any]:
+        if post.status == PostStatus.PUBLISHED or post.published_at or post.external_post_id:
+            result = dict(post.publish_result or {})
+            if post.external_post_id and "name" not in result:
+                result["name"] = post.external_post_id
+            result["skipped"] = True
+            log_audit(
+                self.db,
+                action="gbp.post.publish_skipped",
+                actor=None,
+                org_id=post.organization_id,
+                entity="post",
+                entity_id=str(post.id),
+                location_id=post.location_id,
+                metadata={"reason": "already_published", "google_resource": post.external_post_id},
+            )
+            return result
+        self.safety.validate_publish_ready(post)
         # Shadow/dry-run modes skip external calls but keep audit trail.
         if settings.SHADOW_MODE or settings.DRY_RUN_MODE:
             result = {
@@ -46,17 +65,15 @@ class GbpPublishingService:
                 org_id=post.organization_id,
                 entity="post",
                 entity_id=str(post.id),
+                location_id=post.location_id,
                 metadata=result,
             )
             return result
         # proactive rate limit guard
-        try:
-            self.rate_limits.check_and_increment(
-                organization_id=post.organization_id,
-                location_id=post.location_id,
-            )
-        except RateLimitError as exc:
-            raise
+        self.rate_limits.check_and_increment(
+            organization_id=post.organization_id,
+            location_id=post.location_id,
+        )
 
         client = self._client(post.organization_id)
         location = post.location
@@ -69,7 +86,8 @@ class GbpPublishingService:
         }
         result = client.create_local_post(location.google_location_id, payload)
         post.publish_result = result
-        post.status = post.status  # ensure SQLAlchemy detects change
+        post.external_post_id = result.get("name")
+        post.status = PostStatus.PUBLISHED
         post.published_at = post.published_at or datetime.now(timezone.utc)
         self.db.add(post)
         self.db.commit()
@@ -81,6 +99,7 @@ class GbpPublishingService:
             org_id=post.organization_id,
             entity="post",
             entity_id=str(post.id),
+            location_id=post.location_id,
             metadata={"google_resource": result.get("name")},
         )
         return result

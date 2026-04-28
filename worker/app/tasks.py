@@ -68,13 +68,16 @@ def _schedule_automation_rules() -> Dict[str, int]:
     scheduled = 0
     try:
         service = ActionService(db)
+        now = datetime.now(timezone.utc)
+        bucket = _period_bucket(now, minutes=15)
         org_ids = [org_id for (org_id,) in db.query(Organization.id).all()]
         for org_id in org_ids:
             service.schedule_action(
                 organization_id=org_id,
                 action_type=ActionType.RUN_AUTOMATION_RULES,
-                run_at=datetime.now(timezone.utc),
+                run_at=now,
                 payload={"organization_id": str(org_id)},
+                dedupe_key=f"automation_rules:{org_id}:{bucket}",
             )
             scheduled += 1
         return {"scheduled": scheduled}
@@ -87,13 +90,16 @@ def _plan_content() -> Dict[str, int]:
     scheduled = 0
     try:
         service = ActionService(db)
+        now = datetime.now(timezone.utc)
+        bucket = _period_bucket(now, minutes=240)
         org_ids = [org_id for (org_id,) in db.query(Organization.id).all()]
         for org_id in org_ids:
             service.schedule_action(
                 organization_id=org_id,
                 action_type=ActionType.PLAN_CONTENT,
-                run_at=datetime.now(timezone.utc),
+                run_at=now,
                 payload={"horizon_days": 14},
+                dedupe_key=f"plan_content:{org_id}:{bucket}",
             )
             scheduled += 1
         return {"scheduled": scheduled}
@@ -106,13 +112,16 @@ def _connection_health() -> Dict[str, int]:
     scheduled = 0
     try:
         service = ActionService(db)
+        now = datetime.now(timezone.utc)
+        bucket = _period_bucket(now, minutes=30)
         org_ids = [org_id for (org_id,) in db.query(Organization.id).all()]
         for org_id in org_ids:
             service.schedule_action(
                 organization_id=org_id,
                 action_type=ActionType.REFRESH_GOOGLE_TOKEN,
-                run_at=datetime.now(timezone.utc),
+                run_at=now,
                 payload={"organization_id": str(org_id)},
+                dedupe_key=f"connection_health:{org_id}:{bucket}",
             )
             scheduled += 1
         return {"scheduled": scheduled}
@@ -138,6 +147,12 @@ def _schedule_keyword_campaigns_onboarding() -> Dict[str, int]:
         return {"scheduled": scheduled}
     finally:
         db.close()
+
+
+def _period_bucket(value: datetime, *, minutes: int) -> str:
+    minute = (value.minute // minutes) * minutes if minutes < 60 else 0
+    hour = value.hour if minutes < 60 else (value.hour // (minutes // 60)) * (minutes // 60)
+    return value.replace(hour=hour, minute=minute, second=0, microsecond=0).isoformat()
 
 
 dispatch_due_actions = cast(
