@@ -4,12 +4,15 @@ from datetime import datetime, timedelta, timezone
 
 from backend.app.models.content.brand_voice import BrandVoice
 from backend.app.models.enums import MediaType, OrganizationType, PostStatus, PostType
+from backend.app.models.google_business.listing_audit import ListingAudit
 from backend.app.models.google_business.location import Location
 from backend.app.models.google_business.location_settings import LocationSettings
 from backend.app.models.media.media_asset import MediaAsset
 from backend.app.models.identity.organization import Organization
 from backend.app.models.posts.post import Post
 from backend.app.models.posts.post_candidate import PostCandidate
+from backend.app.models.rank_tracking.gbp_post_keyword_mapping import GbpPostKeywordMapping
+from backend.app.models.rank_tracking.keyword_campaign_cycle import KeywordCampaignCycle
 from backend.app.services.content.content_guardrails import ContentGuardrails
 from backend.app.services.google_business.gbp_sync import GbpSyncService
 from backend.app.services.media.media_management import MediaManagementService
@@ -33,7 +36,7 @@ def _setup_org_location(
         organization_id=org.id,
         name="Automation Location",
         timezone="UTC",
-        google_location_id=google_location_id,
+        google_location_id=google_location_id or f"locations/{org.id}",
         address={"city": "Media", "state": "PA", "category": "Roofing Contractor"},
     )
     db_session.add(location)
@@ -47,6 +50,19 @@ def _setup_org_location(
     db_session.add(loc_settings)
     if tone:
         db_session.add(BrandVoice(organization_id=org.id, tone=tone))
+    db_session.add(
+        ListingAudit(
+            organization_id=org.id,
+            location_id=location.id,
+            category="Roofing Contractor",
+            audited_at=datetime.now(timezone.utc),
+            status="completed",
+            completed_at=datetime.now(timezone.utc),
+            profile_completeness_score=100,
+            trigger_source="test",
+            summary_json={},
+        )
+    )
     db_session.commit()
     return org, location
 
@@ -333,6 +349,62 @@ def test_photo_usage_count_and_last_used_update_when_scheduled(db_session):
     db_session.refresh(asset)
     assert asset.usage_count == 1
     assert asset.last_used_at is not None
+
+
+def test_scheduler_updates_keyword_mapping_with_post_and_photo(db_session):
+    org, location = _setup_org_location(db_session)
+    asset = MediaAsset(
+        organization_id=org.id,
+        location_id=location.id,
+        file_name="repair.jpg",
+        media_type=MediaType.IMAGE,
+        storage_url="https://example.com/repair.jpg",
+        source="upload",
+        categories=["roof", "repair"],
+    )
+    db_session.add(asset)
+    db_session.flush()
+    candidate = _candidate(
+        db_session,
+        org,
+        location,
+        bucket="service_spotlight",
+        reason_json={"service": "Roof Repair", "angle": "service_spotlight"},
+    )
+    candidate.proposed_caption = "Roof repair planning in Media, PA with clear scheduling and practical next steps."
+    candidate.media_asset_id = asset.id
+    cycle = KeywordCampaignCycle(
+        organization_id=org.id,
+        location_id=location.id,
+        cycle_year=2026,
+        cycle_month=4,
+        status="completed",
+    )
+    db_session.add(cycle)
+    db_session.flush()
+    mapping = GbpPostKeywordMapping(
+        organization_id=org.id,
+        location_id=location.id,
+        campaign_cycle_id=cycle.id,
+        post_candidate_id=candidate.id,
+        target_keyword="roof repair Media",
+        service_name="Roof Repair",
+        post_angle="service_spotlight",
+        post_type="update",
+        publish_date=candidate.candidate_date,
+        status="planned",
+    )
+    db_session.add(candidate)
+    db_session.add(mapping)
+    db_session.commit()
+
+    scheduled = PostSchedulerService(db_session).schedule(candidate.id)
+    db_session.refresh(mapping)
+
+    assert scheduled.status == PostStatus.SCHEDULED
+    assert mapping.status == "scheduled"
+    assert mapping.post_id is not None
+    assert mapping.media_asset_id == asset.id
 
 
 def test_automation_continues_with_limited_client_inputs(db_session):

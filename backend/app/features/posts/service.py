@@ -77,6 +77,7 @@ class PostService:
             organization_id=organization_id, location_id=location_id
         )
         merged_settings = self.settings.merged(organization_id, location_id)
+        keyword_mapped = bool((context or {}).get("keyword_mapping_id"))
         fingerprint = self._fingerprint(base_prompt, bucket, topic_tags or [])
         self.safety.validate(
             organization_id=organization_id,
@@ -86,6 +87,8 @@ class PostService:
             body=base_prompt,
             fingerprint=fingerprint,
             window_id=window_id,
+            enforce_frequency=not keyword_mapped,
+            enforce_bucket_cooldown=not keyword_mapped,
         )
         existing = (
             self.db.query(Post)

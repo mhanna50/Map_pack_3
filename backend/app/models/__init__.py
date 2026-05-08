@@ -13,9 +13,11 @@ from .content.content_plan import ContentPlan
 from .content.content_template import ContentTemplate
 from .content.daily_signal import DailySignal
 from .google_business.attribute_template import AttributeTemplate
+from .google_business.business_service import BusinessService
 from .google_business.connected_account import ConnectedAccount
 from .google_business.gbp_connection import GbpConnection
 from .google_business.listing_audit import ListingAudit
+from .google_business.listing_audit_item import ListingAuditItem
 from .google_business.location import Location
 from .google_business.location_settings import LocationSettings
 from .google_business.org_settings import OrgSettings
@@ -84,7 +86,9 @@ __all__ = [
     "VisibilityScore",
     "ServiceTemplate",
     "AttributeTemplate",
+    "BusinessService",
     "ListingAudit",
+    "ListingAuditItem",
     "PendingChange",
     "MediaUploadRequest",
     "Review",

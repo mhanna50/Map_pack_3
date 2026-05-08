@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from datetime import datetime
@@ -114,7 +115,7 @@ class LocationSettingsPayload(BaseModel):
     posting_schedule: dict | None = None
     voice_profile: dict | None = None
     approvals: dict | None = None
-    services: list[str] | None = None
+    services: list[str | dict[str, Any]] | None = None
     keywords: list[str] | None = None
     competitors: list[str] | None = None
 

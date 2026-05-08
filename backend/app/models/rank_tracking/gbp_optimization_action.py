@@ -24,8 +24,8 @@ class GbpOptimizationAction(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     location_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("locations.id"), nullable=False
     )
-    campaign_cycle_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("keyword_campaign_cycles.id"), nullable=False
+    campaign_cycle_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("keyword_campaign_cycles.id")
     )
     selected_keyword_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("selected_keywords.id")

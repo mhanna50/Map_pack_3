@@ -84,6 +84,13 @@ class GbpPublishingService:
             "summary": post.body,
             "topicType": self._topic_type(post.post_type.value if post.post_type else "update"),
         }
+        if post.media_asset and post.media_asset.storage_url:
+            payload["media"] = [
+                {
+                    "mediaFormat": "PHOTO",
+                    "sourceUrl": post.media_asset.storage_url,
+                }
+            ]
         result = client.create_local_post(location.google_location_id, payload)
         post.publish_result = result
         post.external_post_id = result.get("name")
@@ -105,6 +112,11 @@ class GbpPublishingService:
         return result
 
     def reply_to_review(self, review: Review, reply_body: str) -> dict[str, Any]:
+        if review.location_id:
+            self.safety.ensure_automation_ready(
+                organization_id=review.organization_id,
+                location_id=review.location_id,
+            )
         client = self._client(review.organization_id)
         if not review.metadata_json or "name" not in review.metadata_json:
             raise ValueError("Missing Google review resource name")

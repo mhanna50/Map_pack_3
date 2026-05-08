@@ -422,6 +422,13 @@ def _update_org_status(
             db.rollback()
             logger.exception("Unable to upsert billing subscription for org %s after DataError fallback", org.id)
             return
+    if org_active:
+        from backend.app.services.google_business.readiness import GbpReadinessService
+
+        GbpReadinessService(db).schedule_audit_if_lifecycle_ready(
+            organization_id=org.id,
+            trigger_source="subscription_active",
+        )
 
 
 def _record_stripe_webhook_event_once(

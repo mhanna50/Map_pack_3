@@ -249,6 +249,13 @@ class AutomationRuleService:
         return self._response(stale, context)
 
     def _execute(self, rule: AutomationRule, metrics: dict[str, Any]):
+        if rule.action_type in {AutomationActionType.CREATE_POST, AutomationActionType.ACCEPT_REVIEW_REPLY} and rule.location_id:
+            from backend.app.services.google_business.readiness import GbpReadinessService
+
+            GbpReadinessService(self.db).ensure_ready_for_automation(
+                organization_id=rule.organization_id,
+                location_id=rule.location_id,
+            )
         action = self.action_service.schedule_action(
             organization_id=rule.organization_id,
             action_type=self._map_action(rule.action_type),

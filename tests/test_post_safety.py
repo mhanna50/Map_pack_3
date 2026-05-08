@@ -38,7 +38,7 @@ def test_max_posts_per_week_enforced(db_session):
     org, location = _setup_location(db_session)
     service = _service(db_session)
     base_time = datetime.now(timezone.utc)
-    for offset in (0, 3, 5):
+    for offset in range(7):
         service.create_post(
             organization_id=org.id,
             location_id=location.id,
@@ -55,10 +55,10 @@ def test_max_posts_per_week_enforced(db_session):
             location_id=location.id,
             connected_account_id=None,
             post_type=PostType.UPDATE,
-            base_prompt="Fourth post",
-            scheduled_at=base_time + timedelta(days=6),
+            base_prompt="Eighth post",
+            scheduled_at=base_time + timedelta(days=7),
             context={},
-            bucket="bucket-4",
+            bucket="bucket-8",
         )
 
 

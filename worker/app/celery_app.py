@@ -46,4 +46,12 @@ celery_app.conf.beat_schedule = {
         "task": "actions.schedule_keyword_campaigns_onboarding",
         "schedule": crontab(minute="*/10"),
     },
+    "schedule-gbp-audits-monthly": {
+        "task": "actions.schedule_gbp_audits_monthly",
+        "schedule": crontab(minute=20, hour=2, day_of_month="1"),
+    },
+    "schedule-gbp-audits-onboarding": {
+        "task": "actions.schedule_gbp_audits_onboarding",
+        "schedule": crontab(minute="*/10"),
+    },
 }

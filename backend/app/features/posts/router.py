@@ -12,6 +12,7 @@ from backend.app.db.session import get_db
 from backend.app.models.enums import PostStatus, PostType
 from backend.app.models.media.media_asset import MediaAsset
 from backend.app.models.posts.post import Post
+from backend.app.models.rank_tracking.gbp_post_keyword_mapping import GbpPostKeywordMapping
 from backend.app.services.posts.posts import PostService
 from backend.app.services.auth.access import AccessDeniedError, AccessService
 
@@ -126,6 +127,56 @@ def list_posts(
     if location_id:
         query = query.filter(Post.location_id == location_id)
     return query.limit(100).all()
+
+
+@router.get("/automation-plan")
+def automation_plan(
+    organization_id: uuid.UUID,
+    location_id: uuid.UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> list[dict]:
+    try:
+        AccessService(db).resolve_org(user_id=current_user.id, organization_id=organization_id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    query = (
+        db.query(GbpPostKeywordMapping)
+        .filter(GbpPostKeywordMapping.organization_id == organization_id)
+        .order_by(GbpPostKeywordMapping.publish_date.asc(), GbpPostKeywordMapping.created_at.asc())
+    )
+    if location_id:
+        query = query.filter(GbpPostKeywordMapping.location_id == location_id)
+    rows = query.limit(120).all()
+    payload: list[dict] = []
+    for row in rows:
+        post = row.post
+        media = row.media_asset or (post.media_asset if post else None)
+        payload.append(
+            {
+                "id": str(row.id),
+                "service_name": row.service_name,
+                "keyword": row.target_keyword,
+                "secondary_keywords": row.secondary_keywords or [],
+                "proximity_target": row.proximity_target,
+                "proximity_source": row.proximity_source,
+                "assigned_photo": {
+                    "id": str(media.id),
+                    "file_name": media.file_name,
+                    "storage_url": media.storage_url,
+                    "source": media.source,
+                }
+                if media
+                else None,
+                "post_angle": row.post_angle,
+                "post_mix": (row.metadata_json or {}).get("post_mix"),
+                "status": post.status.value if post else row.status,
+                "generated_at": row.created_at.isoformat() if row.created_at else None,
+                "scheduled_publish_date": post.scheduled_at.isoformat() if post and post.scheduled_at else row.publish_date.isoformat(),
+                "post_id": str(post.id) if post else None,
+            }
+        )
+    return payload
 
 
 class PostStatusUpdateRequest(BaseModel):

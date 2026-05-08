@@ -51,6 +51,12 @@ class PostCandidateService:
         threshold: float = 25,
     ) -> PostCandidate | None:
         target_date = target_date or datetime.now(timezone.utc).date()
+        from backend.app.services.google_business.readiness import GbpReadinessService
+
+        GbpReadinessService(self.db).ensure_ready_for_automation(
+            organization_id=organization_id,
+            location_id=location_id,
+        )
         signal = self._latest_signal(organization_id, location_id, target_date)
         if not signal:
             signal = self.daily_signals.compute(
@@ -69,6 +75,12 @@ class PostCandidateService:
             location_id=location_id,
             target_date=target_date,
         )
+        if not planned_mapping and self._has_keyword_plan_for_month(
+            organization_id=organization_id,
+            location_id=location_id,
+            target_date=target_date,
+        ):
+            return None
         best: tuple[dict[str, Any], float] | None = None
         as_of = datetime.combine(target_date, datetime.min.time(), tzinfo=timezone.utc)
         reasons: dict[str, Any] = {
@@ -109,12 +121,19 @@ class PostCandidateService:
             forced_bucket = self._bucket_for_angle(planned_mapping.post_angle)
             best = ({"id": forced_bucket, "cooldown_days": 0}, 999.0)
             reasons["keyword_mapping_id"] = str(planned_mapping.id)
+            reasons["business_service_id"] = str(planned_mapping.business_service_id) if planned_mapping.business_service_id else None
+            reasons["service_name"] = planned_mapping.service_name
             reasons["target_keyword"] = planned_mapping.target_keyword
             reasons["secondary_keywords"] = planned_mapping.secondary_keywords or []
             reasons["keyword_post_angle"] = planned_mapping.post_angle
             reasons["keyword_post_type"] = planned_mapping.post_type
             reasons["keyword_cta"] = planned_mapping.cta
             reasons["keyword_image_theme"] = planned_mapping.suggested_image_theme
+            reasons["proximity_target"] = planned_mapping.proximity_target
+            reasons["proximity_source"] = planned_mapping.proximity_source
+            reasons["location_strategy"] = (planned_mapping.metadata_json or {}).get("location_strategy")
+            reasons["post_mix"] = (planned_mapping.metadata_json or {}).get("post_mix")
+            reasons["planned_media_asset_id"] = str(planned_mapping.media_asset_id) if planned_mapping.media_asset_id else None
         else:
             for bucket in BUCKETS:
                 if bucket["id"] == "offer" and not verified_offers:
@@ -190,7 +209,7 @@ class PostCandidateService:
         self.db.refresh(candidate)
         if planned_mapping:
             planned_mapping.post_candidate_id = candidate.id
-            planned_mapping.status = "scheduled"
+            planned_mapping.status = "candidate"
             self.db.add(planned_mapping)
             self.db.commit()
         return candidate
@@ -217,7 +236,7 @@ class PostCandidateService:
         as_of: datetime,
     ) -> float:
         extra = signal.extra_metrics or {}
-        if extra.get("posts_last_7d", 0) >= 3:
+        if extra.get("posts_last_7d", 0) >= 7:
             return 0
         base = 0.0
         if signal.days_since_post is not None:
@@ -300,12 +319,36 @@ class PostCandidateService:
             .first()
         )
 
+    def _has_keyword_plan_for_month(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        location_id: uuid.UUID,
+        target_date: date,
+    ) -> bool:
+        month_start = target_date.replace(day=1)
+        next_month = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+        return (
+            self.db.query(GbpPostKeywordMapping)
+            .filter(
+                GbpPostKeywordMapping.organization_id == organization_id,
+                GbpPostKeywordMapping.location_id == location_id,
+                GbpPostKeywordMapping.publish_date >= month_start,
+                GbpPostKeywordMapping.publish_date < next_month,
+                GbpPostKeywordMapping.status.in_(["planned", "queued", "candidate", "scheduled"]),
+            )
+            .first()
+            is not None
+        )
+
     @staticmethod
     def _bucket_for_angle(post_angle: str | None) -> str:
         mapping = {
             "service_post": "service_spotlight",
+            "educational_post": "faq",
             "offer_post": "offer",
             "trust_post": "proof",
+            "before_after_post": "proof",
             "local_relevance_post": "local_highlight",
             "seasonal_post": "seasonal_tip",
         }

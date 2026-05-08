@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
-from backend.app.models.enums import OrganizationType, PostStatus, PostType, ReviewRating
+from backend.app.models.enums import MediaType, OrganizationType, PostStatus, PostType, ReviewRating
+from backend.app.models.google_business.listing_audit import ListingAudit
 from backend.app.models.google_business.location import Location
 from backend.app.models.identity.organization import Organization
+from backend.app.models.media.media_asset import MediaAsset
 from backend.app.models.posts.post import Post
 from backend.app.models.reviews.review import Review
 from backend.app.services.google_business.gbp_publishing import GbpPublishingService
@@ -41,6 +44,22 @@ class _FakeClient:
         return {"name": review_name, "comment": comment}
 
 
+def _mark_ready(db_session, org: Organization, location: Location) -> None:
+    db_session.add(
+        ListingAudit(
+            organization_id=org.id,
+            location_id=location.id,
+            category="Test",
+            audited_at=datetime.now(timezone.utc),
+            status="completed",
+            completed_at=datetime.now(timezone.utc),
+            profile_completeness_score=100,
+            trigger_source="test",
+            summary_json={},
+        )
+    )
+
+
 def test_gbp_publishing_service(db_session):
     org = Organization(name="GBP Org", org_type=OrganizationType.AGENCY)
     db_session.add(org)
@@ -48,12 +67,24 @@ def test_gbp_publishing_service(db_session):
     location = Location(name="HQ", organization_id=org.id, timezone="UTC", google_location_id="locations/123")
     db_session.add(location)
     db_session.flush()
+    _mark_ready(db_session, org, location)
+    asset = MediaAsset(
+        organization_id=org.id,
+        location_id=location.id,
+        file_name="team.jpg",
+        media_type=MediaType.IMAGE,
+        storage_url="https://example.com/team.jpg",
+        source="upload",
+    )
+    db_session.add(asset)
+    db_session.flush()
     post = Post(
         organization_id=org.id,
         location_id=location.id,
         body="Hello",
         post_type=PostType.UPDATE,
         status=PostStatus.SCHEDULED,
+        media_asset_id=asset.id,
     )
     db_session.add(post)
     db_session.commit()
@@ -64,6 +95,9 @@ def test_gbp_publishing_service(db_session):
 
     result = service.publish_post(post)
     assert result["name"].endswith("/posts/1")
+    assert fake_client.published[0][1]["media"] == [
+        {"mediaFormat": "PHOTO", "sourceUrl": "https://example.com/team.jpg"}
+    ]
     db_session.refresh(post)
     assert post.publish_result["name"].endswith("/posts/1")
 
@@ -75,6 +109,7 @@ def test_gbp_publish_post_is_idempotent_after_success(db_session):
     location = Location(name="HQ", organization_id=org.id, timezone="UTC", google_location_id="locations/123")
     db_session.add(location)
     db_session.flush()
+    _mark_ready(db_session, org, location)
     post = Post(
         organization_id=org.id,
         location_id=location.id,

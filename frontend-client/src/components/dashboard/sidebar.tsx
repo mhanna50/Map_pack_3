@@ -5,11 +5,12 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import { Home, Image, Settings, Star, Gauge, LifeBuoy } from "lucide-react";
+import { ClipboardCheck, Home, Image, Settings, Star, Gauge, LifeBuoy } from "lucide-react";
 
 const navItems = [
   { href: "/dashboard", label: "Overview", icon: Gauge },
   { href: "/dashboard/gbp", label: "GBP Monitoring", icon: Home },
+  { href: "/dashboard/gbp-audit", label: "GBP Audit", icon: ClipboardCheck },
   { href: "/dashboard/keywords", label: "Keyword Strategy", icon: Gauge },
   { href: "/dashboard/reviews", label: "Reviews", icon: Star },
   { href: "/dashboard/content", label: "Content", icon: Image },

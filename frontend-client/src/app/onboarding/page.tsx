@@ -925,10 +925,14 @@ function OnboardingContent() {
         throw new Error(message);
       }
       const locationId = draft.selectedGoogleLocation?.connectedLocationId;
-      const serviceNames = (draft.services ?? [])
-        .map((service) => service.name.trim())
-        .filter(Boolean);
-      if (locationId && serviceNames.length > 0) {
+      const servicePayload = (draft.services ?? [])
+        .map((service) => ({
+          name: service.name.trim(),
+          description: service.description.trim(),
+          source: service.source,
+        }))
+        .filter((service) => service.name);
+      if (locationId && servicePayload.length > 0) {
         const settingsRes = await fetch(`${API_BASE_URL}/orgs/locations/${locationId}/settings`, {
           method: "PUT",
           headers: {
@@ -936,7 +940,7 @@ function OnboardingContent() {
             Authorization: `Bearer ${accessToken}`,
           },
           body: JSON.stringify({
-            services: serviceNames,
+            services: servicePayload,
             voice_profile: {
               tone: draft.brandVoice?.tone,
               business_description: draft.orgInfo?.existingBusinessDescription,

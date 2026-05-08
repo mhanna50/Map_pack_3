@@ -36,6 +36,12 @@ class ContentPlannerService:
     ) -> list[ContentPlan]:
         today = datetime.now(timezone.utc).date()
         created: list[ContentPlan] = []
+        from backend.app.services.google_business.readiness import GbpReadinessService
+
+        GbpReadinessService(self.db).ensure_ready_for_automation(
+            organization_id=organization_id,
+            location_id=location.id,
+        )
         for offset in range(horizon_days):
             target = today + timedelta(days=offset)
             if self._existing_plan(location.id, target):

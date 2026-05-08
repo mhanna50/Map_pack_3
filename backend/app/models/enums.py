@@ -26,6 +26,15 @@ class LocationStatus(str, Enum):
     DISCONNECTED = "disconnected"
 
 
+class GbpAutomationStatus(str, Enum):
+    PENDING_GBP_CONNECTION = "pending_gbp_connection"
+    AUDIT_REQUIRED = "audit_required"
+    AUDIT_IN_PROGRESS = "audit_in_progress"
+    SETUP_ACTION_REQUIRED = "setup_action_required"
+    READY_FOR_AUTOMATION = "ready_for_automation"
+    AUTOMATION_ACTIVE = "automation_active"
+
+
 class ActionStatus(str, Enum):
     PENDING = "pending"
     QUEUED = "queued"
@@ -55,6 +64,7 @@ class ActionType(str, Enum):
     EXECUTE_POST_JOB = "execute_post_job"
     RUN_KEYWORD_CAMPAIGN = "run_keyword_campaign"
     RUN_KEYWORD_FOLLOWUP_SCAN = "run_keyword_followup_scan"
+    RUN_GBP_AUDIT = "run_gbp_audit"
     CUSTOM = "custom"
 
 

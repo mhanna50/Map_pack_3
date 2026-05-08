@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.db.base import Base
-from backend.app.models.enums import LocationStatus, enum_values
+from backend.app.models.enums import GbpAutomationStatus, LocationStatus, enum_values
 from backend.app.models.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 
@@ -41,6 +41,13 @@ class Location(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     posting_cap_per_week: Mapped[int | None] = mapped_column(Integer)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     reviews_last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    automation_status: Mapped[GbpAutomationStatus] = mapped_column(
+        Enum(GbpAutomationStatus, name="gbp_automation_status", values_callable=enum_values),
+        default=GbpAutomationStatus.PENDING_GBP_CONNECTION,
+        nullable=False,
+    )
+    readiness_json: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    readiness_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     organization = relationship("Organization", back_populates="locations")
     connected_account = relationship("ConnectedAccount", back_populates="locations")

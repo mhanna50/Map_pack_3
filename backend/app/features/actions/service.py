@@ -33,8 +33,10 @@ from backend.app.services.posts.post_metrics import PostMetricsService
 from backend.app.services.content.content_planner import ContentPlannerService
 from backend.app.services.posts.post_jobs import PostJobService
 from backend.app.services.rank_tracking.keyword_strategy import KeywordCampaignService
+from backend.app.services.google_business.listing_optimization import ListingOptimizationService
 from backend.app.models.google_business.location import Location
 from backend.app.models.posts.post_job import PostJob
+from backend.app.models.posts.post_candidate import PostCandidate
 from backend.app.models.google_business.gbp_connection import GbpConnection
 from backend.app.models.identity.organization import Organization
 from backend.app.services.google_business.gbp_connections import GbpConnectionService
@@ -453,6 +455,7 @@ class ActionExecutor:
         self.content_planner = ContentPlannerService(db)
         self.post_jobs = PostJobService(db)
         self.keyword_campaigns = KeywordCampaignService(db)
+        self.gbp_audits = ListingOptimizationService(db)
         self.connection_service = GbpConnectionService(db)
         self.alerts = AlertService(db)
         self.oauth = GoogleOAuthService()
@@ -475,6 +478,7 @@ class ActionExecutor:
             ActionType.EXECUTE_POST_JOB: self._handle_execute_post_job,
             ActionType.RUN_KEYWORD_CAMPAIGN: self._handle_run_keyword_campaign,
             ActionType.RUN_KEYWORD_FOLLOWUP_SCAN: self._handle_run_keyword_followup_scan,
+            ActionType.RUN_GBP_AUDIT: self._handle_run_gbp_audit,
             ActionType.CUSTOM: self._handle_noop,
         }
 
@@ -526,6 +530,12 @@ class ActionExecutor:
         qna: QnaEntry | None = self.db.get(QnaEntry, uuid.UUID(qna_id)) if qna_id else None
         if not qna:
             return {"status": "missing_qna"}
+        from backend.app.services.google_business.readiness import GbpReadinessService
+
+        GbpReadinessService(self.db).ensure_ready_for_automation(
+            organization_id=qna.organization_id,
+            location_id=qna.location_id,
+        )
         qna.status = QnaStatus.PUBLISHED
         self.qna_service.mark_posted(qna)
         self.audit.log(
@@ -660,6 +670,12 @@ class ActionExecutor:
         location_id = action.payload.get("location_id") if action.payload else None
         if not location_id:
             return {"status": "missing_location"}
+        from backend.app.services.google_business.readiness import GbpReadinessService
+
+        GbpReadinessService(self.db).ensure_ready_for_automation(
+            organization_id=action.organization_id,
+            location_id=uuid.UUID(location_id),
+        )
         count = self.gbp_sync.sync_reviews(action.organization_id, uuid.UUID(location_id))
         return {"status": "reviews_synced", "count": count}
 
@@ -686,6 +702,12 @@ class ActionExecutor:
         location_id = action.payload.get("location_id") if action.payload else None
         if not location_id:
             return {"status": "missing_location"}
+        from backend.app.services.google_business.readiness import GbpReadinessService
+
+        GbpReadinessService(self.db).ensure_ready_for_automation(
+            organization_id=action.organization_id,
+            location_id=uuid.UUID(location_id),
+        )
         candidate = self.post_candidates.generate(
             organization_id=action.organization_id,
             location_id=uuid.UUID(location_id),
@@ -698,6 +720,15 @@ class ActionExecutor:
         candidate_id = action.payload.get("candidate_id")
         if not candidate_id:
             return {"status": "missing_candidate"}
+        candidate = self.db.get(PostCandidate, uuid.UUID(candidate_id))
+        if not candidate:
+            return {"status": "missing_candidate"}
+        from backend.app.services.google_business.readiness import GbpReadinessService
+
+        GbpReadinessService(self.db).ensure_ready_for_automation(
+            organization_id=candidate.organization_id,
+            location_id=candidate.location_id,
+        )
         candidate = self.post_composer.compose(uuid.UUID(candidate_id))
         return {"status": "candidate_composed", "candidate_id": str(candidate.id)}
 
@@ -711,14 +742,26 @@ class ActionExecutor:
     def _handle_plan_content(self, action: Action) -> dict[str, Any]:
         organization_id = action.organization_id
         horizon = action.payload.get("horizon_days", 14) if action.payload else 14
+        loc_value = action.payload.get("location_id") if action.payload else None
         locations = (
             self.db.query(Location)
             .filter(Location.organization_id == organization_id)
             .filter(Location.posting_paused == False)  # noqa: E712
             .all()
         )
+        if loc_value:
+            locations = [loc for loc in locations if str(loc.id) == str(loc_value)]
         total = 0
         for loc in locations:
+            from backend.app.services.google_business.readiness import GbpReadinessService
+
+            try:
+                GbpReadinessService(self.db).ensure_ready_for_automation(
+                    organization_id=organization_id,
+                    location_id=loc.id,
+                )
+            except ValueError:
+                continue
             plans = self.content_planner.plan_horizon(
                 organization_id=organization_id,
                 location=loc,
@@ -739,6 +782,13 @@ class ActionExecutor:
         location_id = payload.get("location_id") or (str(action.location_id) if action.location_id else None)
         if not location_id:
             return {"status": "missing_location"}
+        from backend.app.services.google_business.readiness import GbpReadinessService
+
+        readiness = GbpReadinessService(self.db)
+        readiness.ensure_ready_for_automation(
+            organization_id=action.organization_id,
+            location_id=uuid.UUID(str(location_id)),
+        )
         cycle = self.keyword_campaigns.run_cycle(
             organization_id=action.organization_id,
             location_id=uuid.UUID(str(location_id)),
@@ -746,6 +796,10 @@ class ActionExecutor:
             cycle_month=int(payload["cycle_month"]) if payload.get("cycle_month") else None,
             trigger_source=str(payload.get("trigger_source") or "monthly"),
             onboarding_triggered=bool(payload.get("onboarding_triggered") is True),
+        )
+        readiness.schedule_content_planning_after_keyword_cycle(
+            organization_id=action.organization_id,
+            location_id=uuid.UUID(str(location_id)),
         )
         return {
             "status": "keyword_campaign_completed",
@@ -764,6 +818,22 @@ class ActionExecutor:
             "status": "keyword_followup_completed",
             "cycle_id": str(cycle.id),
             "followup_scanned_at": cycle.followup_scanned_at.isoformat() if cycle.followup_scanned_at else None,
+        }
+
+    def _handle_run_gbp_audit(self, action: Action) -> dict[str, Any]:
+        payload = action.payload or {}
+        location_id = payload.get("location_id") or (str(action.location_id) if action.location_id else None)
+        if not location_id:
+            return {"status": "missing_location"}
+        audit = self.gbp_audits.run_full_audit(
+            organization_id=action.organization_id,
+            location_id=uuid.UUID(str(location_id)),
+            trigger_source=str(payload.get("trigger_source") or "monthly"),
+        )
+        return {
+            "status": "gbp_audit_completed",
+            "audit_id": str(audit.id),
+            "profile_completeness_score": audit.profile_completeness_score,
         }
 
     def _handle_noop(self, action: Action) -> dict[str, Any]:

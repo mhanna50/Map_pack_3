@@ -23,6 +23,16 @@ class Settings(BaseSettings):
     GOOGLE_BUSINESS_API_BASE_URL: AnyHttpUrl = cast(
         AnyHttpUrl, "https://mybusinessbusinessinformation.googleapis.com/v1"
     )
+    GOOGLE_ADS_DEVELOPER_TOKEN: str = ""
+    GOOGLE_ADS_CLIENT_ID: str = ""
+    GOOGLE_ADS_CLIENT_SECRET: str = ""
+    GOOGLE_ADS_REFRESH_TOKEN: str = ""
+    GOOGLE_ADS_LOGIN_CUSTOMER_ID: str = ""
+    GOOGLE_ADS_CUSTOMER_ID: str = ""
+    GOOGLE_ADS_LANGUAGE_ID: str = "1000"  # English
+    GOOGLE_ADS_GEO_TARGET_IDS: str = ""
+    GOOGLE_ADS_API_VERSION: str = "v22"
+    REQUIRE_GOOGLE_KEYWORD_PLANNER: bool = False
 
     OPENAI_API_KEY: str = ""
     TWILIO_ACCOUNT_SID: str = ""
@@ -67,6 +77,11 @@ class Settings(BaseSettings):
     SHADOW_MODE: bool = False
     RATE_LIMIT_PER_HOUR: int = 200
     ALERT_SMS_RECIPIENTS: str = ""  # comma-separated E.164 numbers
+    KEYWORD_POSTS_PER_MONTH: int = 30
+    KEYWORDS_PER_SERVICE_MIN: int = 2
+    KEYWORDS_PER_SERVICE_MAX: int = 3
+    KEYWORD_RETAIN_PERFORMANCE_THRESHOLD: float = 55.0
+    PROFILE_DESCRIPTION_REFRESH_DAYS: int = 90
 
 
 settings = Settings()

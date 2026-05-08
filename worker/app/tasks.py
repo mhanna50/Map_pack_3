@@ -14,6 +14,7 @@ from backend.app.models.identity.organization import Organization
 from backend.app.services.google_business.gbp_connections import GbpConnectionService
 from backend.app.services.automation.actions import ActionExecutor, ActionService
 from backend.app.services.rank_tracking.keyword_strategy import KeywordCampaignSchedulerService
+from backend.app.services.google_business.listing_optimization import ListingOptimizationService
 
 logger = get_task_logger(__name__)
 
@@ -149,6 +150,24 @@ def _schedule_keyword_campaigns_onboarding() -> Dict[str, int]:
         db.close()
 
 
+def _schedule_gbp_audits_monthly() -> Dict[str, int]:
+    db = SessionLocal()
+    try:
+        scheduled = ListingOptimizationService(db).schedule_monthly_audits()
+        return {"scheduled": scheduled}
+    finally:
+        db.close()
+
+
+def _schedule_gbp_audits_onboarding() -> Dict[str, int]:
+    db = SessionLocal()
+    try:
+        scheduled = ListingOptimizationService(db).schedule_onboarding_audits()
+        return {"scheduled": scheduled}
+    finally:
+        db.close()
+
+
 def _period_bucket(value: datetime, *, minutes: int) -> str:
     minute = (value.minute // minutes) * minutes if minutes < 60 else 0
     hour = value.hour if minutes < 60 else (value.hour // (minutes // 60)) * (minutes // 60)
@@ -179,4 +198,12 @@ schedule_keyword_campaigns_onboarding = cast(
     celery_app.task(name="actions.schedule_keyword_campaigns_onboarding")(
         _schedule_keyword_campaigns_onboarding
     ),
+)
+schedule_gbp_audits_monthly = cast(
+    Task,
+    celery_app.task(name="actions.schedule_gbp_audits_monthly")(_schedule_gbp_audits_monthly),
+)
+schedule_gbp_audits_onboarding = cast(
+    Task,
+    celery_app.task(name="actions.schedule_gbp_audits_onboarding")(_schedule_gbp_audits_onboarding),
 )

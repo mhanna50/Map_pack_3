@@ -12,6 +12,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
+from backend.app.core.config import settings
 from backend.app.models.automation.action import Action
 from backend.app.models.rank_tracking.campaign_job_run import CampaignJobRun
 from backend.app.models.enums import ActionType, LocationStatus
@@ -23,16 +24,20 @@ from backend.app.models.rank_tracking.keyword_candidate import KeywordCandidate
 from backend.app.models.rank_tracking.keyword_campaign_cycle import KeywordCampaignCycle
 from backend.app.models.rank_tracking.keyword_dashboard_aggregate import KeywordDashboardAggregate
 from backend.app.models.rank_tracking.keyword_score import KeywordScore
+from backend.app.models.google_business.business_service import BusinessService
 from backend.app.models.google_business.location import Location
 from backend.app.models.google_business.location_settings import LocationSettings
 from backend.app.models.identity.organization import Organization
+from backend.app.models.media.media_asset import MediaAsset
 from backend.app.models.rank_tracking.selected_keyword import SelectedKeyword
 from backend.app.services.shared.settings import SettingsService
 from backend.app.services.shared.validators import assert_location_in_org
 from backend.app.services.rank_tracking.keyword_strategy_providers import (
     GeoGridProvider,
+    GoogleAdsKeywordDataProvider,
     HeuristicKeywordDataProvider,
     KeywordDataProvider,
+    KeywordMarketMetric,
     LocalGbpInsightsProvider,
     MockGeoGridProvider,
     RankInsightsProvider,
@@ -80,22 +85,24 @@ HIGH_TICKET_TOKENS = {
 }
 
 DEFAULT_SCORE_WEIGHTS = {
+    "value": 0.26,
     "relevance": 0.30,
-    "intent": 0.20,
-    "ticket_value": 0.14,
-    "search_volume": 0.13,
-    "opportunity": 0.14,
-    "current_rank": 0.09,
+    "intent": 0.14,
+    "ticket_value": 0.08,
+    "search_volume": 0.10,
+    "opportunity": 0.08,
+    "current_rank": 0.04,
     "competition_penalty": 0.10,
     "already_dominant_penalty": 1.00,
 }
 
 POST_ANGLE_ROTATION = [
     ("service_post", "update"),
-    ("offer_post", "offer"),
-    ("trust_post", "update"),
-    ("local_relevance_post", "event"),
+    ("educational_post", "update"),
     ("seasonal_post", "update"),
+    ("trust_post", "update"),
+    ("before_after_post", "update"),
+    ("offer_post", "offer"),
 ]
 
 CTA_ROTATION = [
@@ -113,8 +120,10 @@ IMAGE_THEME_ROTATION = [
     "seasonal-service-scene",
 ]
 
-KEYWORD_SELECTION_TARGET = 10
+DEFAULT_SERVICE_VALUE_CENTS = 35_000
 FOLLOWUP_SCAN_DELAY_DAYS = 21
+PROFILE_DESCRIPTION_ACTION_TYPE = "description_refresh"
+SERVICE_DESCRIPTION_ACTION_TYPE = "service_description_update"
 
 
 @dataclass(frozen=True)
@@ -135,6 +144,8 @@ class DiscoveryContext:
 
 @dataclass(frozen=True)
 class ScoredCandidate:
+    business_service_id: uuid.UUID | None
+    service_name: str | None
     keyword: str
     normalized_keyword: str
     cluster_key: str
@@ -145,16 +156,26 @@ class ScoredCandidate:
     local_volume_score: float
     intent_score: float
     ticket_value_score: float
+    value_score: float
     competition_score: float
     opportunity_score: float
     current_rank_score: float
     already_dominant_penalty: float
     overall_score: float
     search_volume: int
+    average_cpc_micros: int | None
+    top_of_page_bid_low_micros: int | None
+    top_of_page_bid_high_micros: int | None
     competition_estimate: float
+    competition_index: float | None
+    competition_level: str | None
     current_rank: float | None
+    service_value_cents: int | None
+    provider: str | None
+    source_query: dict[str, Any]
     classifications: list[str]
     why_selected: str
+    retained_from_selected_keyword_id: uuid.UUID | None = None
 
 
 class KeywordCampaignService:
@@ -170,10 +191,18 @@ class KeywordCampaignService:
         from backend.app.services.automation.actions import ActionService
 
         self.action_service = ActionService(db)
-        self.keyword_data_provider = keyword_data_provider or HeuristicKeywordDataProvider()
+        self.keyword_data_provider = keyword_data_provider or self._default_keyword_data_provider()
         self.geo_grid_provider = geo_grid_provider or MockGeoGridProvider(db)
         self.gbp_insights = LocalGbpInsightsProvider(db)
         self.rank_insights = RankInsightsProvider(db)
+
+    @staticmethod
+    def _default_keyword_data_provider() -> KeywordDataProvider:
+        if GoogleAdsKeywordDataProvider.configured():
+            return GoogleAdsKeywordDataProvider()
+        if settings.REQUIRE_GOOGLE_KEYWORD_PLANNER:
+            raise ValueError("Google Ads Keyword Planner is required but credentials are not configured")
+        return HeuristicKeywordDataProvider()
 
     def run_cycle(
         self,
@@ -186,6 +215,12 @@ class KeywordCampaignService:
         onboarding_triggered: bool = False,
     ) -> KeywordCampaignCycle:
         location = assert_location_in_org(self.db, location_id=location_id, organization_id=organization_id)
+        from backend.app.services.google_business.readiness import GbpReadinessService
+
+        GbpReadinessService(self.db).ensure_ready_for_automation(
+            organization_id=organization_id,
+            location_id=location_id,
+        )
         today = datetime.now(timezone.utc).date()
         year = cycle_year or today.year
         month = cycle_month or today.month
@@ -224,11 +259,21 @@ class KeywordCampaignService:
 
             self._clear_cycle_children(cycle.id)
 
+            business_services = self._sync_business_services(location)
             context = self._build_discovery_context(organization_id=organization_id, location=location)
-            scored = self._score_candidates(location=location, context=context)
-            selected, _rejected = self._select_candidates(scored)
-            if len(selected) != KEYWORD_SELECTION_TARGET:
-                raise ValueError("Keyword selection failed to produce exactly 10 keywords")
+            scored = self._score_candidates(
+                location=location,
+                context=context,
+                business_services=business_services,
+            )
+            previous_active = self._previous_active_keywords(location_id=location.id)
+            selected, retained_previous_ids, replaced_previous_ids = self._select_candidates_by_service(
+                scored=scored,
+                business_services=business_services,
+                previous_active=previous_active,
+            )
+            if not selected:
+                raise ValueError("Keyword selection failed to produce service-mapped keywords")
 
             selected_rows = self._persist_keyword_candidates_and_scores(
                 cycle=cycle,
@@ -236,6 +281,11 @@ class KeywordCampaignService:
                 scored_candidates=scored,
                 selected=selected,
                 score_weights=context.scoring_weights,
+            )
+            self._deactivate_previous_keywords(
+                previous_active=previous_active,
+                retained_previous_ids=retained_previous_ids,
+                replaced_previous_ids=replaced_previous_ids,
             )
             self._sync_location_keyword_targets(location=location, selected_keywords=selected_rows)
             self._create_gbp_optimization_actions(
@@ -255,7 +305,13 @@ class KeywordCampaignService:
             cycle.status = "completed"
             cycle.completed_at = datetime.now(timezone.utc)
             cycle.data_sources_json = {
-                "keyword_provider": self.keyword_data_provider.__class__.__name__,
+                "keyword_provider": getattr(
+                    self.keyword_data_provider,
+                    "provider_name",
+                    self.keyword_data_provider.__class__.__name__,
+                ),
+                "keyword_provider_class": self.keyword_data_provider.__class__.__name__,
+                "requires_google_keyword_planner": settings.REQUIRE_GOOGLE_KEYWORD_PLANNER,
                 "gbp_insights_provider": self.gbp_insights.__class__.__name__,
                 "geo_grid_provider": self.geo_grid_provider.__class__.__name__,
             }
@@ -435,11 +491,21 @@ class KeywordCampaignService:
             keyword_rows.append(
                 {
                     "id": str(row.id),
+                    "business_service_id": str(row.business_service_id) if row.business_service_id else None,
+                    "service_name": row.business_service.name if row.business_service else None,
                     "keyword": row.keyword,
                     "target_city_or_area": row.target_service_area,
                     "search_volume": row.search_volume,
+                    "average_cpc_micros": row.average_cpc_micros,
+                    "top_of_page_bid_low_micros": row.top_of_page_bid_low_micros,
+                    "top_of_page_bid_high_micros": row.top_of_page_bid_high_micros,
+                    "competition_index": row.competition_index,
+                    "service_value_cents": row.service_value_cents,
                     "intent_level": row.intent_level,
                     "competition_level": row.competition_level,
+                    "status": row.status,
+                    "is_active": row.is_active,
+                    "is_primary": row.is_primary,
                     "baseline_rank": baseline_rank,
                     "latest_rank": latest_rank,
                     "rank_change": rank_change,
@@ -543,15 +609,22 @@ class KeywordCampaignService:
                 {
                     "id": str(item.id),
                     "campaign_cycle_id": str(item.campaign_cycle_id),
+                    "business_service_id": str(item.business_service_id) if item.business_service_id else None,
+                    "service_name": item.service_name,
                     "target_keyword": item.target_keyword,
                     "secondary_keywords": item.secondary_keywords or [],
                     "post_angle": item.post_angle,
                     "post_type": item.post_type,
                     "cta": item.cta,
                     "suggested_image_theme": item.suggested_image_theme,
+                    "proximity_target": item.proximity_target,
+                    "proximity_source": item.proximity_source,
+                    "media_asset_id": str(item.media_asset_id) if item.media_asset_id else None,
+                    "generated_at": item.created_at.isoformat() if item.created_at else None,
                     "publish_date": item.publish_date.isoformat(),
                     "status": item.status,
                     "post_id": str(item.post_id) if item.post_id else None,
+                    "metadata": item.metadata_json or {},
                 }
                 for item in mappings
             ],
@@ -737,9 +810,17 @@ class KeywordCampaignService:
                 self._safe_str((location.address or {}).get("administrativeArea")),
             ]
         )
-        service_area_cities = self._listify(settings_json.get("service_area_cities")) + self._listify(
-            settings_json.get("service_area")
-        )
+        gbp_service_area_cities = [
+            item["target"]
+            for item in self._gbp_proximity_targets(location)
+            if item.get("source") == "gbp_service_area"
+        ]
+        configured_service_area = []
+        if settings_json.get("service_area_source") == "gbp":
+            configured_service_area = self._listify(settings_json.get("service_area_cities")) + self._listify(
+                settings_json.get("service_area")
+            )
+        service_area_cities = self._dedupe_preserve(gbp_service_area_cities + configured_service_area)
         existing_description = self._first_non_empty(
             [
                 self._safe_str(settings_json.get("gbp_description")),
@@ -781,51 +862,83 @@ class KeywordCampaignService:
             scoring_weights=scoring_weights,
         )
 
-    def _score_candidates(self, *, location: Location, context: DiscoveryContext) -> list[ScoredCandidate]:
-        candidates = self._build_candidate_pool(location=location, context=context)
-        metrics = self.keyword_data_provider.fetch_market_metrics(
-            location=location,
-            keywords=[candidate["keyword"] for candidate in candidates],
-        )
+    def _score_candidates(
+        self,
+        *,
+        location: Location,
+        context: DiscoveryContext,
+        business_services: list[BusinessService],
+    ) -> list[ScoredCandidate]:
         scored: list[ScoredCandidate] = []
-        for candidate in candidates:
-            keyword = candidate["keyword"]
-            metric = metrics.get(keyword)
-            if not metric:
-                continue
-            current_rank = self._resolve_rank(context.current_rank_map, keyword)
-            scored.append(
-                self._score_single_candidate(
-                    candidate=candidate,
-                    context=context,
-                    search_volume=metric.search_volume,
-                    competition=metric.competition,
-                    current_rank=current_rank,
-                )
+        for business_service in business_services:
+            candidates = self._build_candidate_pool(
+                location=location,
+                context=context,
+                business_service=business_service,
             )
+            metrics = self.keyword_data_provider.fetch_service_keyword_ideas(
+                location=location,
+                service_name=business_service.name,
+                seed_keywords=[candidate["keyword"] for candidate in candidates],
+                page_url=context.website_url,
+                max_results=140,
+            )
+            candidate_lookup = {candidate["normalized_keyword"]: candidate for candidate in candidates}
+            for keyword, metric in metrics.items():
+                normalized = self._normalize_keyword(keyword)
+                candidate = candidate_lookup.get(normalized)
+                if not candidate:
+                    candidate = self._candidate_payload(
+                        keyword=keyword,
+                        candidate_type="provider_idea",
+                        source_tag=metric.provider,
+                        business_service=business_service,
+                        target_area=context.city,
+                    )
+                current_rank = self._resolve_rank(context.current_rank_map, keyword)
+                scored.append(
+                    self._score_single_candidate(
+                        candidate=candidate,
+                        context=context,
+                        search_volume=metric.search_volume,
+                        competition=metric.competition,
+                        current_rank=current_rank,
+                        metric=metric,
+                        business_service=business_service,
+                    )
+                )
         scored.sort(key=lambda item: item.overall_score, reverse=True)
         return scored
 
-    def _build_candidate_pool(self, *, location: Location, context: DiscoveryContext) -> list[dict[str, Any]]:
+    def _build_candidate_pool(
+        self,
+        *,
+        location: Location,
+        context: DiscoveryContext,
+        business_service: BusinessService,
+    ) -> list[dict[str, Any]]:
         pool: dict[str, dict[str, Any]] = {}
-        services = list(context.services)
-        if context.primary_category:
-            services.append(context.primary_category)
-        if not services:
-            services.append("local service")
+        services = [business_service.name]
         city = context.city
         state = context.state
         for service in services:
             service = self._clean_term(service)
             if not service:
                 continue
-            self._add_candidate(pool, keyword=service, candidate_type="core_service", source_tag="service")
+            self._add_candidate(
+                pool,
+                keyword=service,
+                candidate_type="core_service",
+                source_tag="service",
+                business_service=business_service,
+            )
             if city:
                 self._add_candidate(
                     pool,
                     keyword=f"{service} {city}",
                     candidate_type="service_city",
                     source_tag="service_city",
+                    business_service=business_service,
                     target_area=city,
                 )
             if city and state:
@@ -834,6 +947,7 @@ class KeywordCampaignService:
                     keyword=f"{service} {city} {state}",
                     candidate_type="service_city_state",
                     source_tag="service_city_state",
+                    business_service=business_service,
                     target_area=city,
                 )
             self._add_candidate(
@@ -841,21 +955,24 @@ class KeywordCampaignService:
                 keyword=f"{service} near me",
                 candidate_type="near_me",
                 source_tag="near_me",
+                business_service=business_service,
                 target_area=city,
             )
             for modifier in ["emergency", "repair", "replacement", "installation"]:
                 self._add_candidate(
                     pool,
-                    keyword=f"{modifier} {service}",
-                    candidate_type="intent_variant",
-                    source_tag="intent_variant",
-                )
+                        keyword=f"{modifier} {service}",
+                        candidate_type="intent_variant",
+                        source_tag="intent_variant",
+                        business_service=business_service,
+                    )
                 if city:
                     self._add_candidate(
                         pool,
                         keyword=f"{modifier} {service} {city}",
                         candidate_type="intent_city_variant",
                         source_tag="intent_city_variant",
+                        business_service=business_service,
                         target_area=city,
                     )
             for service_city in context.service_area_cities:
@@ -867,6 +984,7 @@ class KeywordCampaignService:
                     keyword=f"{service} {service_city}",
                     candidate_type="service_area",
                     source_tag="service_area_city",
+                    business_service=business_service,
                     target_area=service_city,
                 )
                 self._add_candidate(
@@ -874,17 +992,21 @@ class KeywordCampaignService:
                     keyword=f"emergency {service} {service_city}",
                     candidate_type="service_area_intent",
                     source_tag="service_area_city",
+                    business_service=business_service,
                     target_area=service_city,
                 )
 
         for term in context.gbp_search_terms:
             if not term:
                 continue
+            if not self._term_matches_service(term, business_service.name):
+                continue
             self._add_candidate(
                 pool,
                 keyword=term,
                 candidate_type="gbp_insight_term",
                 source_tag="gbp_insight",
+                business_service=business_service,
                 target_area=city,
             )
             if city and city.lower() not in term.lower():
@@ -893,15 +1015,19 @@ class KeywordCampaignService:
                     keyword=f"{term} {city}",
                     candidate_type="gbp_insight_city_variant",
                     source_tag="gbp_insight",
+                    business_service=business_service,
                     target_area=city,
                 )
 
         for historical in context.historical_keywords:
+            if not self._term_matches_service(historical, business_service.name):
+                continue
             self._add_candidate(
                 pool,
                 keyword=historical,
                 candidate_type="historical",
                 source_tag="historical",
+                business_service=business_service,
                 target_area=city,
             )
 
@@ -917,21 +1043,31 @@ class KeywordCampaignService:
         search_volume: int,
         competition: float,
         current_rank: float | None,
+        metric: KeywordMarketMetric,
+        business_service: BusinessService,
     ) -> ScoredCandidate:
         keyword = candidate["keyword"]
         normalized = candidate["normalized_keyword"]
         relevance = self._relevance_score(keyword=normalized, context=context, target_area=candidate.get("target_service_area"))
         volume_score = min(100.0, (max(0, search_volume) / 350.0) * 100.0)
         intent_score = self._intent_score(normalized)
-        ticket_score = self._ticket_value_score(normalized)
+        service_value_cents = business_service.service_value_cents or self._estimated_service_value_cents(normalized)
+        ticket_score = self._ticket_value_score(normalized, service_value_cents=service_value_cents)
         competition_score = max(0.0, min(100.0, competition * 100.0))
+        value_score, formula = self._value_based_score(
+            search_volume=search_volume,
+            metric=metric,
+            competition=competition,
+            service_value_cents=service_value_cents,
+        )
         opportunity = self._opportunity_score(current_rank=current_rank, target_area=candidate.get("target_service_area"), city=context.city)
         current_rank_score = self._current_rank_score(current_rank)
         already_dominant_penalty = 22.0 if current_rank is not None and current_rank <= 3.0 else 0.0
 
         weights = context.scoring_weights
         overall = (
-            relevance * weights["relevance"]
+            value_score * weights["value"]
+            + relevance * weights["relevance"]
             + intent_score * weights["intent"]
             + ticket_score * weights["ticket_value"]
             + volume_score * weights["search_volume"]
@@ -944,6 +1080,7 @@ class KeywordCampaignService:
             target_area=candidate.get("target_service_area"),
             city=context.city,
             ticket_score=ticket_score,
+            value_score=value_score,
             competition_score=competition_score,
             current_rank=current_rank,
             opportunity_score=opportunity,
@@ -955,6 +1092,8 @@ class KeywordCampaignService:
             current_rank=current_rank,
         )
         return ScoredCandidate(
+            business_service_id=business_service.id,
+            service_name=business_service.name,
             keyword=keyword,
             normalized_keyword=normalized,
             cluster_key=candidate["cluster_key"],
@@ -965,82 +1104,230 @@ class KeywordCampaignService:
             local_volume_score=round(volume_score, 2),
             intent_score=round(intent_score, 2),
             ticket_value_score=round(ticket_score, 2),
+            value_score=round(value_score, 2),
             competition_score=round(competition_score, 2),
             opportunity_score=round(opportunity, 2),
             current_rank_score=round(current_rank_score, 2),
             already_dominant_penalty=round(already_dominant_penalty, 2),
             overall_score=round(overall, 2),
             search_volume=search_volume,
+            average_cpc_micros=metric.average_cpc_micros,
+            top_of_page_bid_low_micros=metric.top_of_page_bid_low_micros,
+            top_of_page_bid_high_micros=metric.top_of_page_bid_high_micros,
             competition_estimate=round(competition, 4),
+            competition_index=metric.competition_index,
+            competition_level=metric.competition_level,
             current_rank=round(current_rank, 2) if current_rank is not None else None,
+            service_value_cents=service_value_cents,
+            provider=metric.provider,
+            source_query={**metric.source_query, "value_formula": formula},
             classifications=classifications,
             why_selected=why_selected,
         )
 
-    def _select_candidates(self, scored: list[ScoredCandidate]) -> tuple[list[ScoredCandidate], set[str]]:
+    def _select_candidates_by_service(
+        self,
+        *,
+        scored: list[ScoredCandidate],
+        business_services: list[BusinessService],
+        previous_active: list[SelectedKeyword],
+    ) -> tuple[list[ScoredCandidate], set[uuid.UUID], set[uuid.UUID]]:
+        per_service: dict[uuid.UUID, list[ScoredCandidate]] = defaultdict(list)
+        for candidate in scored:
+            if candidate.business_service_id:
+                per_service[candidate.business_service_id].append(candidate)
+
+        previous_by_service: dict[uuid.UUID, list[SelectedKeyword]] = defaultdict(list)
+        for previous in previous_active:
+            if previous.business_service_id:
+                previous_by_service[previous.business_service_id].append(previous)
+
         selected: list[ScoredCandidate] = []
-        rejected: set[str] = set()
-        selected_clusters: dict[str, int] = defaultdict(int)
+        retained_previous_ids: set[uuid.UUID] = set()
+        replaced_previous_ids: set[uuid.UUID] = set()
+        min_per_service = max(1, int(settings.KEYWORDS_PER_SERVICE_MIN))
+        max_per_service = max(min_per_service, int(settings.KEYWORDS_PER_SERVICE_MAX))
 
-        # Diversity-first pass.
-        for candidate in scored:
-            if len(selected) >= KEYWORD_SELECTION_TARGET:
-                break
-            cluster_hits = selected_clusters[candidate.cluster_key]
-            if cluster_hits >= 1 and candidate.overall_score < (selected[0].overall_score * 0.72 if selected else 0):
-                rejected.add(candidate.normalized_keyword)
+        for business_service in business_services:
+            candidates = sorted(
+                per_service.get(business_service.id, []),
+                key=lambda item: item.overall_score,
+                reverse=True,
+            )
+            if not candidates:
                 continue
-            if candidate.search_volume < 50 and candidate.intent_score < 55 and len(selected) < 8:
-                rejected.add(candidate.normalized_keyword)
-                continue
-            selected.append(candidate)
-            selected_clusters[candidate.cluster_key] += 1
+            slots = min(max_per_service, max(min_per_service, len(candidates)))
+            service_selected: list[ScoredCandidate] = []
+            selected_norms: set[str] = set()
+            selected_clusters: set[str] = set()
 
-        # Fill to exactly 10 if needed.
-        if len(selected) < KEYWORD_SELECTION_TARGET:
-            for candidate in scored:
-                if candidate in selected:
-                    continue
-                selected.append(candidate)
-                if len(selected) >= KEYWORD_SELECTION_TARGET:
+            for previous in sorted(
+                previous_by_service.get(business_service.id, []),
+                key=lambda row: self._keyword_performance_score(row),
+                reverse=True,
+            ):
+                if len(service_selected) >= slots:
                     break
-
-        selected = selected[:KEYWORD_SELECTION_TARGET]
-        selected_norm = {item.normalized_keyword for item in selected}
-        for candidate in scored:
-            if candidate.normalized_keyword not in selected_norm:
-                rejected.add(candidate.normalized_keyword)
-
-        if len(selected) < KEYWORD_SELECTION_TARGET and selected:
-            while len(selected) < KEYWORD_SELECTION_TARGET:
-                fallback = selected[-1]
-                suffix = len(selected) + 1
-                selected.append(
-                    ScoredCandidate(
-                        keyword=f"{fallback.keyword} {suffix}",
-                        normalized_keyword=f"{fallback.normalized_keyword}-{suffix}",
-                        cluster_key=fallback.cluster_key,
-                        target_service_area=fallback.target_service_area,
-                        candidate_type=fallback.candidate_type,
-                        source_tags=fallback.source_tags,
-                        relevance_score=fallback.relevance_score,
-                        local_volume_score=fallback.local_volume_score,
-                        intent_score=fallback.intent_score,
-                        ticket_value_score=fallback.ticket_value_score,
-                        competition_score=fallback.competition_score,
-                        opportunity_score=fallback.opportunity_score,
-                        current_rank_score=fallback.current_rank_score,
-                        already_dominant_penalty=fallback.already_dominant_penalty,
-                        overall_score=fallback.overall_score - 0.1,
-                        search_volume=fallback.search_volume,
-                        competition_estimate=fallback.competition_estimate,
-                        current_rank=fallback.current_rank,
-                        classifications=fallback.classifications,
-                        why_selected=fallback.why_selected,
-                    )
+                performance = self._keyword_performance_score(previous)
+                if performance < settings.KEYWORD_RETAIN_PERFORMANCE_THRESHOLD:
+                    replaced_previous_ids.add(previous.id)
+                    continue
+                retained = self._matching_or_retained_candidate(
+                    previous=previous,
+                    candidates=candidates,
+                    business_service=business_service,
+                    performance=performance,
                 )
+                if retained.normalized_keyword in selected_norms:
+                    continue
+                service_selected.append(retained)
+                selected_norms.add(retained.normalized_keyword)
+                selected_clusters.add(retained.cluster_key)
+                retained_previous_ids.add(previous.id)
 
-        return selected, rejected
+            for candidate in candidates:
+                if len(service_selected) >= slots:
+                    break
+                if candidate.normalized_keyword in selected_norms:
+                    continue
+                if candidate.cluster_key in selected_clusters and candidate.overall_score < candidates[0].overall_score * 0.72:
+                    continue
+                if candidate.search_volume < 20 and candidate.intent_score < 45 and len(service_selected) < min_per_service:
+                    continue
+                service_selected.append(candidate)
+                selected_norms.add(candidate.normalized_keyword)
+                selected_clusters.add(candidate.cluster_key)
+
+            for candidate in candidates:
+                if len(service_selected) >= min_per_service:
+                    break
+                if candidate.normalized_keyword not in selected_norms:
+                    service_selected.append(candidate)
+                    selected_norms.add(candidate.normalized_keyword)
+
+            selected.extend(service_selected[:slots])
+
+            retained_for_service = {row.id for row in previous_by_service.get(business_service.id, [])} & retained_previous_ids
+            for previous in previous_by_service.get(business_service.id, []):
+                if previous.id not in retained_for_service:
+                    replaced_previous_ids.add(previous.id)
+
+        selected.sort(key=lambda item: (item.service_name or "", -item.overall_score))
+        return selected, retained_previous_ids, replaced_previous_ids
+
+    def _matching_or_retained_candidate(
+        self,
+        *,
+        previous: SelectedKeyword,
+        candidates: list[ScoredCandidate],
+        business_service: BusinessService,
+        performance: float,
+    ) -> ScoredCandidate:
+        normalized = self._normalize_keyword(previous.keyword)
+        for candidate in candidates:
+            if candidate.normalized_keyword == normalized:
+                return ScoredCandidate(
+                    **{
+                        **candidate.__dict__,
+                        "source_tags": self._dedupe_preserve([*candidate.source_tags, "retained"]),
+                        "overall_score": max(candidate.overall_score, performance),
+                        "retained_from_selected_keyword_id": previous.id,
+                        "why_selected": "Retained because prior-cycle performance stayed above the replacement threshold.",
+                    }
+                )
+        score_breakdown = previous.score_breakdown_json or {}
+        return ScoredCandidate(
+            business_service_id=business_service.id,
+            service_name=business_service.name,
+            keyword=previous.keyword,
+            normalized_keyword=normalized,
+            cluster_key=f"{business_service.id}:{self._cluster_key(normalized)}",
+            target_service_area=previous.target_service_area,
+            candidate_type="retained_active_keyword",
+            source_tags=["retained", "previous_cycle"],
+            relevance_score=float(score_breakdown.get("relevance_score") or 70.0),
+            local_volume_score=float(score_breakdown.get("local_volume_score") or 50.0),
+            intent_score=float(score_breakdown.get("intent_score") or 50.0),
+            ticket_value_score=float(score_breakdown.get("ticket_value_score") or 50.0),
+            value_score=float(score_breakdown.get("value_score") or min(100.0, performance)),
+            competition_score=float(score_breakdown.get("competition_score") or 50.0),
+            opportunity_score=float(score_breakdown.get("opportunity_score") or 50.0),
+            current_rank_score=float(score_breakdown.get("current_rank_score") or 50.0),
+            already_dominant_penalty=float(score_breakdown.get("already_dominant_penalty") or 0.0),
+            overall_score=max(float(score_breakdown.get("overall_score") or performance), performance),
+            search_volume=previous.search_volume or 0,
+            average_cpc_micros=previous.average_cpc_micros,
+            top_of_page_bid_low_micros=previous.top_of_page_bid_low_micros,
+            top_of_page_bid_high_micros=previous.top_of_page_bid_high_micros,
+            competition_estimate=float(previous.competition_estimate or 0.5),
+            competition_index=previous.competition_index,
+            competition_level=previous.competition_level,
+            current_rank=previous.current_rank,
+            service_value_cents=previous.service_value_cents,
+            provider="retained_previous_cycle",
+            source_query={"previous_selected_keyword_id": str(previous.id), "performance_score": performance},
+            classifications=self._dedupe_preserve([*(previous.classifications_json or []), "retained"]),
+            why_selected="Retained because prior-cycle performance stayed above the replacement threshold.",
+            retained_from_selected_keyword_id=previous.id,
+        )
+
+    def _previous_active_keywords(self, *, location_id: uuid.UUID) -> list[SelectedKeyword]:
+        return (
+            self.db.query(SelectedKeyword)
+            .filter(SelectedKeyword.location_id == location_id)
+            .filter(SelectedKeyword.is_active == True)  # noqa: E712
+            .filter(SelectedKeyword.status == "active")
+            .order_by(SelectedKeyword.created_at.desc())
+            .all()
+        )
+
+    def _keyword_performance_score(self, row: SelectedKeyword) -> float:
+        performance = dict(row.performance_json or {})
+        explicit = performance.get("performance_score")
+        if isinstance(explicit, (int, float)):
+            return float(explicit)
+        score = float((row.score_breakdown_json or {}).get("overall_score") or 50.0)
+        if row.current_rank is not None:
+            if row.current_rank <= 3:
+                score += 16
+            elif row.current_rank <= 6:
+                score += 8
+            elif row.current_rank > 12:
+                score -= 12
+        published_posts = (
+            self.db.query(GbpPostKeywordMapping)
+            .filter(
+                GbpPostKeywordMapping.selected_keyword_id == row.id,
+                GbpPostKeywordMapping.status == "published",
+            )
+            .count()
+        )
+        score += min(12, published_posts * 4)
+        return max(0.0, min(100.0, round(score, 2)))
+
+    def _deactivate_previous_keywords(
+        self,
+        *,
+        previous_active: list[SelectedKeyword],
+        retained_previous_ids: set[uuid.UUID],
+        replaced_previous_ids: set[uuid.UUID],
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        for previous in previous_active:
+            previous.is_active = False
+            previous.active_until = now
+            if previous.id in retained_previous_ids:
+                previous.status = "retained"
+                previous.replacement_reason = "Retained into a newer cycle; superseded by current active row."
+            elif previous.id in replaced_previous_ids:
+                previous.status = "replaced"
+                previous.replacement_reason = "Below performance threshold or outscored by new service candidates."
+            else:
+                previous.status = "inactive"
+                previous.replacement_reason = "Deactivated by newer keyword campaign cycle."
+            self.db.add(previous)
+        if previous_active:
+            self.db.commit()
 
     def _persist_keyword_candidates_and_scores(
         self,
@@ -1051,20 +1338,51 @@ class KeywordCampaignService:
         selected: list[ScoredCandidate],
         score_weights: dict[str, float],
     ) -> list[SelectedKeyword]:
-        selected_lookup = {item.normalized_keyword: index + 1 for index, item in enumerate(selected)}
+        persist_candidates = list(scored_candidates)
+        scored_keys = {(item.business_service_id, item.normalized_keyword) for item in persist_candidates}
+        for item in selected:
+            key = (item.business_service_id, item.normalized_keyword)
+            if key not in scored_keys:
+                persist_candidates.append(item)
+                scored_keys.add(key)
+        selected_lookup = {
+            (item.business_service_id, item.normalized_keyword): index + 1
+            for index, item in enumerate(selected)
+        }
+        selected_item_lookup = {
+            (item.business_service_id, item.normalized_keyword): item
+            for item in selected
+        }
+        service_rank_order_lookup: dict[tuple[uuid.UUID | None, str], int] = {}
+        service_counts: dict[uuid.UUID | None, int] = defaultdict(int)
+        for item in selected:
+            key = (item.business_service_id, item.normalized_keyword)
+            service_counts[item.business_service_id] += 1
+            service_rank_order_lookup[key] = service_counts[item.business_service_id]
         selected_rows: list[SelectedKeyword] = []
-        for scored in scored_candidates:
-            is_selected = scored.normalized_keyword in selected_lookup
+        for scored in persist_candidates:
+            selected_key = (scored.business_service_id, scored.normalized_keyword)
+            is_selected = selected_key in selected_lookup
+            row_data = selected_item_lookup.get(selected_key, scored) if is_selected else scored
             candidate = KeywordCandidate(
                 organization_id=cycle.organization_id,
                 location_id=cycle.location_id,
                 campaign_cycle_id=cycle.id,
-                keyword=scored.keyword,
-                normalized_keyword=scored.normalized_keyword,
-                cluster_key=scored.cluster_key,
-                target_service_area=scored.target_service_area,
-                candidate_type=scored.candidate_type,
-                source_tags=scored.source_tags,
+                business_service_id=row_data.business_service_id,
+                keyword=row_data.keyword,
+                normalized_keyword=row_data.normalized_keyword,
+                cluster_key=row_data.cluster_key,
+                target_service_area=row_data.target_service_area,
+                candidate_type=row_data.candidate_type,
+                source_tags=row_data.source_tags,
+                provider=row_data.provider,
+                source_query_json=row_data.source_query,
+                avg_monthly_searches=row_data.search_volume,
+                average_cpc_micros=row_data.average_cpc_micros,
+                top_of_page_bid_low_micros=row_data.top_of_page_bid_low_micros,
+                top_of_page_bid_high_micros=row_data.top_of_page_bid_high_micros,
+                competition_index=row_data.competition_index,
+                competition_level=row_data.competition_level,
                 rejection_reason=None if is_selected else "Lower score or duplicate cluster than selected set",
                 is_selected=is_selected,
             )
@@ -1076,53 +1394,76 @@ class KeywordCampaignService:
                 location_id=cycle.location_id,
                 campaign_cycle_id=cycle.id,
                 candidate_id=candidate.id,
-                relevance_score=scored.relevance_score,
-                local_volume_score=scored.local_volume_score,
-                intent_score=scored.intent_score,
-                ticket_value_score=scored.ticket_value_score,
-                competition_score=scored.competition_score,
-                opportunity_score=scored.opportunity_score,
-                current_rank_score=scored.current_rank_score,
-                already_dominant_penalty=scored.already_dominant_penalty,
-                overall_score=scored.overall_score,
-                search_volume=scored.search_volume,
-                competition_estimate=scored.competition_estimate,
-                current_rank=scored.current_rank,
+                business_service_id=row_data.business_service_id,
+                relevance_score=row_data.relevance_score,
+                local_volume_score=row_data.local_volume_score,
+                intent_score=row_data.intent_score,
+                ticket_value_score=row_data.ticket_value_score,
+                value_score=row_data.value_score,
+                competition_score=row_data.competition_score,
+                opportunity_score=row_data.opportunity_score,
+                current_rank_score=row_data.current_rank_score,
+                already_dominant_penalty=row_data.already_dominant_penalty,
+                overall_score=row_data.overall_score,
+                search_volume=row_data.search_volume,
+                average_cpc_micros=row_data.average_cpc_micros,
+                top_of_page_bid_low_micros=row_data.top_of_page_bid_low_micros,
+                top_of_page_bid_high_micros=row_data.top_of_page_bid_high_micros,
+                competition_estimate=row_data.competition_estimate,
+                competition_index=row_data.competition_index,
+                current_rank=row_data.current_rank,
+                service_value_cents=row_data.service_value_cents,
                 score_weights_json=score_weights,
-                classifications_json=scored.classifications,
-                rationale=scored.why_selected,
+                score_formula_json=row_data.source_query.get("value_formula") if row_data.source_query else {},
+                classifications_json=row_data.classifications,
+                rationale=row_data.why_selected,
             )
             self.db.add(score)
 
             if is_selected:
-                rank_order = selected_lookup[scored.normalized_keyword]
+                rank_order = selected_lookup[selected_key]
+                service_rank_order = service_rank_order_lookup[selected_key]
                 selected_row = SelectedKeyword(
                     organization_id=cycle.organization_id,
                     location_id=cycle.location_id,
                     campaign_cycle_id=cycle.id,
                     candidate_id=candidate.id,
+                    business_service_id=row_data.business_service_id,
+                    previous_selected_keyword_id=row_data.retained_from_selected_keyword_id,
                     rank_order=rank_order,
-                    keyword=scored.keyword,
-                    target_service_area=scored.target_service_area,
-                    search_volume=scored.search_volume,
-                    competition_estimate=scored.competition_estimate,
-                    current_rank=scored.current_rank,
-                    intent_level=self._intent_label(scored.intent_score),
-                    competition_level=self._competition_label(scored.competition_score),
-                    selection_bucket=self._selection_bucket(scored.classifications),
-                    why_selected=scored.why_selected,
+                    service_rank_order=service_rank_order,
+                    keyword=row_data.keyword,
+                    target_service_area=row_data.target_service_area,
+                    search_volume=row_data.search_volume,
+                    average_cpc_micros=row_data.average_cpc_micros,
+                    top_of_page_bid_low_micros=row_data.top_of_page_bid_low_micros,
+                    top_of_page_bid_high_micros=row_data.top_of_page_bid_high_micros,
+                    competition_estimate=row_data.competition_estimate,
+                    competition_index=row_data.competition_index,
+                    current_rank=row_data.current_rank,
+                    service_value_cents=row_data.service_value_cents,
+                    intent_level=self._intent_label(row_data.intent_score),
+                    competition_level=self._competition_label(row_data.competition_score),
+                    selection_bucket=self._selection_bucket(row_data.classifications),
+                    status="active",
+                    is_active=True,
+                    is_primary=service_rank_order == 1,
+                    active_since=datetime.now(timezone.utc),
+                    performance_json={},
+                    why_selected=row_data.why_selected,
                     score_breakdown_json={
-                        "relevance_score": scored.relevance_score,
-                        "local_volume_score": scored.local_volume_score,
-                        "intent_score": scored.intent_score,
-                        "ticket_value_score": scored.ticket_value_score,
-                        "competition_score": scored.competition_score,
-                        "opportunity_score": scored.opportunity_score,
-                        "current_rank_score": scored.current_rank_score,
-                        "already_dominant_penalty": scored.already_dominant_penalty,
-                        "overall_score": scored.overall_score,
+                        "relevance_score": row_data.relevance_score,
+                        "local_volume_score": row_data.local_volume_score,
+                        "intent_score": row_data.intent_score,
+                        "ticket_value_score": row_data.ticket_value_score,
+                        "value_score": row_data.value_score,
+                        "competition_score": row_data.competition_score,
+                        "opportunity_score": row_data.opportunity_score,
+                        "current_rank_score": row_data.current_rank_score,
+                        "already_dominant_penalty": row_data.already_dominant_penalty,
+                        "overall_score": row_data.overall_score,
                     },
-                    classifications_json=scored.classifications,
+                    classifications_json=row_data.classifications,
                 )
                 self.db.add(selected_row)
                 selected_rows.append(selected_row)
@@ -1137,17 +1478,25 @@ class KeywordCampaignService:
         selected_keywords: list[SelectedKeyword],
     ) -> None:
         values = [item.keyword for item in sorted(selected_keywords, key=lambda row: row.rank_order)]
+        by_service: dict[str, list[str]] = defaultdict(list)
+        for item in sorted(selected_keywords, key=lambda row: row.rank_order):
+            service_name = item.business_service.name if item.business_service else "Unmapped service"
+            by_service[service_name].append(item.keyword)
         if not location.settings:
             location.settings = LocationSettings(
                 tenant_id=location.tenant_id,
                 location_id=location.id,
                 keywords=values,
-                settings_json={},
+                settings_json={
+                    "active_keyword_targets": values,
+                    "service_active_keyword_targets": dict(by_service),
+                },
             )
         else:
             location.settings.keywords = values
             settings_json = dict(location.settings.settings_json or {})
             settings_json["active_keyword_targets"] = values
+            settings_json["service_active_keyword_targets"] = dict(by_service)
             settings_json["keyword_target_updated_at"] = datetime.now(timezone.utc).isoformat()
             location.settings.settings_json = settings_json
         self.db.add(location)
@@ -1162,21 +1511,17 @@ class KeywordCampaignService:
         context: DiscoveryContext,
     ) -> None:
         top_keywords = [item.keyword for item in sorted(selected_keywords, key=lambda row: row.rank_order)]
-        keyword_snippet = ", ".join(top_keywords[:4])
-        description_suggestion = (
-            f"{location.name} helps customers with {keyword_snippet}. "
-            f"Serving {context.city or 'your area'} with responsive, high-quality service."
+        description_suggestion = self._profile_description_suggestion(
+            location=location,
+            context=context,
+            top_keywords=top_keywords,
+        )
+        service_description_payloads = self._service_description_payloads(
+            location=location,
+            selected_keywords=selected_keywords,
+            context=context,
         )
         action_specs = [
-            {
-                "action_type": "description_refresh",
-                "status": "pending_review",
-                "auto_apply": False,
-                "before": {"description": context.existing_description},
-                "after": {"description": description_suggestion},
-                "keywords": top_keywords[:5],
-                "notes": "Refresh GBP description using selected monthly terms without keyword stuffing.",
-            },
             {
                 "action_type": "service_name_expansion",
                 "status": "pending_review",
@@ -1185,15 +1530,6 @@ class KeywordCampaignService:
                 "after": {"suggested_services": self._service_expansion_suggestions(top_keywords)},
                 "keywords": top_keywords,
                 "notes": "Normalize and expand service naming with selected keyword themes.",
-            },
-            {
-                "action_type": "service_descriptions",
-                "status": "recommended",
-                "auto_apply": False,
-                "before": {},
-                "after": {"service_description_prompts": self._service_description_prompts(top_keywords)},
-                "keywords": top_keywords[:6],
-                "notes": "Use concise service descriptions tied to local intent terms.",
             },
             {
                 "action_type": "faq_qna_suggestions",
@@ -1232,6 +1568,22 @@ class KeywordCampaignService:
                 "notes": "Photo caption suggestions tied to target service terms.",
             },
         ]
+        if self._should_create_profile_description_refresh(location=location):
+            action_specs.insert(
+                0,
+                {
+                    "action_type": PROFILE_DESCRIPTION_ACTION_TYPE,
+                    "status": "pending_review",
+                    "auto_apply": False,
+                    "before": {"description": context.existing_description},
+                    "after": {"description": description_suggestion},
+                    "keywords": top_keywords[:5],
+                    "notes": (
+                        "Light profile optimization suggestion. Core profile copy stays stable; "
+                        "this action is throttled by profile refresh cadence."
+                    ),
+                },
+            )
 
         for spec in action_specs:
             action = GbpOptimizationAction(
@@ -1250,11 +1602,43 @@ class KeywordCampaignService:
             )
             self.db.add(action)
 
+        for payload in service_description_payloads:
+            primary_selected_keyword_id = payload.get("primary_selected_keyword_id")
+            action = GbpOptimizationAction(
+                organization_id=cycle.organization_id,
+                location_id=cycle.location_id,
+                campaign_cycle_id=cycle.id,
+                selected_keyword_id=(
+                    uuid.UUID(primary_selected_keyword_id)
+                    if isinstance(primary_selected_keyword_id, str) and primary_selected_keyword_id
+                    else primary_selected_keyword_id
+                ),
+                action_type=SERVICE_DESCRIPTION_ACTION_TYPE,
+                status="pending_review",
+                auto_apply_allowed=False,
+                before_value={
+                    "business_service_id": payload.get("business_service_id"),
+                    "service_name": payload.get("service_name"),
+                    "description": payload.get("current_description"),
+                },
+                after_value={
+                    "business_service_id": payload.get("business_service_id"),
+                    "service_name": payload.get("service_name"),
+                    "description": payload.get("suggested_description"),
+                    "template_id": payload.get("template_id"),
+                    "keywords": payload.get("keywords"),
+                },
+                source_keywords=payload.get("keywords") or [],
+                notes="Template-generated service description using service-specific active keywords and location data.",
+            )
+            self.db.add(action)
+
         if location.settings:
             settings_json = dict(location.settings.settings_json or {})
             settings_json["keyword_strategy"] = {
                 "cycle_id": str(cycle.id),
                 "description_suggestion": description_suggestion,
+                "service_description_suggestions": service_description_payloads,
                 "review_response_guidance": self._review_response_guidance(top_keywords),
                 "post_theme_suggestions": self._post_theme_suggestions(top_keywords),
             }
@@ -1269,12 +1653,20 @@ class KeywordCampaignService:
         location: Location,
         selected_keywords: list[SelectedKeyword],
     ) -> None:
-        ordered = sorted(selected_keywords, key=lambda row: row.rank_order)
+        ordered = sorted(
+            [
+                row
+                for row in selected_keywords
+                if row.is_active and row.status == "active" and row.business_service_id
+            ],
+            key=lambda row: row.rank_order,
+        )
         if not ordered:
             return
         month_days = calendar.monthrange(cycle.cycle_year, cycle.cycle_month)[1]
-        post_count = max(10, min(16, math.ceil(month_days / 3)))
-        interval = max(2, math.floor(month_days / post_count))
+        desired_posts = max(1, int(settings.KEYWORD_POSTS_PER_MONTH))
+        post_count = max(1, min(month_days, desired_posts))
+        interval = max(1, math.floor(month_days / post_count))
         publish_dates: list[date] = []
         cursor = date(cycle.cycle_year, cycle.cycle_month, 1)
         while len(publish_dates) < post_count:
@@ -1282,27 +1674,174 @@ class KeywordCampaignService:
             cursor = cursor + timedelta(days=interval)
             if cursor.month != cycle.cycle_month:
                 cursor = date(cycle.cycle_year, cycle.cycle_month, month_days)
+        service_groups: dict[uuid.UUID | None, list[SelectedKeyword]] = defaultdict(list)
+        for keyword in ordered:
+            service_groups[keyword.business_service_id].append(keyword)
+        grouped_order = [
+            group
+            for _service_id, group in sorted(
+                service_groups.items(),
+                key=lambda item: min(row.rank_order for row in item[1]),
+            )
+        ]
+        proximity_targets = self._gbp_proximity_targets(location)
+        planned_media_counts: dict[uuid.UUID, int] = defaultdict(int)
         for idx, publish_date in enumerate(publish_dates):
-            keyword_row = ordered[idx % len(ordered)]
-            angle, post_type = POST_ANGLE_ROTATION[idx % len(POST_ANGLE_ROTATION)]
+            group = grouped_order[idx % len(grouped_order)]
+            keyword_row = group[(idx // len(grouped_order)) % len(group)]
+            use_proximity = bool(proximity_targets) and idx % 4 == 0
+            proximity = proximity_targets[(idx // 4) % len(proximity_targets)] if use_proximity else None
+            angle, post_type = (
+                ("local_relevance_post", "update")
+                if use_proximity
+                else POST_ANGLE_ROTATION[idx % len(POST_ANGLE_ROTATION)]
+            )
+            service_name = keyword_row.business_service.name if keyword_row.business_service else None
+            image_theme = self._image_theme_for_post(idx=idx, angle=angle, service_name=service_name)
+            media_asset_id = self._select_monthly_media(
+                location_id=location.id,
+                service=service_name,
+                theme=image_theme,
+                planned_counts=planned_media_counts,
+            )
             mapping = GbpPostKeywordMapping(
                 organization_id=cycle.organization_id,
                 location_id=cycle.location_id,
                 campaign_cycle_id=cycle.id,
                 selected_keyword_id=keyword_row.id,
+                business_service_id=keyword_row.business_service_id,
                 post_candidate_id=None,
                 post_id=None,
                 target_keyword=keyword_row.keyword,
-                secondary_keywords=self._secondary_keyword_variations(keyword_row.keyword),
+                secondary_keywords=self._secondary_keyword_variations(keyword_row.keyword)[:2],
+                service_name=service_name,
                 post_angle=angle,
                 post_type=post_type,
                 cta=CTA_ROTATION[idx % len(CTA_ROTATION)],
-                suggested_image_theme=IMAGE_THEME_ROTATION[idx % len(IMAGE_THEME_ROTATION)],
+                suggested_image_theme=image_theme,
+                media_asset_id=media_asset_id,
+                proximity_target=proximity["target"] if proximity else None,
+                proximity_source=proximity["source"] if proximity else None,
                 publish_date=publish_date,
                 status="planned",
+                metadata_json={
+                    "post_mix": self._post_mix_label(angle),
+                    "location_strategy": "proximity" if proximity else "none",
+                    "keyword_group_index": idx,
+                    "source": "keyword_campaign_monthly_batch",
+                },
             )
             self.db.add(mapping)
         self.db.commit()
+
+    def _gbp_proximity_targets(self, location: Location) -> list[dict[str, str]]:
+        address = location.address or {}
+        values: list[dict[str, str]] = []
+        city = self._first_non_empty(
+            [
+                self._safe_str(address.get("city")),
+                self._safe_str(address.get("locality")),
+            ]
+        )
+        if city:
+            values.append({"target": city, "source": "gbp_city"})
+        service_area = address.get("serviceArea")
+        area_values = self._service_area_values(service_area)
+        for value in area_values:
+            values.append({"target": value, "source": "gbp_service_area"})
+        return self._dedupe_target_payloads(values)
+
+    def _service_area_values(self, service_area: Any) -> list[str]:
+        if not service_area:
+            return []
+        values: list[str] = []
+        if isinstance(service_area, str):
+            values.append(service_area)
+        elif isinstance(service_area, list):
+            values.extend(self._listify(service_area))
+        elif isinstance(service_area, dict):
+            values.extend(self._listify(service_area.get("places")))
+            places = service_area.get("places") if isinstance(service_area.get("places"), dict) else {}
+            values.extend(self._listify(places.get("placeInfos")))
+        return self._dedupe_preserve(values)
+
+    def _select_monthly_media(
+        self,
+        *,
+        location_id: uuid.UUID,
+        service: str | None,
+        theme: str | None,
+        planned_counts: dict[uuid.UUID, int],
+    ) -> uuid.UUID | None:
+        assets = self.db.query(MediaAsset).filter(MediaAsset.location_id == location_id).all()
+        if not assets:
+            return None
+        service_tokens = self._token_set([service])
+        theme_tokens = self._token_set([theme])
+
+        def score(asset: MediaAsset) -> tuple[float, int, int, float]:
+            tags = self._media_tags(asset)
+            relevance = 0.0
+            if service_tokens and service_tokens & tags:
+                relevance += 3.0
+            if theme_tokens and theme_tokens & tags:
+                relevance += 2.0
+            if not service_tokens and not theme_tokens:
+                relevance += 1.0
+            last_used = asset.last_used_at.timestamp() if asset.last_used_at else 0.0
+            return (-relevance, planned_counts[asset.id], int(asset.usage_count or 0), last_used)
+
+        selected = sorted(assets, key=score)[0]
+        planned_counts[selected.id] += 1
+        return selected.id
+
+    def _media_tags(self, asset: MediaAsset) -> set[str]:
+        values: list[str | None] = [asset.file_name, asset.description, asset.job_type, asset.season, asset.shot_stage]
+        for item in asset.categories or []:
+            values.append(str(item))
+        metadata = asset.metadata_json or {}
+        for item in metadata.get("tags") or metadata.get("service_tags") or []:
+            values.append(str(item))
+        return self._token_set(values)
+
+    @staticmethod
+    def _image_theme_for_post(*, idx: int, angle: str, service_name: str | None) -> str:
+        if angle == "before_after_post":
+            return "before-and-after"
+        if angle == "trust_post":
+            return "customer-success"
+        if angle == "seasonal_post":
+            return "seasonal-service-scene"
+        if angle == "local_relevance_post":
+            return "team-at-work"
+        return service_name or IMAGE_THEME_ROTATION[idx % len(IMAGE_THEME_ROTATION)]
+
+    @staticmethod
+    def _post_mix_label(angle: str) -> str:
+        return {
+            "service_post": "service",
+            "educational_post": "education",
+            "seasonal_post": "seasonal",
+            "trust_post": "social_proof",
+            "before_after_post": "before_after",
+            "offer_post": "promotion",
+            "local_relevance_post": "proximity",
+        }.get(angle, "service")
+
+    @staticmethod
+    def _dedupe_target_payloads(values: list[dict[str, str]]) -> list[dict[str, str]]:
+        result: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for item in values:
+            target = str(item.get("target") or "").strip()
+            if not target:
+                continue
+            key = target.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append({"target": target, "source": item.get("source") or "gbp"})
+        return result
 
     def _run_geo_grid_scans_for_cycle(
         self,
@@ -1514,6 +2053,8 @@ class KeywordCampaignService:
         return {
             "selected_score_breakdowns": [
                 {
+                    "business_service_id": str(item.business_service_id) if item.business_service_id else None,
+                    "service_name": item.business_service.name if item.business_service else None,
                     "keyword": item.keyword,
                     "why_selected": item.why_selected,
                     "classifications": item.classifications_json or [],
@@ -1690,6 +2231,104 @@ class KeywordCampaignService:
         )
         return [row.keyword.lower() for row in rows]
 
+    def _sync_business_services(self, location: Location) -> list[BusinessService]:
+        service_entries = self._service_entries(location)
+        if not service_entries:
+            fallback = self._first_non_empty(
+                [
+                    self._safe_str((location.address or {}).get("primaryCategory")),
+                    self._safe_str((location.address or {}).get("category")),
+                    "local service",
+                ]
+            )
+            service_entries = [{"name": fallback or "local service", "source": "fallback"}]
+
+        existing = {
+            row.normalized_name: row
+            for row in self.db.query(BusinessService)
+            .filter(
+                BusinessService.organization_id == location.organization_id,
+                BusinessService.location_id == location.id,
+            )
+            .all()
+        }
+        active_names: set[str] = set()
+        rows: list[BusinessService] = []
+        for entry in service_entries:
+            name = self._clean_term(self._safe_str(entry.get("name")) or "")
+            if not name:
+                continue
+            normalized = self._normalize_keyword(name)
+            active_names.add(normalized)
+            service_value_cents = self._service_value_cents_from_entry(entry, name)
+            row = existing.get(normalized)
+            if not row:
+                row = BusinessService(
+                    organization_id=location.organization_id,
+                    location_id=location.id,
+                    name=name,
+                    normalized_name=normalized,
+                    description=self._safe_str(entry.get("description")),
+                    service_value_cents=service_value_cents,
+                    source=self._safe_str(entry.get("source")) or "settings",
+                    is_active=True,
+                    metadata_json=self._service_metadata(entry),
+                )
+            else:
+                row.name = name
+                row.description = self._safe_str(entry.get("description")) or row.description
+                row.service_value_cents = service_value_cents or row.service_value_cents
+                row.is_active = True
+                row.metadata_json = {**(row.metadata_json or {}), **self._service_metadata(entry)}
+            self.db.add(row)
+            rows.append(row)
+
+        for normalized, row in existing.items():
+            if normalized not in active_names:
+                row.is_active = False
+                self.db.add(row)
+
+        self.db.commit()
+        for row in rows:
+            self.db.refresh(row)
+        return [row for row in rows if row.is_active]
+
+    def _service_entries(self, location: Location) -> list[dict[str, Any]]:
+        if not location.settings or not location.settings.services:
+            return []
+        entries: list[dict[str, Any]] = []
+        for item in location.settings.services:
+            if isinstance(item, str):
+                entries.append({"name": item, "source": "settings"})
+            elif isinstance(item, dict):
+                label = item.get("name") or item.get("title") or item.get("service")
+                if isinstance(label, str):
+                    entries.append({**item, "name": label})
+        return entries
+
+    def _service_value_cents_from_entry(self, entry: dict[str, Any], name: str) -> int:
+        for key in ("service_value_cents", "ticket_price_cents", "value_cents"):
+            value = entry.get(key)
+            if isinstance(value, (int, float)) and value > 0:
+                return int(value)
+        for key in ("service_value", "ticket_price", "value", "price"):
+            value = entry.get(key)
+            if isinstance(value, (int, float)) and value > 0:
+                return int(float(value) * 100)
+            if isinstance(value, str):
+                cleaned = re.sub(r"[^0-9.]", "", value)
+                if cleaned:
+                    return int(float(cleaned) * 100)
+        return self._estimated_service_value_cents(self._normalize_keyword(name))
+
+    @staticmethod
+    def _service_metadata(entry: dict[str, Any]) -> dict[str, Any]:
+        metadata = entry.get("metadata_json") if isinstance(entry.get("metadata_json"), dict) else {}
+        return {
+            **metadata,
+            "description_source": entry.get("source"),
+        }
+
     def _extract_services(self, location: Location) -> list[str]:
         if not location.settings or not location.settings.services:
             return []
@@ -1746,13 +2385,48 @@ class KeywordCampaignService:
             score += 18
         return min(100.0, score)
 
-    def _ticket_value_score(self, keyword: str) -> float:
+    def _estimated_service_value_cents(self, keyword: str) -> int:
+        lowered = keyword.lower()
+        base = DEFAULT_SERVICE_VALUE_CENTS
+        for token, value in HIGH_TICKET_TOKENS.items():
+            if token in lowered:
+                base += value * 2_500
+        return max(15_000, min(base, 250_000))
+
+    def _ticket_value_score(self, keyword: str, *, service_value_cents: int | None = None) -> float:
         score = 20.0
         lowered = keyword.lower()
         for token, value in HIGH_TICKET_TOKENS.items():
             if token in lowered:
                 score += value
+        if service_value_cents:
+            score += min(45.0, max(0.0, (service_value_cents / 100.0) / 40.0))
         return min(100.0, score)
+
+    def _value_based_score(
+        self,
+        *,
+        search_volume: int,
+        metric: KeywordMarketMetric,
+        competition: float,
+        service_value_cents: int,
+    ) -> tuple[float, dict[str, Any]]:
+        cpc_micros = metric.average_cpc_micros
+        if not cpc_micros and metric.top_of_page_bid_low_micros and metric.top_of_page_bid_high_micros:
+            cpc_micros = int((metric.top_of_page_bid_low_micros + metric.top_of_page_bid_high_micros) / 2)
+        cpc_dollars = max(0.10, (cpc_micros or 100_000) / 1_000_000.0)
+        ticket_price = max(1.0, service_value_cents / 100.0)
+        competition_divisor = max(0.15, competition)
+        raw = (max(1, search_volume) * cpc_dollars * ticket_price) / competition_divisor
+        score = min(100.0, math.log10(raw + 1.0) * 18.0)
+        return round(score, 2), {
+            "formula": "(volume * cpc * ticket_price) / competition",
+            "volume": search_volume,
+            "cpc": round(cpc_dollars, 4),
+            "ticket_price": round(ticket_price, 2),
+            "competition": round(competition_divisor, 4),
+            "raw": round(raw, 4),
+        }
 
     def _opportunity_score(self, *, current_rank: float | None, target_area: str | None, city: str | None) -> float:
         if current_rank is None:
@@ -1781,6 +2455,7 @@ class KeywordCampaignService:
         target_area: str | None,
         city: str | None,
         ticket_score: float,
+        value_score: float,
         competition_score: float,
         current_rank: float | None,
         opportunity_score: float,
@@ -1793,6 +2468,8 @@ class KeywordCampaignService:
             labels.append("expansion_opportunity")
         if ticket_score >= 68:
             labels.append("high_ticket_opportunity")
+        if value_score >= 72:
+            labels.append("value_opportunity")
         if competition_score <= 38:
             labels.append("low_competition_opportunity")
         if current_rank is not None and 4 <= current_rank <= 10:
@@ -1829,6 +2506,8 @@ class KeywordCampaignService:
             return "service_area_opportunity"
         if "high_ticket_opportunity" in classifications:
             return "high_ticket_opportunity"
+        if "value_opportunity" in classifications:
+            return "value_opportunity"
         if "low_competition_opportunity" in classifications:
             return "low_competition_opportunity"
         return "expansion_opportunity"
@@ -1848,6 +2527,105 @@ class KeywordCampaignService:
         if competition_score <= 66:
             return "medium"
         return "high"
+
+    def _profile_description_suggestion(
+        self,
+        *,
+        location: Location,
+        context: DiscoveryContext,
+        top_keywords: list[str],
+    ) -> str:
+        primary_terms = ", ".join(top_keywords[:3])
+        city = context.city or "the local area"
+        if context.existing_description and len(context.existing_description) >= 180:
+            return (
+                f"{context.existing_description.strip()} "
+                f"Customers in {city} can also contact {location.name} for {primary_terms}."
+            )[:750]
+        return (
+            f"{location.name} provides practical local support for {primary_terms}. "
+            f"Serving {city} with clear communication, timely scheduling, and reliable service."
+        )
+
+    def _service_description_payloads(
+        self,
+        *,
+        location: Location,
+        selected_keywords: list[SelectedKeyword],
+        context: DiscoveryContext,
+    ) -> list[dict[str, Any]]:
+        by_service: dict[uuid.UUID, list[SelectedKeyword]] = defaultdict(list)
+        for selected in selected_keywords:
+            if selected.business_service_id:
+                by_service[selected.business_service_id].append(selected)
+        if not by_service:
+            return []
+        services = {
+            row.id: row
+            for row in self.db.query(BusinessService)
+            .filter(BusinessService.id.in_(list(by_service)))
+            .all()
+        }
+        payloads: list[dict[str, Any]] = []
+        for service_id, keywords in by_service.items():
+            service = services.get(service_id)
+            if not service:
+                continue
+            ordered = sorted(keywords, key=lambda row: row.service_rank_order or row.rank_order)
+            keyword_values = [row.keyword for row in ordered[:3]]
+            primary = ordered[0]
+            description = self._render_service_description(
+                service_name=service.name,
+                keywords=keyword_values,
+                city=context.city,
+                state=context.state,
+                business_name=location.name,
+            )
+            payloads.append(
+                {
+                    "business_service_id": str(service.id),
+                    "service_name": service.name,
+                    "primary_selected_keyword_id": str(primary.id),
+                    "current_description": service.description,
+                    "suggested_description": description,
+                    "keywords": keyword_values,
+                    "template_id": "service_keyword_location_v1",
+                }
+            )
+        return payloads
+
+    @staticmethod
+    def _render_service_description(
+        *,
+        service_name: str,
+        keywords: list[str],
+        city: str | None,
+        state: str | None,
+        business_name: str,
+    ) -> str:
+        location = ", ".join([part for part in [city, state] if part]) or "the local area"
+        primary_keyword = keywords[0] if keywords else service_name
+        secondary = keywords[1] if len(keywords) > 1 else service_name
+        return (
+            f"{business_name} provides {service_name} for customers in {location}. "
+            f"Our team keeps the process clear, responsive, and focused on outcomes for {primary_keyword}. "
+            f"Ask us about {secondary} when planning your next service visit."
+        )
+
+    def _should_create_profile_description_refresh(self, *, location: Location) -> bool:
+        cadence_days = max(30, int(settings.PROFILE_DESCRIPTION_REFRESH_DAYS))
+        cutoff = datetime.now(timezone.utc) - timedelta(days=cadence_days)
+        recent = (
+            self.db.query(GbpOptimizationAction)
+            .filter(
+                GbpOptimizationAction.organization_id == location.organization_id,
+                GbpOptimizationAction.location_id == location.id,
+                GbpOptimizationAction.action_type == PROFILE_DESCRIPTION_ACTION_TYPE,
+                GbpOptimizationAction.created_at >= cutoff,
+            )
+            .first()
+        )
+        return recent is None
 
     @staticmethod
     def _service_expansion_suggestions(keywords: list[str]) -> list[str]:
@@ -1922,20 +2700,44 @@ class KeywordCampaignService:
         keyword: str,
         candidate_type: str,
         source_tag: str,
+        business_service: BusinessService,
         target_area: str | None = None,
     ) -> None:
-        cleaned = self._clean_term(keyword)
-        if not cleaned:
+        payload = self._candidate_payload(
+            keyword=keyword,
+            candidate_type=candidate_type,
+            source_tag=source_tag,
+            business_service=business_service,
+            target_area=target_area,
+        )
+        if not payload:
             return
-        normalized = self._normalize_keyword(cleaned)
-        cluster_key = self._cluster_key(normalized)
+        normalized = payload["normalized_keyword"]
         if normalized in pool:
             tags = list(pool[normalized].get("source_tags") or [])
             if source_tag not in tags:
                 tags.append(source_tag)
                 pool[normalized]["source_tags"] = tags
             return
-        pool[normalized] = {
+        pool[normalized] = payload
+
+    def _candidate_payload(
+        self,
+        *,
+        keyword: str,
+        candidate_type: str,
+        source_tag: str,
+        business_service: BusinessService,
+        target_area: str | None = None,
+    ) -> dict[str, Any]:
+        cleaned = self._clean_term(keyword)
+        if not cleaned:
+            return {}
+        normalized = self._normalize_keyword(cleaned)
+        cluster_key = f"{business_service.id}:{self._cluster_key(normalized)}"
+        return {
+            "business_service_id": business_service.id,
+            "service_name": business_service.name,
             "keyword": cleaned,
             "normalized_keyword": normalized,
             "cluster_key": cluster_key,
@@ -1992,7 +2794,7 @@ class KeywordCampaignService:
                     if cleaned:
                         items.append(cleaned)
                 elif isinstance(item, dict):
-                    for key in ("name", "label", "city", "service"):
+                    for key in ("name", "label", "city", "service", "placeName", "displayName"):
                         if key in item and isinstance(item[key], str):
                             cleaned = cls._clean_term(item[key])
                             if cleaned:
@@ -2022,6 +2824,13 @@ class KeywordCampaignService:
                 if cleaned and cleaned not in STOP_WORDS:
                     tokens.add(cleaned)
         return tokens
+
+    def _term_matches_service(self, term: str, service_name: str) -> bool:
+        service_tokens = self._token_set([service_name])
+        term_tokens = self._token_set([term])
+        if not service_tokens or not term_tokens:
+            return False
+        return bool(service_tokens & term_tokens)
 
     @staticmethod
     def _dedupe_preserve(values: Iterable[str]) -> list[str]:
@@ -2138,12 +2947,25 @@ class KeywordCampaignSchedulerService:
         return scheduled
 
     def _is_monthly_eligible(self, organization: Organization, location: Location) -> bool:
-        return self._onboarding_completed(organization) and self._has_core_profile_fields(location)
+        return self._onboarding_completed(organization) and self._automation_ready(organization, location)
 
     def _is_ready_for_first_run(self, organization: Organization, location: Location) -> bool:
         if not self._onboarding_completed(organization):
             return False
-        return self._has_core_profile_fields(location)
+        return self._automation_ready(organization, location)
+
+    def _automation_ready(self, organization: Organization, location: Location) -> bool:
+        from backend.app.services.google_business.readiness import GbpReadinessService
+
+        try:
+            state = GbpReadinessService(self.db).calculate(
+                organization_id=organization.id,
+                location_id=location.id,
+                persist=True,
+            )
+        except ValueError:
+            return False
+        return bool(state.get("ready"))
 
     def _has_core_profile_fields(self, location: Location) -> bool:
         settings_json = dict(location.settings.settings_json or {}) if location.settings else {}

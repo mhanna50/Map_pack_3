@@ -31,6 +31,9 @@ class GbpPostKeywordMapping(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     selected_keyword_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("selected_keywords.id")
     )
+    business_service_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("business_services.id")
+    )
     post_candidate_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("post_candidates.id")
     )
@@ -39,16 +42,23 @@ class GbpPostKeywordMapping(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     target_keyword: Mapped[str] = mapped_column(String(255), nullable=False)
     secondary_keywords: Mapped[list[str] | None] = mapped_column(JSONB, default=list)
+    service_name: Mapped[str | None] = mapped_column(String(255))
     post_angle: Mapped[str] = mapped_column(String(64), nullable=False)
     post_type: Mapped[str] = mapped_column(String(32), nullable=False, default="update")
     cta: Mapped[str | None] = mapped_column(String(255))
     suggested_image_theme: Mapped[str | None] = mapped_column(String(255))
+    media_asset_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("media_assets.id"))
+    proximity_target: Mapped[str | None] = mapped_column(String(128))
+    proximity_source: Mapped[str | None] = mapped_column(String(64))
     publish_date: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="planned", nullable=False)
+    metadata_json: Mapped[dict | None] = mapped_column(JSONB, default=dict)
 
     organization = relationship("Organization")
     location = relationship("Location")
     campaign_cycle = relationship("KeywordCampaignCycle")
     selected_keyword = relationship("SelectedKeyword")
+    business_service = relationship("BusinessService")
     post_candidate = relationship("PostCandidate")
     post = relationship("Post")
+    media_asset = relationship("MediaAsset")

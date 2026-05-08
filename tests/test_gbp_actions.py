@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from backend.app.models.automation.action import Action
 from backend.app.models.enums import ActionType, OrganizationType, PostStatus, PostType
+from backend.app.models.google_business.listing_audit import ListingAudit
 from backend.app.models.google_business.location import Location
 from backend.app.models.identity.organization import Organization
 from backend.app.models.posts.post import Post
@@ -25,6 +26,19 @@ def _setup_post(db_session):
         status=PostStatus.SCHEDULED,
     )
     db_session.add(post)
+    db_session.add(
+        ListingAudit(
+            organization_id=org.id,
+            location_id=location.id,
+            category="Test",
+            audited_at=datetime.now(timezone.utc),
+            status="completed",
+            completed_at=datetime.now(timezone.utc),
+            profile_completeness_score=100,
+            trigger_source="test",
+            summary_json={},
+        )
+    )
     db_session.commit()
     return org, location, post
 

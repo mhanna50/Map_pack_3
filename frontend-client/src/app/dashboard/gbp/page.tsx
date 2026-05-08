@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { useTenant } from "@/features/tenants/tenant-context";
 import { listPostJobs, listPosts } from "@/lib/db";
 import { format } from "@/lib/date-utils";
+import { fetchBackendJson } from "@/lib/backend-api";
 
 type Post = {
   id: string | number;
@@ -43,6 +44,17 @@ type PostJob = {
   template_id?: string | null;
 };
 
+type AutomationPost = {
+  id: string;
+  service_name?: string | null;
+  keyword?: string | null;
+  proximity_target?: string | null;
+  assigned_photo?: { file_name?: string | null; source?: string | null } | null;
+  status?: string | null;
+  generated_at?: string | null;
+  scheduled_publish_date?: string | null;
+};
+
 const statusColorMap: Record<string, string> = {
   published: "var(--chart-2)",
   scheduled: "var(--chart-1)",
@@ -51,9 +63,10 @@ const statusColorMap: Record<string, string> = {
 };
 
 export default function GbpPage() {
-  const { tenantId, selectedLocationId, refresh: refreshTenant } = useTenant();
+  const { tenantId, selectedLocationId, refresh: refreshTenant, supabase } = useTenant();
   const [posts, setPosts] = useState<Post[]>([]);
   const [jobs, setJobs] = useState<PostJob[]>([]);
+  const [automationPosts, setAutomationPosts] = useState<AutomationPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -73,13 +86,19 @@ export default function GbpPage() {
       setLoading(true);
       setError(null);
       try {
-        const [postData, jobData] = await Promise.all([
+        const [postData, jobData, automationData] = await Promise.all([
           listPosts(tenantId, selectedLocationId ?? undefined, { limit: 25 }),
           listPostJobs(tenantId, selectedLocationId ?? undefined, { limit: 10 }),
+          fetchBackendJson<AutomationPost[]>(
+            "/posts/automation-plan",
+            { query: { organization_id: tenantId, location_id: selectedLocationId ?? undefined } },
+            supabase,
+          ).catch(() => []),
         ]);
         if (!active) return;
         setPosts((postData ?? []) as Post[]);
         setJobs((jobData ?? []) as PostJob[]);
+        setAutomationPosts(automationData ?? []);
       } catch (err: unknown) {
         if (!active) return;
         const message = err instanceof Error ? err.message : "Failed to load GBP data";
@@ -92,7 +111,7 @@ export default function GbpPage() {
     return () => {
       active = false;
     };
-  }, [tenantId, selectedLocationId, refreshKey]);
+  }, [tenantId, selectedLocationId, refreshKey, supabase]);
 
   const engagementTrend = useMemo(() => {
     return [...posts]
@@ -241,17 +260,37 @@ export default function GbpPage() {
                   onAction={() => {}}
                 />
               ) : (
-                jobs.map((job, index) => (
-                  <div key={job.id?.toString?.() ?? `job-${index}`} className="flex items-center justify-between rounded-lg border border-border bg-white/60 px-3 py-2 text-sm">
-                    <div>
-                      <p className="font-semibold">{job.template_id ?? "Scheduled post"}</p>
-                      <p className="text-xs text-muted-foreground">{format(job.scheduled_for)}</p>
-                    </div>
-                    <Badge variant="muted" className="capitalize">
-                      {job.status ?? "scheduled"}
-                    </Badge>
-                  </div>
-                ))
+                <Table>
+                  <THead>
+                    <TR>
+                      <TH>Scheduled</TH>
+                      <TH>Service</TH>
+                      <TH>Keyword</TH>
+                      <TH>Proximity</TH>
+                      <TH>Photo</TH>
+                      <TH>Status</TH>
+                      <TH>Generated</TH>
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {(automationPosts.length ? automationPosts : jobs.map((job): AutomationPost => ({
+                      id: String(job.id),
+                      service_name: job.template_id ?? "Scheduled post",
+                      status: job.status,
+                      scheduled_publish_date: job.scheduled_for,
+                    }))).map((item, index) => (
+                      <TR key={item.id ?? `automation-post-${index}`}>
+                        <TD>{format(item.scheduled_publish_date)}</TD>
+                        <TD>{item.service_name ?? "-"}</TD>
+                        <TD className="font-medium">{item.keyword ?? "-"}</TD>
+                        <TD>{item.proximity_target ?? "-"}</TD>
+                        <TD>{item.assigned_photo?.file_name ?? "-"}</TD>
+                        <TD><Badge variant="muted" className="capitalize">{item.status ?? "scheduled"}</Badge></TD>
+                        <TD>{format(item.generated_at)}</TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
               )}
             </CardContent>
           </Card>

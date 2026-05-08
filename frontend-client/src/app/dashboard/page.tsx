@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { CalendarClock, Sparkles, TrendingUp } from "lucide-react";
 import {
   Area,
@@ -29,6 +30,15 @@ import {
   listPosts,
   listReviewRequests,
 } from "@/lib/db";
+import { fetchBackendJson } from "@/lib/backend-api";
+
+type GbpAuditPayload = {
+  latest: { profile_completeness_score: number | null; audited_at: string | null } | null;
+  user_action_required_items: unknown[];
+  auto_fixable_items: unknown[];
+  popup?: { should_show?: boolean; action_required?: boolean };
+  readiness?: { status: string; ready: boolean; blocking_reasons?: string[] };
+};
 
 type ActivityItem = {
   id: string | number;
@@ -56,7 +66,7 @@ type ReviewRow = {
 };
 
 export default function DashboardPage() {
-  const { tenantId, locations, selectedLocationId, refresh: refreshTenant, loading: contextLoading } = useTenant();
+  const { tenantId, locations, selectedLocationId, refresh: refreshTenant, loading: contextLoading, supabase } = useTenant();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [kpis, setKpis] = useState({
@@ -69,6 +79,7 @@ export default function DashboardPage() {
   const [postRows, setPostRows] = useState<PostRow[]>([]);
   const [reviewRows, setReviewRows] = useState<ReviewRow[]>([]);
   const [recommendation, setRecommendation] = useState<string | null>(null);
+  const [gbpAudit, setGbpAudit] = useState<GbpAuditPayload | null>(null);
   const [statusMeta, setStatusMeta] = useState<{ lastPost?: string | null; nextPost?: string | null }>({});
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -87,18 +98,26 @@ export default function DashboardPage() {
       setLoading(true);
       setError(null);
       try {
-        const [kpiData, recentPosts, scheduled, reviewRequests, assets] = await Promise.all([
+        const [kpiData, recentPosts, scheduled, reviewRequests, assets, auditPayload] = await Promise.all([
           getDashboardKpis(tenantId, selectedLocationId ?? undefined),
           listPosts(tenantId, selectedLocationId ?? undefined, { limit: 60 }),
           listPostJobs(tenantId, selectedLocationId ?? undefined, { limit: 1 }),
           listReviewRequests(tenantId, selectedLocationId ?? undefined, { limit: 60 }),
           listContentAssets(tenantId, selectedLocationId ?? undefined, { limit: 5 }),
+          selectedLocationId
+            ? fetchBackendJson<GbpAuditPayload>(
+                `/optimization/gbp-audit/locations/${selectedLocationId}/latest`,
+                { query: { organization_id: tenantId } },
+                supabase,
+              ).catch(() => null)
+            : Promise.resolve(null),
         ]);
 
         if (!active) return;
         setKpis(kpiData);
         setPostRows((recentPosts ?? []) as PostRow[]);
         setReviewRows((reviewRequests ?? []) as ReviewRow[]);
+        setGbpAudit(auditPayload);
 
         const mappedPosts: ActivityItem[] = (recentPosts ?? [])
           .slice(0, 5)
@@ -154,7 +173,7 @@ export default function DashboardPage() {
     return () => {
       active = false;
     };
-  }, [tenantId, selectedLocationId, refreshKey]);
+  }, [tenantId, selectedLocationId, refreshKey, supabase]);
 
   const connectedLocations = useMemo(
     () => locations.filter((loc) => Boolean(loc.gbp_location_id)),
@@ -246,6 +265,22 @@ export default function DashboardPage() {
   return (
     <DashboardShell onRefresh={handleRefresh}>
       <div className="space-y-6">
+        {gbpAudit && !gbpAudit.readiness?.ready && (
+          <Card className="border-amber-200 bg-amber-50">
+            <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+              <div>
+                <p className="font-semibold">GBP setup required</p>
+                <p className="text-sm text-muted-foreground">
+                  {(gbpAudit.readiness?.status ?? "audit_required").replaceAll("_", " ")}. {gbpAudit.user_action_required_items.length} manual actions need review.
+                </p>
+              </div>
+              <Link className="inline-flex h-10 items-center rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground" href="/dashboard/gbp-audit">
+                Open GBP Audit
+              </Link>
+            </CardContent>
+          </Card>
+        )}
+
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <KpiCard label="Posts this month" value={kpis.postsThisMonth} delta="Auto-published" icon={<TrendingUp className="h-5 w-5 text-primary" />} />
           <KpiCard label="Scheduled posts" value={kpis.scheduledPosts} delta="Next 14 days" icon={<CalendarClock className="h-5 w-5 text-primary" />} />

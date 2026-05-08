@@ -32,7 +32,19 @@ ANGLES = [
     "seasonal_reminder",
     "maintenance_guidance",
     "credibility",
+    "before_after_style",
+    "local_proximity",
 ]
+
+KEYWORD_ANGLE_MAP = {
+    "service_post": "service_highlight",
+    "educational_post": "educational",
+    "seasonal_post": "seasonal_reminder",
+    "trust_post": "credibility",
+    "before_after_post": "before_after_style",
+    "local_relevance_post": "local_proximity",
+    "offer_post": "service_highlight",
+}
 
 TONE_INSTRUCTIONS = {
     "friendly": "Warm, approachable, and helpful.",
@@ -66,7 +78,7 @@ class PostCompositionService:
         service_name = self._rotate_service(candidate)
         angle = self._rotate_angle(candidate)
         cta = self._rotate_cta(candidate)
-        location_text = self._location_text(candidate)
+        location_text = self._posting_location_text(candidate)
         category = self._location_category(candidate)
         seasonal_hint = self._seasonal_hint(candidate.candidate_date)
         offer_context = offers[0] if offers else None
@@ -79,14 +91,16 @@ class PostCompositionService:
 
         # Best effort GBP media import so existing GBP photos share the same local media pool.
         self._sync_gbp_media_best_effort(candidate)
-        media = self.media_selector.pick_asset(
-            location_id=candidate.location_id,
-            service=service_name,
-            theme=angle,
-            prefer_upload=True,
-            min_reuse_gap_days=int(merged.get("photo_reuse_gap_days", 14)),
-            mark_used=False,
-        )
+        media = self._planned_media(candidate)
+        if media is None:
+            media = self.media_selector.pick_asset(
+                location_id=candidate.location_id,
+                service=service_name,
+                theme=self._image_theme(candidate, angle),
+                prefer_upload=True,
+                min_reuse_gap_days=int(merged.get("photo_reuse_gap_days", 14)),
+                mark_used=False,
+            )
 
         generated = self._generate_caption_openai(
             business_name=candidate.location.name,
@@ -209,6 +223,10 @@ class PostCompositionService:
         return PostType.UPDATE
 
     def _rotate_service(self, candidate: PostCandidate) -> str:
+        reason = candidate.reason_json or {}
+        mapped_service = reason.get("service_name")
+        if isinstance(mapped_service, str) and mapped_service.strip():
+            return mapped_service.strip()
         candidates = self._service_candidates(candidate)
         selected = self.rotation.select_next(
             organization_id=candidate.organization_id,
@@ -219,6 +237,10 @@ class PostCompositionService:
         return selected or candidates[0]
 
     def _rotate_angle(self, candidate: PostCandidate) -> str:
+        reason = candidate.reason_json or {}
+        mapped_angle = reason.get("keyword_post_angle")
+        if isinstance(mapped_angle, str) and mapped_angle.strip():
+            return KEYWORD_ANGLE_MAP.get(mapped_angle.strip(), "service_highlight")
         selected = self.rotation.select_next(
             organization_id=candidate.organization_id,
             location_id=candidate.location_id,
@@ -228,6 +250,10 @@ class PostCompositionService:
         return selected or ANGLES[0]
 
     def _rotate_cta(self, candidate: PostCandidate) -> str:
+        reason = candidate.reason_json or {}
+        mapped_cta = reason.get("keyword_cta")
+        if isinstance(mapped_cta, str) and mapped_cta.strip():
+            return mapped_cta.strip()
         selected = self.rotation.select_next(
             organization_id=candidate.organization_id,
             location_id=candidate.location_id,
@@ -274,6 +300,38 @@ class PostCompositionService:
             return voice.tone.lower()
         configured = str(merged_settings.get("tone_of_voice", "friendly")).lower()
         return configured if configured in TONE_INSTRUCTIONS else "friendly"
+
+    def _planned_media(self, candidate: PostCandidate):
+        reason = candidate.reason_json or {}
+        media_id = reason.get("planned_media_asset_id")
+        if not media_id:
+            return None
+        from backend.app.models.media.media_asset import MediaAsset
+
+        try:
+            asset = self.db.get(MediaAsset, uuid.UUID(str(media_id)))
+        except Exception:  # noqa: BLE001
+            return None
+        if asset and asset.location_id == candidate.location_id:
+            return asset
+        return None
+
+    @staticmethod
+    def _image_theme(candidate: PostCandidate, angle: str) -> str:
+        reason = candidate.reason_json or {}
+        value = reason.get("keyword_image_theme")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return angle
+
+    def _posting_location_text(self, candidate: PostCandidate) -> str:
+        reason = candidate.reason_json or {}
+        proximity = reason.get("proximity_target")
+        if isinstance(proximity, str) and proximity.strip():
+            return proximity.strip()
+        if reason.get("keyword_mapping_id") and reason.get("location_strategy") != "proximity":
+            return ""
+        return self._location_text(candidate)
 
     @staticmethod
     def _location_text(candidate: PostCandidate) -> str:
@@ -350,7 +408,9 @@ class PostCompositionService:
                 "80-220 words",
                 "one clear CTA",
                 "no fabricated specifics",
-                "natural location mention",
+                "if location is provided, use at most one natural location/proximity mention",
+                "do not invent cities, neighborhoods, or service areas",
+                "avoid repeating the focus keyword more than once",
             ],
         }
         payload = {
@@ -398,11 +458,13 @@ class PostCompositionService:
             "concise": "Quick update:",
         }
         opener = tone_openers.get(tone, "Quick update:")
+        in_location = f" in {location_text}" if location_text else ""
+        across_location = f" across {location_text}" if location_text else ""
         if post_type == PostType.OFFER and offer_context:
             title = offer_context.get("title") or offer_context.get("name") or "special offer"
             details = offer_context.get("description") or "Contact us for current terms."
             return (
-                f"{opener} {business_name} is featuring a verified {title} for customers in {location_text}. "
+                f"{opener} {business_name} is featuring a verified {title}{in_location}. "
                 f"Our {category} team can help with {service_name}. {details} {cta}"
             )
         if post_type == PostType.EVENT and event_context:
@@ -410,28 +472,36 @@ class PostCompositionService:
             details = event_context.get("description") or "Reach out for full details."
             return (
                 f"{opener} {business_name} has a verified event update: {name}. "
-                f"We support customers in {location_text} with {service_name}. {details} {cta}"
+                f"We support customers{across_location} with {service_name}. {details} {cta}"
             )
         angle_map = {
             "service_highlight": (
-                f"{business_name} provides {service_name} in {location_text}.",
+                f"{business_name} provides {service_name}{in_location}.",
                 f"Our {category} team focuses on clear communication and dependable service.",
             ),
             "educational": (
                 f"Small issues related to {service_name} can become bigger over time.",
-                f"{business_name} helps property owners in {location_text} make informed decisions.",
+                f"{business_name} helps customers make informed decisions before scheduling service.",
             ),
             "seasonal_reminder": (
                 f"As seasons change, {seasonal_hint}.",
-                f"{business_name} supports {location_text} customers with {service_name}.",
+                f"{business_name} supports customers with practical {service_name} planning.",
             ),
             "maintenance_guidance": (
                 f"Routine upkeep helps extend performance and reduce avoidable repairs.",
-                f"Our {category} team offers {service_name} for homes and businesses in {location_text}.",
+                f"Our {category} team offers {service_name} with clear next steps.",
             ),
             "credibility": (
                 f"When you need {service_name}, choosing an experienced local team matters.",
-                f"{business_name} works with customers across {location_text} with a practical, professional approach.",
+                f"{business_name} works with customers{across_location} using a practical, professional approach.",
+            ),
+            "before_after_style": (
+                f"Before planning {service_name}, it helps to understand what a strong outcome should look like.",
+                f"{business_name} focuses on clear expectations, careful preparation, and useful follow-through.",
+            ),
+            "local_proximity": (
+                f"{business_name} helps customers{across_location} with {service_name}.",
+                f"Our team keeps service guidance local, practical, and easy to act on.",
             ),
         }
         line_one, line_two = angle_map.get(angle, angle_map["service_highlight"])

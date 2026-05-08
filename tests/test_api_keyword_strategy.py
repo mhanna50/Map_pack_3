@@ -67,5 +67,10 @@ def test_keyword_strategy_run_and_dashboard_endpoint(api_client, db_session):
     assert dashboard.status_code == 200
     payload = dashboard.json()
     assert payload["has_data"] is True
-    assert len(payload["keywords"]) == 10
+    assert len(payload["keywords"]) == 9
+    assert all(item["business_service_id"] for item in payload["keywords"])
+    assert all(item["service_name"] for item in payload["keywords"])
+    assert all(item["is_active"] for item in payload["keywords"])
+    assert len(payload["post_plan"]) == 30
+    assert all(item["business_service_id"] for item in payload["post_plan"])
     assert payload["cycle"]["id"] == cycle_id

@@ -111,6 +111,10 @@ class PostJobService:
                 organization_id=job.organization_id,
                 location_id=job.location_id,
             )
+            self.safety.ensure_automation_ready(
+                organization_id=job.organization_id,
+                location_id=job.location_id,
+            )
             post = self._ensure_post(job)
             if job.content_plan and not post.media_asset_id and (job.content_plan.reason_json or {}).get("selected_bucket") in {"proof", "service_spotlight", "local_highlight"}:
                 job.status = PostJobStatus.NEEDS_CLIENT_INPUT
@@ -198,6 +202,13 @@ class PostJobService:
         if existing_post_id:
             existing = self.db.get(Post, uuid.UUID(str(existing_post_id)))
             if existing:
+                if plan and plan.candidate_id:
+                    self._attach_mapping_to_post(
+                        organization_id=job.organization_id,
+                        location_id=job.location_id,
+                        post_candidate_id=plan.candidate_id,
+                        post_id=existing.id,
+                    )
                 return existing
         if candidate and candidate.fingerprint:
             existing = (
@@ -287,6 +298,9 @@ class PostJobService:
             return
         mapping.post_id = post_id
         mapping.status = "scheduled"
+        post = self.db.get(Post, post_id)
+        if post and post.media_asset_id:
+            mapping.media_asset_id = post.media_asset_id
         self.db.add(mapping)
         self.db.commit()
 

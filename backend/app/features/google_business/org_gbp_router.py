@@ -13,6 +13,7 @@ from backend.app.models.enums import ActionType, LocationStatus
 from backend.app.models.google_business.location import Location
 from backend.app.models.google_business.location_settings import LocationSettings
 from backend.app.services.automation.actions import ActionService
+from backend.app.services.google_business.readiness import GbpReadinessService
 from backend.app.services.operations.audit import log_audit
 from backend.app.services.google_business.gbp_connections import GbpConnectionService, GbpLocationSyncService
 from backend.app.services.google_business.google import (
@@ -201,6 +202,12 @@ def update_location_details(
     db.add(location)
     db.commit()
     db.refresh(location)
+    GbpReadinessService(db).schedule_audit_if_lifecycle_ready(
+        organization_id=organization_id,
+        location_id=location.id,
+        trigger_source="location_updated",
+        force=True,
+    )
     after = {
         "name": location.name,
         "timezone": location.timezone,
@@ -251,4 +258,10 @@ def sync_location_now(
     db.add(location)
     db.commit()
     db.refresh(location)
+    GbpReadinessService(db).schedule_audit_if_lifecycle_ready(
+        organization_id=organization_id,
+        location_id=location.id,
+        trigger_source="gbp_sync",
+        force=True,
+    )
     return LocationSyncResponse(scheduled=True, last_sync_at=location.last_sync_at)

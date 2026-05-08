@@ -66,6 +66,12 @@ class GbpConnectionService:
             self.db.add(connection)
         self.db.commit()
         self.db.refresh(connection)
+        from backend.app.services.google_business.readiness import GbpReadinessService
+
+        GbpReadinessService(self.db).schedule_audit_if_lifecycle_ready(
+            organization_id=organization_id,
+            trigger_source="gbp_connection",
+        )
         return connection
 
     def ensure_access_token(
@@ -196,9 +202,7 @@ class GbpLocationSyncService:
                 self.db.add(location)
             location.tenant_id = organization_id
             location.name = payload.get("title") or payload.get("locationName") or location.name
-            storefront_address = payload.get("storefrontAddress") or payload.get("address")
-            if storefront_address:
-                location.address = storefront_address
+            location.address = self._profile_payload(payload)
             latlng = payload.get("latlng") or {}
             location.latitude = latlng.get("latitude")
             location.longitude = latlng.get("longitude")
@@ -213,4 +217,32 @@ class GbpLocationSyncService:
         self.db.commit()
         for location in updated:
             self.db.refresh(location)
+        from backend.app.services.google_business.readiness import GbpReadinessService
+
+        readiness = GbpReadinessService(self.db)
+        for location in updated:
+            readiness.schedule_audit_if_lifecycle_ready(
+                organization_id=organization_id,
+                location_id=location.id,
+                trigger_source="gbp_sync",
+                force=True,
+            )
         return updated
+
+    @staticmethod
+    def _profile_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        address = dict(payload.get("storefrontAddress") or payload.get("address") or {})
+        for key in (
+            "categories",
+            "serviceArea",
+            "serviceItems",
+            "regularHours",
+            "specialHours",
+            "websiteUri",
+            "phoneNumbers",
+            "profile",
+            "metadata",
+        ):
+            if key in payload:
+                address[key] = payload.get(key)
+        return address

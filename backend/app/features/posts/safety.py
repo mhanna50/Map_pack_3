@@ -15,8 +15,8 @@ from backend.app.models.posts.post import Post
 
 
 class PostingSafetyService:
-    MAX_POSTS_PER_WEEK = 3
-    MIN_GAP_HOURS = 48
+    MAX_POSTS_PER_WEEK = 7
+    MIN_GAP_HOURS = 20
     BUCKET_COOLDOWN_DAYS = 14
     CONTENT_REUSE_COOLDOWN_DAYS = 90
     SIMILARITY_THRESHOLD = 0.88
@@ -42,16 +42,19 @@ class PostingSafetyService:
         body: str | None = None,
         fingerprint: str | None = None,
         window_id: str | None = None,
+        enforce_frequency: bool = True,
+        enforce_bucket_cooldown: bool = True,
     ) -> None:
         target_time = self._normalize_dt(scheduled_at or datetime.now(timezone.utc))
         org = self.db.get(Organization, organization_id)
         location = self.db.get(Location, location_id)
         self._ensure_not_paused(org=org, location=location)
         cap = self._resolve_cap(org=org, location=location)
-        self._enforce_post_frequency(location_id=location_id, target_time=target_time, cap=cap)
+        if enforce_frequency:
+            self._enforce_post_frequency(location_id=location_id, target_time=target_time, cap=cap)
         self._enforce_min_gap(location_id=location_id, target_time=target_time)
         self._enforce_schedule_window(location=location, target_time=target_time, window_id=window_id)
-        if bucket:
+        if bucket and enforce_bucket_cooldown:
             self._enforce_bucket_cooldown(location_id=location_id, bucket=bucket, target_time=target_time)
         if body:
             self._enforce_content_reuse(
@@ -73,6 +76,7 @@ class PostingSafetyService:
         org = self.db.get(Organization, post.organization_id)
         location = self.db.get(Location, post.location_id)
         self._ensure_not_paused(org=org, location=location)
+        self.ensure_automation_ready(organization_id=post.organization_id, location_id=post.location_id)
         cap = self._resolve_cap(org=org, location=location)
         self._enforce_publish_frequency(post=post, now=now, cap=cap)
         self._enforce_publish_min_gap(post=post, now=now)
@@ -88,6 +92,14 @@ class PostingSafetyService:
         org = self.db.get(Organization, organization_id)
         location = self.db.get(Location, location_id)
         self._ensure_not_paused(org=org, location=location)
+
+    def ensure_automation_ready(self, *, organization_id: uuid.UUID, location_id: uuid.UUID) -> None:
+        from backend.app.services.google_business.readiness import GbpReadinessService
+
+        GbpReadinessService(self.db).ensure_ready_for_automation(
+            organization_id=organization_id,
+            location_id=location_id,
+        )
 
     def _enforce_post_frequency(self, *, location_id: uuid.UUID, target_time: datetime, cap: int | None) -> None:
         limit = cap if cap is not None else self.MAX_POSTS_PER_WEEK

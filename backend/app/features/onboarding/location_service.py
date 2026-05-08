@@ -34,10 +34,11 @@ class LocationOnboardingService:
             or location_payload.get("address")
             or {}
         )
+        profile_payload = self._profile_payload(location_payload, address_payload)
         if location:
             location.tenant_id = organization_id
             location.name = location_payload.get("title", location.name)
-            location.address = address_payload
+            location.address = profile_payload
             location.connected_account_id = connected_account_id
             location.status = LocationStatus.ACTIVE
         else:
@@ -53,7 +54,7 @@ class LocationOnboardingService:
                 name=location_payload.get("title") or "Google Location",
                 timezone=timezone,
                 google_location_id=google_location_id,
-                address=address_payload,
+                address=profile_payload,
                 status=LocationStatus.ACTIVE,
             )
             self.db.add(location)
@@ -75,4 +76,30 @@ class LocationOnboardingService:
 
         self.db.commit()
         self.db.refresh(location)
+        from backend.app.services.google_business.readiness import GbpReadinessService
+
+        GbpReadinessService(self.db).schedule_audit_if_lifecycle_ready(
+            organization_id=organization_id,
+            location_id=location.id,
+            trigger_source="onboarding",
+            force=True,
+        )
         return location
+
+    @staticmethod
+    def _profile_payload(location_payload: dict, address_payload: dict) -> dict:
+        profile = dict(address_payload or {})
+        for key in (
+            "categories",
+            "serviceArea",
+            "serviceItems",
+            "regularHours",
+            "specialHours",
+            "websiteUri",
+            "phoneNumbers",
+            "profile",
+            "metadata",
+        ):
+            if key in location_payload:
+                profile[key] = location_payload.get(key)
+        return profile

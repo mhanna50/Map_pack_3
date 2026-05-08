@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -30,20 +31,41 @@ class SelectedKeyword(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     candidate_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("keyword_candidates.id")
     )
+    business_service_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("business_services.id")
+    )
+    previous_selected_keyword_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("selected_keywords.id")
+    )
     rank_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    service_rank_order: Mapped[int | None] = mapped_column(Integer)
     keyword: Mapped[str] = mapped_column(String(255), nullable=False)
     target_service_area: Mapped[str | None] = mapped_column(String(128))
     search_volume: Mapped[int | None] = mapped_column(Integer)
+    average_cpc_micros: Mapped[int | None] = mapped_column(BigInteger)
+    top_of_page_bid_low_micros: Mapped[int | None] = mapped_column(BigInteger)
+    top_of_page_bid_high_micros: Mapped[int | None] = mapped_column(BigInteger)
     competition_estimate: Mapped[float | None] = mapped_column()
+    competition_index: Mapped[float | None] = mapped_column()
     current_rank: Mapped[float | None] = mapped_column()
+    service_value_cents: Mapped[int | None] = mapped_column(Integer)
     intent_level: Mapped[str | None] = mapped_column(String(32))
     competition_level: Mapped[str | None] = mapped_column(String(32))
     selection_bucket: Mapped[str | None] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    active_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    active_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    replacement_reason: Mapped[str | None] = mapped_column(String(512))
     why_selected: Mapped[str | None] = mapped_column(String(512))
     score_breakdown_json: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    performance_json: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     classifications_json: Mapped[list[str] | None] = mapped_column(JSONB, default=list)
 
     organization = relationship("Organization")
     location = relationship("Location")
     campaign_cycle = relationship("KeywordCampaignCycle")
     candidate = relationship("KeywordCandidate")
+    business_service = relationship("BusinessService")
+    previous_selected_keyword = relationship("SelectedKeyword", remote_side="SelectedKeyword.id")

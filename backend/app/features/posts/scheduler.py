@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from backend.app.models.enums import PostStatus, PostType
 from backend.app.models.posts.post_candidate import PostCandidate
 from backend.app.models.posts.post import Post
+from backend.app.models.rank_tracking.gbp_post_keyword_mapping import GbpPostKeywordMapping
 from backend.app.services.posts.posts import PostService
 from backend.app.services.posts.posting_windows import PostingWindowService, POSTING_WINDOWS
 from backend.app.models.google_business.location import Location
@@ -35,6 +36,12 @@ class PostSchedulerService:
             raise ValueError("Post candidate not found")
         if not candidate.proposed_caption:
             raise ValueError("Candidate missing composed caption")
+        from backend.app.services.google_business.readiness import GbpReadinessService
+
+        GbpReadinessService(self.db).ensure_ready_for_automation(
+            organization_id=candidate.organization_id,
+            location_id=candidate.location_id,
+        )
         location = self.db.get(Location, candidate.location_id)
         tz = location.timezone if location else "UTC"
         merged_settings = self.settings.merged(candidate.organization_id, candidate.location_id)
@@ -83,6 +90,7 @@ class PostSchedulerService:
         candidate.window_id = window["id"]
         reason["post_id"] = str(post.id)
         candidate.reason_json = reason
+        self._attach_keyword_mapping(candidate, post)
         self.db.add(candidate)
         self.db.commit()
         self.db.refresh(candidate)
@@ -93,3 +101,29 @@ class PostSchedulerService:
         local_tz = ZoneInfo(timezone_name)
         local_dt = datetime.combine(candidate_date, start, tzinfo=local_tz)
         return local_dt.astimezone(timezone.utc)
+
+    def _attach_keyword_mapping(self, candidate: PostCandidate, post: Post) -> None:
+        mapping_id = (candidate.reason_json or {}).get("keyword_mapping_id")
+        mapping = None
+        if mapping_id:
+            try:
+                mapping = self.db.get(GbpPostKeywordMapping, uuid.UUID(str(mapping_id)))
+            except Exception:  # noqa: BLE001
+                mapping = None
+        if not mapping:
+            mapping = (
+                self.db.query(GbpPostKeywordMapping)
+                .filter(
+                    GbpPostKeywordMapping.organization_id == candidate.organization_id,
+                    GbpPostKeywordMapping.location_id == candidate.location_id,
+                    GbpPostKeywordMapping.post_candidate_id == candidate.id,
+                )
+                .first()
+            )
+        if not mapping:
+            return
+        mapping.post_id = post.id
+        if post.media_asset_id:
+            mapping.media_asset_id = post.media_asset_id
+        mapping.status = "scheduled"
+        self.db.add(mapping)
