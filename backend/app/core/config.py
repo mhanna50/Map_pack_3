@@ -52,11 +52,15 @@ class Settings(BaseSettings):
     STRIPE_PRICE_ID_STARTER: str = ""
     STRIPE_PRICE_ID_PRO: str = ""
     STRIPE_PRICE_ID_AGENCY: str = ""
+    STRIPE_PRICE_ID_FRIENDS_FAMILY: str = ""
+    STRIPE_PRICE_ID_STANDARD: str = ""
     STRIPE_PRICE_ID_GROWTH_ADDON: str = ""
     STRIPE_PRICE_ID_AUTHORITY_ADDON: str = ""
     STRIPE_PRICE_AMOUNT_STARTER: int | None = None
     STRIPE_PRICE_AMOUNT_PRO: int | None = None
     STRIPE_PRICE_AMOUNT_AGENCY: int | None = None
+    STRIPE_PRICE_AMOUNT_FRIENDS_FAMILY: int | None = None
+    STRIPE_PRICE_AMOUNT_STANDARD: int | None = None
     STRIPE_PRICE_AMOUNT_GROWTH_ADDON: int | None = None
     STRIPE_PRICE_AMOUNT_AUTHORITY_ADDON: int | None = None
     STRIPE_PRICE_AMOUNT: int | None = None

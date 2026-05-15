@@ -63,6 +63,9 @@ def test_gbp_connection_flow(api_client, db_session, monkeypatch):
     )
     assert callback.status_code == 200
     assert callback.json()["google_account_email"] == "owner@example.com"
+    connection = GbpConnectionService(db_session).get_by_org(org.id)
+    assert connection is not None
+    assert connection.user_id is not None
 
     import_resp = api_client.post(f"/api/orgs/{org.id}/locations/import")
     assert import_resp.status_code == 200
@@ -73,6 +76,8 @@ def test_gbp_connection_flow(api_client, db_session, monkeypatch):
     assert location.latitude == 40.0
     assert location.status == LocationStatus.ACTIVE
     assert location.last_sync_at is not None
+    db_session.refresh(connection)
+    assert connection.last_sync_at is not None
 
     patch_resp = api_client.patch(
         f"/api/orgs/{org.id}/locations/{location_id}",

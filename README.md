@@ -89,12 +89,12 @@ Automation platform for agencies that need to manage and grow multiple Google Bu
 
 ### Prerequisites
 
-- Python 3.11+ (repo was bootstrapped with 3.13)  
+- Python 3.11+ (repo was bootstrapped with 3.13)
 - Docker (for Redis and future services)
 
 ### Setup
 
-1. Copy `.env.example` → `.env` and fill in provider keys. At minimum you need `DATABASE_URL`, `REDIS_URL`, `CELERY_*`, `ENCRYPTION_KEY` (generate via `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`), and Google OAuth credentials before auth/token storage will work.  
+1. Copy `.env.example` → `.env` and fill in provider keys. At minimum you need `DATABASE_URL`, `REDIS_URL`, `CELERY_*`, `ENCRYPTION_KEY` (generate via `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`), and Google OAuth credentials before GBP token storage will work.
 2. Start the full local stack (marketing + client + admin frontends, backend API, worker, scheduler, Postgres, Redis):
    ```bash
    docker compose -f infra/docker-compose.yml up --build
@@ -167,7 +167,7 @@ When a client completes a Stripe Checkout payment, the backend provisions their 
 1. Create Stripe Products + recurring monthly Prices for each base plan and add-on.
 2. Set these environment variables (see `.env.example`):
    - `STRIPE_SECRET_KEY`
-   - Base plans: `STRIPE_PRICE_ID_STARTER` ($75), `STRIPE_PRICE_ID_PRO` ($99), `STRIPE_PRICE_ID_AGENCY` ($149)
+   - Base plans: `STRIPE_PRICE_ID_STARTER` ($75), `STRIPE_PRICE_ID_PRO` ($99), `STRIPE_PRICE_ID_AGENCY` ($149), `STRIPE_PRICE_ID_FRIENDS_FAMILY` ($129), `STRIPE_PRICE_ID_STANDARD` ($249)
    - Add-ons: `STRIPE_PRICE_ID_GROWTH_ADDON` ($49) and `STRIPE_PRICE_ID_AUTHORITY_ADDON` ($129)
    - `STRIPE_WEBHOOK_SECRET`
    - `STRIPE_SUCCESS_URL`
@@ -213,6 +213,14 @@ This repo now uses Supabase Auth for login (email + password). Configure Supabas
 1. Create a Supabase project.
 2. Enable Email/Password auth in the Supabase Auth settings.
 3. Add your frontend URL to allowed redirect URLs (for password resets).
+
+Supabase Auth handles app login and invite acceptance. Google Business Profile connection is a separate post-login OAuth flow so the backend can request `https://www.googleapis.com/auth/business.manage`, store encrypted refresh tokens server-side, and sync GBP accounts/locations. For local GBP testing, add this redirect URI to the Google Cloud OAuth client:
+
+```text
+http://localhost:3000/onboarding/google/callback
+```
+
+The Supabase provider callback (`https://<project-ref>.supabase.co/auth/v1/callback`) is only for Supabase social login providers; it does not replace the GBP connection callback used by this app.
 
 ### 2) Environment variables
 Set these in `.env`:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from hashlib import sha256
+import logging
 import math
 from random import Random
 from typing import Any, Protocol, Sequence
@@ -14,6 +15,9 @@ from backend.app.core.config import settings
 from backend.app.models.google_business.location import Location
 from backend.app.models.posts.post import Post
 from backend.app.models.rank_tracking.rank_snapshot import RankSnapshot
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -128,22 +132,35 @@ class HeuristicKeywordDataProvider:
 
 
 class GoogleAdsKeywordDataProvider:
-    """Google Ads KeywordPlanIdeaService adapter for Keyword Planner data."""
+    """Agency-owned Google Ads KeywordPlanIdeaService adapter."""
 
     provider_name = "google_ads_keyword_planner"
+    required_settings = (
+        "GOOGLE_ADS_DEVELOPER_TOKEN",
+        "GOOGLE_ADS_CLIENT_ID",
+        "GOOGLE_ADS_CLIENT_SECRET",
+        "GOOGLE_ADS_REFRESH_TOKEN",
+        "GOOGLE_ADS_CUSTOMER_ID",
+    )
 
     def __init__(self, client: Any | None = None) -> None:
         self._client = client
 
     @classmethod
     def configured(cls) -> bool:
-        return bool(
-            settings.GOOGLE_ADS_DEVELOPER_TOKEN
-            and settings.GOOGLE_ADS_CLIENT_ID
-            and settings.GOOGLE_ADS_CLIENT_SECRET
-            and settings.GOOGLE_ADS_REFRESH_TOKEN
-            and settings.GOOGLE_ADS_CUSTOMER_ID
-        )
+        return not cls.missing_required_settings()
+
+    @classmethod
+    def missing_required_settings(cls) -> list[str]:
+        return [field_name for field_name in cls.required_settings if not getattr(settings, field_name, "")]
+
+    @staticmethod
+    def configured_customer_id() -> str:
+        return GoogleAdsKeywordDataProvider._normalize_customer_id(settings.GOOGLE_ADS_CUSTOMER_ID)
+
+    @staticmethod
+    def configured_login_customer_id() -> str:
+        return GoogleAdsKeywordDataProvider._normalize_customer_id(settings.GOOGLE_ADS_LOGIN_CUSTOMER_ID)
 
     def fetch_market_metrics(
         self,
@@ -171,10 +188,23 @@ class GoogleAdsKeywordDataProvider:
         keyword_plan_idea_service = client.get_service("KeywordPlanIdeaService")
         google_ads_service = client.get_service("GoogleAdsService")
         request = client.get_type("GenerateKeywordIdeasRequest")
-        request.customer_id = settings.GOOGLE_ADS_CUSTOMER_ID.replace("-", "")
+        agency_customer_id = self.configured_customer_id()
+        if not agency_customer_id:
+            raise ValueError("Google Ads agency customer ID is not configured")
+        request.customer_id = agency_customer_id
         request.language = google_ads_service.language_constant_path(settings.GOOGLE_ADS_LANGUAGE_ID)
         request.include_adult_keywords = False
         request.keyword_plan_network = client.enums.KeywordPlanNetworkEnum.GOOGLE_SEARCH_AND_PARTNERS
+        logger.info(
+            "Keyword Planner using configured agency Google Ads account, not a client account",
+            extra={
+                "google_ads_account_scope": "agency_owned_global",
+                "agency_google_ads_customer_id": self._mask_customer_id(agency_customer_id),
+                "google_ads_login_customer_id": self._mask_customer_id(self.configured_login_customer_id()),
+                "organization_id": str(location.organization_id),
+                "location_id": str(location.id),
+            },
+        )
 
         geo_target_ids = self._geo_target_ids(location)
         geo_target_service = client.get_service("GeoTargetConstantService")
@@ -209,7 +239,7 @@ class GoogleAdsKeywordDataProvider:
                     "page_url": page_url,
                     "geo_target_ids": geo_target_ids,
                     "language_id": settings.GOOGLE_ADS_LANGUAGE_ID,
-                    "customer_id": request.customer_id,
+                    "google_ads_account_scope": "agency_owned_global",
                 },
             )
             metrics[keyword] = metric
@@ -217,7 +247,8 @@ class GoogleAdsKeywordDataProvider:
 
     def _build_client(self) -> Any:
         if not self.configured():
-            raise ValueError("Google Ads Keyword Planner credentials are not configured")
+            missing = ", ".join(self.missing_required_settings())
+            raise ValueError(f"Google Ads Keyword Planner credentials are not configured: {missing}")
         try:
             from google.ads.googleads.client import GoogleAdsClient
         except ImportError as exc:  # pragma: no cover - depends on optional package install
@@ -230,9 +261,23 @@ class GoogleAdsKeywordDataProvider:
             "refresh_token": settings.GOOGLE_ADS_REFRESH_TOKEN,
             "use_proto_plus": True,
         }
-        if settings.GOOGLE_ADS_LOGIN_CUSTOMER_ID:
-            config["login_customer_id"] = settings.GOOGLE_ADS_LOGIN_CUSTOMER_ID.replace("-", "")
+        login_customer_id = self.configured_login_customer_id()
+        if login_customer_id:
+            config["login_customer_id"] = login_customer_id
         return GoogleAdsClient.load_from_dict(config, version=settings.GOOGLE_ADS_API_VERSION)
+
+    @staticmethod
+    def _normalize_customer_id(value: str | None) -> str:
+        return (value or "").replace("-", "").strip()
+
+    @staticmethod
+    def _mask_customer_id(value: str | None) -> str | None:
+        normalized = GoogleAdsKeywordDataProvider._normalize_customer_id(value)
+        if not normalized:
+            return None
+        if len(normalized) <= 4:
+            return "*" * len(normalized)
+        return f"{'*' * (len(normalized) - 4)}{normalized[-4:]}"
 
     @staticmethod
     def _metric_from_google_ads_result(idea: Any, *, source_query: dict[str, Any]) -> KeywordMarketMetric:

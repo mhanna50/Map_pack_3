@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AdminShell } from "@/features/admin/components/shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -37,6 +38,16 @@ const STATUS_LABEL: Record<string, string> = {
   canceled: "Invite canceled",
 };
 
+const BILLING_PLAN_OPTIONS = [
+  { value: "friends_family", label: "Friends & Family - $129/month" },
+  { value: "standard_249", label: "Standard - $249/month" },
+] as const;
+
+const BILLING_PLAN_LABELS: Record<string, string> = {
+  friends_family: "Friends & Family - $129/month",
+  standard_249: "Standard - $249/month",
+};
+
 type PendingInvite = {
   email: string;
   business_name: string;
@@ -63,7 +74,7 @@ function isCompletedStatus(status?: string) {
 
 export default function OnboardingPage() {
   const { pushToast } = useToast();
-  const [form, setForm] = useState({ email: "" });
+  const [form, setForm] = useState({ email: "", plan: "friends_family" });
   const [sending, setSending] = useState(false);
   const [link, setLink] = useState<string | null>(null);
   const [rows, setRows] = useState<PendingInvite[]>([]);
@@ -349,7 +360,17 @@ export default function OnboardingPage() {
             <CardDescription>Send an onboarding link to the client’s email.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <Input placeholder="Client email" value={form.email} onChange={(e) => setForm({ email: e.target.value })} />
+            <Input
+              placeholder="Client email"
+              value={form.email}
+              onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
+            />
+            <Select
+              aria-label="Billing plan"
+              value={form.plan}
+              options={[...BILLING_PLAN_OPTIONS]}
+              onChange={(e) => setForm((prev) => ({ ...prev, plan: e.target.value }))}
+            />
             <div className="flex gap-2">
               <Button onClick={handleInvite} disabled={sending}>
                 {sending ? "Sending…" : "Create invite link"}
@@ -425,6 +446,9 @@ export default function OnboardingPage() {
                           <div>
                             <p className="font-semibold">{row.business_name || "Pending business name"}</p>
                             <p className="text-xs text-muted-foreground">{row.email}</p>
+                            <p className="text-xs text-muted-foreground">
+                              Plan: {BILLING_PLAN_LABELS[row.plan ?? ""] ?? row.plan ?? "Not selected"}
+                            </p>
                             <p className="text-xs text-muted-foreground">Invited {formatDate(row.invited_at)}</p>
                           </div>
                           <div className="flex flex-col items-end gap-1">

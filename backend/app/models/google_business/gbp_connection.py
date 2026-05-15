@@ -26,6 +26,7 @@ class GbpConnection(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         ForeignKey("organizations.id"),
         nullable=False,
     )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     google_account_email: Mapped[str | None] = mapped_column(String(320))
     account_resource_name: Mapped[str | None] = mapped_column(String(255))
     scopes: Mapped[list[str] | None] = mapped_column(JSONB, default=list)
@@ -43,6 +44,7 @@ class GbpConnection(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     access_token_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     metadata_json: Mapped[dict | None] = mapped_column(JSONB, default=dict)
 
     organization = relationship("Organization", back_populates="gbp_connection")

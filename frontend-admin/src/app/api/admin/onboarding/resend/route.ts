@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
       business_name,
       first_name,
       last_name,
-      plan,
+      plan: normalizeInvitePlan(plan),
       location_limit,
       invited_by: admin.id,
       expires_at: expiresAt,
@@ -114,6 +114,11 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ error: message }, { status: 400 });
   }
+}
+
+function normalizeInvitePlan(value: unknown): string {
+  const normalized = String(value ?? "friends_family").trim().toLowerCase().replaceAll(" ", "_").replaceAll("-", "_");
+  return normalized === "standard_249" ? "standard_249" : "friends_family";
 }
 
 const WINDOW_MS = 60_000;

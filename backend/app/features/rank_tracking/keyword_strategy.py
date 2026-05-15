@@ -201,7 +201,11 @@ class KeywordCampaignService:
         if GoogleAdsKeywordDataProvider.configured():
             return GoogleAdsKeywordDataProvider()
         if settings.REQUIRE_GOOGLE_KEYWORD_PLANNER:
-            raise ValueError("Google Ads Keyword Planner is required but credentials are not configured")
+            missing = ", ".join(GoogleAdsKeywordDataProvider.missing_required_settings())
+            raise ValueError(
+                "Google Ads Keyword Planner is required but credentials are not configured"
+                + (f": {missing}" if missing else "")
+            )
         return HeuristicKeywordDataProvider()
 
     def run_cycle(

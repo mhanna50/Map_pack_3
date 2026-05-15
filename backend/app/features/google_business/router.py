@@ -127,6 +127,7 @@ def oauth_callback(
         connected_accounts.append(
             account_service.upsert_google_account(
                 organization_id=organization_id,
+                user_id=current_user.id,
                 external_account_id=account.get("name"),
                 display_name=account.get("accountName") or account.get("name"),
                 scopes=scopes,
@@ -279,6 +280,13 @@ def connect_location(
         organization_id=payload.organization_id,
         connected_account_id=account.id,
         location_payload=location_payload,
+    )
+    from backend.app.services.google_business.gbp_connections import GbpConnectionService
+
+    GbpConnectionService(db).upsert_from_connected_account(
+        account=account,
+        google_account_email=account.display_name,
+        metadata={"selected_location_id": str(location.id), "selected_google_location": payload.location_name},
     )
 
     return location

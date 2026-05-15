@@ -71,6 +71,7 @@ def gbp_connect_callback(
     state: str = Query(...),
     code: str = Query(...),
     db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
 ) -> GbpConnectCallbackResponse:
     signer = OAuthStateSigner()
     decoded = signer.decode(state)
@@ -90,6 +91,7 @@ def gbp_connect_callback(
     connection_service = GbpConnectionService(db)
     connection = connection_service.upsert_connection(
         organization_id=organization_id,
+        user_id=current_user.id,
         google_account_email=primary_account.get("accountName") or token_data.get("email"),
         account_resource_name=primary_account.get("name"),
         scopes=scopes,

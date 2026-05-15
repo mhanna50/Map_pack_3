@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 from backend.app.core.config import settings
 from backend.app.models.enums import OrganizationType
+from backend.app.models.google_business.gbp_connection import GbpConnection
 from backend.app.models.identity.organization import Organization
 from backend.app.services.google_business.google import GoogleBusinessClient, GoogleOAuthService
 from pydantic import AnyHttpUrl
@@ -82,6 +83,43 @@ def test_google_oauth_start_and_callback(api_client, db_session, monkeypatch):
     assert len(callback_data["connected_accounts"]) == 1
     assert "access-token" not in callback_response.text
     assert "refresh-token" not in callback_response.text
+    account_id = callback_data["connected_accounts"][0]["id"]
+    assert (
+        db_session.query(GbpConnection)
+        .filter(GbpConnection.organization_id == org.id)
+        .one_or_none()
+        is None
+    )
+
+    def fake_get_location(self, location_name):
+        assert location_name == "accounts/123/locations/456"
+        return {
+            "name": "accounts/123/locations/456",
+            "title": "Main Office",
+            "metadata": {"placeStatus": "PUBLISHED"},
+        }
+
+    monkeypatch.setattr(GoogleBusinessClient, "get_location", fake_get_location, raising=False)
+
+    connect_response = api_client.post(
+        f"/api/google/accounts/{account_id}/locations/connect",
+        json={
+            "organization_id": str(org.id),
+            "location_name": "accounts/123/locations/456",
+        },
+    )
+    assert connect_response.status_code == 200
+    connection = (
+        db_session.query(GbpConnection)
+        .filter(GbpConnection.organization_id == org.id)
+        .one()
+    )
+    assert connection.user_id is not None
+    assert connection.account_resource_name == "accounts/123"
+    assert connection.encrypted_access_token is not None
+    assert connection.encrypted_refresh_token is not None
+    assert "access-token" not in connect_response.text
+    assert "refresh-token" not in connect_response.text
 
 
 def test_google_oauth_start_rejects_unsupported_scope(api_client, db_session):

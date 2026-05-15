@@ -20,6 +20,7 @@ class ConnectedAccountService:
         self,
         *,
         organization_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
         external_account_id: str,
         display_name: str | None,
         scopes: list[str],
@@ -50,6 +51,7 @@ class ConnectedAccountService:
 
         if account:
             account.tenant_id = organization_id
+            account.user_id = user_id or account.user_id
             account.display_name = display_name
             account.scopes = scopes
             account.encrypted_access_token = self.encryptor.encrypt(access_token)
@@ -60,6 +62,7 @@ class ConnectedAccountService:
         else:
             account = ConnectedAccount(
                 tenant_id=organization_id,
+                user_id=user_id,
                 organization_id=organization_id,
                 provider=ProviderType.GOOGLE_BUSINESS,
                 external_account_id=external_account_id,

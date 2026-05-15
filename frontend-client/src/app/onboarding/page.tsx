@@ -23,6 +23,12 @@ const MAX_SECONDARY_LOCATIONS = 10;
 const MAX_SERVICE_ROWS = 10;
 const MAX_ONBOARDING_STEP = steps.length - 1;
 
+const BILLING_PLANS: Record<string, { label: string; price: string; checkoutPlan: string }> = {
+  friends_family: { label: "Map Pack 3 Friends & Family", price: "$129/month", checkoutPlan: "friends_family" },
+  standard_249: { label: "Map Pack 3 Standard", price: "$249/month", checkoutPlan: "standard_249" },
+  starter: { label: "Map Pack 3 starter", price: "$75/month", checkoutPlan: "starter" },
+};
+
 const ONBOARDING_STATUS_RANK: Record<string, number> = {
   in_progress: 0,
   business_setup: 1,
@@ -35,6 +41,11 @@ const ONBOARDING_STATUS_RANK: Record<string, number> = {
   canceled: -1,
 };
 const buildScopedKey = (baseKey: string, scope: string) => `${baseKey}:${scope}`;
+const normalizeBillingPlan = (value: unknown) => {
+  if (typeof value !== "string") return "friends_family";
+  const normalized = value.trim().toLowerCase().replaceAll(" ", "_").replaceAll("-", "_");
+  return BILLING_PLANS[normalized] ? normalized : "friends_family";
+};
 type LocationInput = {
   city: string;
   state: string;
@@ -342,6 +353,7 @@ function OnboardingContent() {
   const [agreementError, setAgreementError] = useState<string | null>(null);
   const [loadingClaimStatus, setLoadingClaimStatus] = useState(true);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const [billingPlan, setBillingPlan] = useState("friends_family");
   const [orgInfo, setOrgInfo] = useState<OrgInfoState>(defaultOrgInfo);
   const [creatingOrg, setCreatingOrg] = useState(false);
   const [createOrgError, setCreateOrgError] = useState<string | null>(null);
@@ -740,8 +752,10 @@ function OnboardingContent() {
         }
         setInviteMismatch(null);
         const tenantIdFromClaim = typeof claim.tenant_id === "string" ? claim.tenant_id : null;
+        const claimPlan = normalizeBillingPlan(claim.plan_name);
         // Claim response is the source of truth for Supabase tenant linkage.
         setOrganizationId((prev) => tenantIdFromClaim ?? prev);
+        setBillingPlan(claimPlan);
         setOrgInfo((prev) => ({
           ...prev,
           name: claim.business_name || prev.name,
@@ -1062,7 +1076,7 @@ function OnboardingContent() {
         body: JSON.stringify({
           email: userEmail,
           company_name: companyName || "New client",
-          plan: "starter",
+          plan: BILLING_PLANS[billingPlan]?.checkoutPlan ?? "friends_family",
           tenant_id: tenantId,
           user_id: userStorageScope,
           success_path: "/onboarding?payment=success",
@@ -1078,11 +1092,13 @@ function OnboardingContent() {
       if (!checkoutUrl) {
         throw new Error("Stripe checkout did not return a redirect URL");
       }
+      setStripeStarted(true);
       if (typeof window !== "undefined") {
         window.location.assign(checkoutUrl);
       }
     } catch (error) {
       const message = normalizeClientError(error, "Unable to start Stripe checkout");
+      setStripeStarted(false);
       setStripeError(message);
     } finally {
       setStripeLoading(false);
@@ -1091,6 +1107,7 @@ function OnboardingContent() {
     agreementAccepted,
     agreementSignature,
     buildOnboardingDraft,
+    billingPlan,
     orgInfo.firstName,
     orgInfo.lastName,
     orgInfo.name,
@@ -1710,19 +1727,11 @@ function OnboardingContent() {
         setAgreementError("Accept the agreement before continuing.");
         return;
       }
-      if (!stripeStarted) {
-        if (!organizationId) {
-          setStripeError("Onboarding is missing a tenant. Refresh and try again.");
-          return;
-        }
-        await startStripeCheckout(organizationId);
+      if (!organizationId) {
+        setStripeError("Onboarding is missing a tenant. Refresh and try again.");
         return;
       }
-      if (typeof window !== "undefined") {
-        window.location.reload();
-      } else {
-        router.refresh();
-      }
+      await startStripeCheckout(organizationId);
       return;
     }
     await goNext();
@@ -2402,7 +2411,8 @@ function OnboardingContent() {
             <div className="space-y-4">
               <h2 className="text-xl font-semibold">Stripe payment (final step)</h2>
               <p className="text-sm text-slate-600">
-                You are signing up for the Map Pack 3 starter plan at <span className="font-semibold">$75/month</span>.
+                You are signing up for the {BILLING_PLANS[billingPlan]?.label ?? "Map Pack 3"} plan at{" "}
+                <span className="font-semibold">{BILLING_PLANS[billingPlan]?.price ?? "$129/month"}</span>.
               </p>
               <p className="text-sm text-slate-600">Sign the agreement, continue to Stripe Checkout, then return here after payment is confirmed.</p>
               {stripeError && <p className="text-sm text-rose-600">{stripeError}</p>}
@@ -2410,7 +2420,7 @@ function OnboardingContent() {
                 <p className="text-sm text-slate-600">Opening Stripe Checkout…</p>
               ) : stripeStarted ? (
                 <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                  Stripe Checkout has started. After payment completes, dashboard access unlocks when the webhook confirms an active subscription.
+                  Stripe Checkout has started. Continue to Stripe again if the previous checkout window did not open.
                 </div>
               ) : (
                 <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
@@ -2419,7 +2429,8 @@ function OnboardingContent() {
               )}
               <div className="space-y-3 rounded-2xl border border-slate-200 p-4">
                 <p className="text-sm text-slate-700">
-                  By signing below, you agree to recurring billing of <span className="font-semibold">$75/month</span> for this service until canceled.
+                  By signing below, you agree to recurring billing of{" "}
+                  <span className="font-semibold">{BILLING_PLANS[billingPlan]?.price ?? "$129/month"}</span> for this service until canceled.
                 </p>
                 <label className="block">
                   <span className="text-sm text-slate-600">Typed signature (full name)</span>
@@ -2480,7 +2491,7 @@ function OnboardingContent() {
           >
             {currentStep === 2
               ? stripeStarted
-                  ? "Check payment status"
+                  ? "Continue to Stripe"
                   : stripeLoading
                     ? "Opening Stripe…"
                     : "Continue to Stripe"

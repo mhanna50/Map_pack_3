@@ -31,11 +31,32 @@ class BillingService:
         "$149": "agency",
         "all_in": "agency",
         "all-in": "agency",
+        "friends_family": "friends_family",
+        "friends_and_family": "friends_family",
+        "family": "friends_family",
+        "base_129": "friends_family",
+        "129": "friends_family",
+        "$129": "friends_family",
+        "standard_249": "standard_249",
+        "map_pack_standard": "standard_249",
+        "base_249": "standard_249",
+        "249": "standard_249",
+        "$249": "standard_249",
     }
     _BASE_PLAN_CONFIG = {
         "starter": ("STRIPE_PRICE_ID_STARTER", "STRIPE_PRICE_AMOUNT_STARTER", "GBP Automations Starter"),
         "pro": ("STRIPE_PRICE_ID_PRO", "STRIPE_PRICE_AMOUNT_PRO", "GBP Automations Pro"),
         "agency": ("STRIPE_PRICE_ID_AGENCY", "STRIPE_PRICE_AMOUNT_AGENCY", "GBP Automations Agency"),
+        "friends_family": (
+            "STRIPE_PRICE_ID_FRIENDS_FAMILY",
+            "STRIPE_PRICE_AMOUNT_FRIENDS_FAMILY",
+            "Map Pack 3 - Friends & Family",
+        ),
+        "standard_249": (
+            "STRIPE_PRICE_ID_STANDARD",
+            "STRIPE_PRICE_AMOUNT_STANDARD",
+            "Map Pack 3 - Standard",
+        ),
     }
     _ADDON_ALIASES = {
         "growth": "growth_add_on",

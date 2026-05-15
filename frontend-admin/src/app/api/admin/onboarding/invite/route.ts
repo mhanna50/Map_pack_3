@@ -15,6 +15,7 @@ export async function POST(request: NextRequest) {
     if (!normalizedEmail) {
       return NextResponse.json({ error: "email is required" }, { status: 400 });
     }
+    const plan = normalizeInvitePlan(body.plan);
     const redirectTo = `${clientBase.replace(/\/$/, "")}/onboarding?step=account&invite_email=${encodeURIComponent(normalizedEmail)}`;
 
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -23,6 +24,7 @@ export async function POST(request: NextRequest) {
       invited_by: admin.id,
       expires_at: expiresAt,
       status: "invited",
+      plan,
     });
 
     const invite = await sendSupabaseInvite(normalizedEmail, redirectTo);
@@ -32,6 +34,11 @@ export async function POST(request: NextRequest) {
     const message = error instanceof Error ? error.message : "failed to create invite";
     return NextResponse.json({ error: message }, { status: 400 });
   }
+}
+
+function normalizeInvitePlan(value: unknown): string {
+  const normalized = String(value ?? "friends_family").trim().toLowerCase().replaceAll(" ", "_").replaceAll("-", "_");
+  return normalized === "standard_249" ? "standard_249" : "friends_family";
 }
 
 const WINDOW_MS = 60_000;

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
+from backend.app.core.config import settings
 from backend.app.models.enums import LocationStatus, MembershipRole, OrganizationType
+from backend.app.models.google_business.listing_audit import ListingAudit
 from backend.app.models.google_business.location import Location
 from backend.app.models.google_business.location_settings import LocationSettings
 from backend.app.models.identity.membership import Membership
 from backend.app.models.identity.organization import Organization
 from backend.app.models.identity.user import User
+from backend.app.features.rank_tracking.providers import GoogleAdsKeywordDataProvider
 
 
 def _seed(api_client, db_session):
@@ -36,11 +41,27 @@ def _seed(api_client, db_session):
             settings_json={"gbp_ready": True, "service_area_cities": ["Pflugerville"]},
         )
     )
+    db_session.add(
+        ListingAudit(
+            organization_id=org.id,
+            location_id=location.id,
+            category="Plumber",
+            audited_at=datetime.now(timezone.utc),
+            status="completed",
+            completed_at=datetime.now(timezone.utc),
+            profile_completeness_score=100,
+            trigger_source="test",
+            summary_json={},
+        )
+    )
     db_session.commit()
     return user, org, location
 
 
-def test_keyword_strategy_run_and_dashboard_endpoint(api_client, db_session):
+def test_keyword_strategy_run_and_dashboard_endpoint(api_client, db_session, monkeypatch):
+    for field_name in GoogleAdsKeywordDataProvider.required_settings:
+        monkeypatch.setattr(settings, field_name, "")
+    monkeypatch.setattr(settings, "REQUIRE_GOOGLE_KEYWORD_PLANNER", False)
     user, org, location = _seed(api_client, db_session)
 
     run = api_client.post(

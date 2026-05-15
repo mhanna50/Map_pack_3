@@ -15,6 +15,7 @@ const testimonials = [
 
 export default function Home() {
   const [mouse, setMouse] = useState({ x: 0, y: 0 });
+  const checkoutUrl = `${(process.env.NEXT_PUBLIC_CLIENT_APP_URL ?? "http://localhost:3000").replace(/\/+$/, "")}/checkout?plan=all-in`;
 
   useEffect(() => {
     const handler = (e: PointerEvent) => {
@@ -189,7 +190,7 @@ export default function Home() {
                   <p className="text-sm font-medium text-slate-300">No contracts • No setup fees • Cancel anytime</p>
                   <div className="flex flex-wrap gap-3">
                     <a
-                      href="/checkout?plan=all-in"
+                      href={checkoutUrl}
                       className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-sky-500 to-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-900/40 transition hover:from-sky-400 hover:to-indigo-500"
                     >
                       Get Started

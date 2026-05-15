@@ -29,6 +29,7 @@ class GbpConnectionService:
         self,
         *,
         organization_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
         google_account_email: str | None,
         account_resource_name: str | None,
         scopes: list[str] | None,
@@ -42,6 +43,7 @@ class GbpConnectionService:
         encrypted_access = self.encryptor.encrypt(access_token)
         encrypted_refresh = self.encryptor.encrypt(refresh_token) if refresh_token else None
         if connection:
+            connection.user_id = user_id or connection.user_id
             connection.google_account_email = google_account_email or connection.google_account_email
             connection.account_resource_name = account_resource_name or connection.account_resource_name
             connection.scopes = scopes or connection.scopes
@@ -54,6 +56,7 @@ class GbpConnectionService:
         else:
             connection = GbpConnection(
                 organization_id=organization_id,
+                user_id=user_id,
                 google_account_email=google_account_email,
                 account_resource_name=account_resource_name,
                 scopes=scopes or [],
@@ -72,6 +75,43 @@ class GbpConnectionService:
             organization_id=organization_id,
             trigger_source="gbp_connection",
         )
+        return connection
+
+    def upsert_from_connected_account(
+        self,
+        *,
+        account,
+        google_account_email: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> GbpConnection:
+        connection = self.get_by_org(account.organization_id)
+        if connection:
+            connection.user_id = account.user_id or connection.user_id
+            connection.google_account_email = google_account_email or account.display_name or connection.google_account_email
+            connection.account_resource_name = account.external_account_id or connection.account_resource_name
+            connection.scopes = account.scopes or connection.scopes
+            connection.status = GbpConnectionStatus.CONNECTED
+            connection.encrypted_access_token = account.encrypted_access_token
+            if account.encrypted_refresh_token:
+                connection.encrypted_refresh_token = account.encrypted_refresh_token
+            connection.access_token_expires_at = account.access_token_expires_at
+            connection.metadata_json = metadata or connection.metadata_json or {}
+        else:
+            connection = GbpConnection(
+                organization_id=account.organization_id,
+                user_id=account.user_id,
+                google_account_email=google_account_email or account.display_name,
+                account_resource_name=account.external_account_id,
+                scopes=account.scopes or [],
+                status=GbpConnectionStatus.CONNECTED,
+                encrypted_access_token=account.encrypted_access_token,
+                encrypted_refresh_token=account.encrypted_refresh_token,
+                access_token_expires_at=account.access_token_expires_at,
+                metadata_json=metadata or {},
+            )
+            self.db.add(connection)
+        self.db.commit()
+        self.db.refresh(connection)
         return connection
 
     def ensure_access_token(
@@ -150,7 +190,11 @@ class GbpLocationSyncService:
         client = GoogleBusinessClient(token)
         account_name = self._ensure_account_reference(connection, client)
         google_locations = client.list_locations(account_name)
-        return self._upsert_locations(organization_id, google_locations)
+        imported = self._upsert_locations(organization_id, google_locations)
+        connection.last_sync_at = datetime.now(timezone.utc)
+        self.db.add(connection)
+        self.db.commit()
+        return imported
 
     def _ensure_account_reference(
         self,

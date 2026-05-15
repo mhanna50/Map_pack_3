@@ -217,7 +217,7 @@ describe("Onboarding flow", () => {
     getSearchParam.mockImplementation(() => null);
   });
 
-  it("collects first/last name, connects/selects GBP, and saves step 1", async () => {
+  it("collects first/last name, connects/selects GBP only, and saves step 1", async () => {
     const { mock: fetchMock, saveCalls } = makeFetchMock();
     global.fetch = fetchMock as unknown as typeof fetch;
 
@@ -244,6 +244,8 @@ describe("Onboarding flow", () => {
       return typeof url === "string" && url.includes("/google/accounts/acc_1/locations/connect");
     });
     expect(connectedLocationCallSeen).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) => typeof url === "string" && /google[_-]?ads/i.test(url))).toBe(false);
+    expect(JSON.stringify(stepOneSave)).not.toMatch(/google[_-]?ads/i);
   });
 
   it("shows missing business fields, then persists brand voice and continues", async () => {
@@ -418,7 +420,7 @@ describe("Onboarding flow", () => {
 
     await screen.findByText(/Stripe payment \(final step\)/i);
     await screen.findByText(/Waiting for webhook confirmation/i);
-    expect(screen.getByRole("button", { name: /Check payment status/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Continue to Stripe/i })).toBeInTheDocument();
 
     expect(replace).not.toHaveBeenCalledWith("/dashboard");
     expect(saveCalls.find((call) => call.status === "completed")).toBeUndefined();

@@ -2,10 +2,15 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Sequence
 
 from backend.app.core.config import settings
-from backend.app.features.rank_tracking.providers import KeywordMarketMetric
+from backend.app.features.rank_tracking.providers import (
+    GoogleAdsKeywordDataProvider,
+    HeuristicKeywordDataProvider,
+    KeywordMarketMetric,
+)
 from backend.app.models.automation.action import Action
 from backend.app.models.enums import ActionType, LocationStatus, MembershipRole, OrganizationType
 from backend.app.models.google_business.business_service import BusinessService
@@ -95,6 +100,67 @@ class PlannerStubProvider:
         return metrics
 
 
+class FakeKeywordIdeaService:
+    def __init__(self) -> None:
+        self.requests = []
+
+    def generate_keyword_ideas(self, *, request):
+        self.requests.append(request)
+        metrics = SimpleNamespace(
+            avg_monthly_searches=120,
+            competition=SimpleNamespace(name="LOW"),
+            competition_index=22,
+            average_cpc_micros=900_000,
+            low_top_of_page_bid_micros=500_000,
+            high_top_of_page_bid_micros=1_400_000,
+        )
+        return [SimpleNamespace(text="ac repair austin", keyword_idea_metrics=metrics)]
+
+
+class FakeGoogleAdsService:
+    @staticmethod
+    def language_constant_path(language_id: str) -> str:
+        return f"languageConstants/{language_id}"
+
+
+class FakeGeoTargetConstantService:
+    @staticmethod
+    def geo_target_constant_path(geo_target_id: str) -> str:
+        return f"geoTargetConstants/{geo_target_id}"
+
+
+class FakeGoogleAdsClient:
+    def __init__(self) -> None:
+        self.idea_service = FakeKeywordIdeaService()
+        self.enums = SimpleNamespace(
+            KeywordPlanNetworkEnum=SimpleNamespace(GOOGLE_SEARCH_AND_PARTNERS="GOOGLE_SEARCH_AND_PARTNERS")
+        )
+
+    def get_service(self, name: str):
+        if name == "KeywordPlanIdeaService":
+            return self.idea_service
+        if name == "GoogleAdsService":
+            return FakeGoogleAdsService()
+        if name == "GeoTargetConstantService":
+            return FakeGeoTargetConstantService()
+        raise AssertionError(f"Unexpected Google Ads service requested: {name}")
+
+    @staticmethod
+    def get_type(name: str):
+        if name != "GenerateKeywordIdeasRequest":
+            raise AssertionError(f"Unexpected Google Ads request type requested: {name}")
+        return SimpleNamespace(
+            customer_id="",
+            language="",
+            include_adult_keywords=None,
+            keyword_plan_network=None,
+            geo_target_constants=[],
+            keyword_seed=SimpleNamespace(keywords=[]),
+            keyword_and_url_seed=SimpleNamespace(url="", keywords=[]),
+            url_seed=SimpleNamespace(url=""),
+        )
+
+
 def _seed_location(db_session):
     user = User(email="keyword-strategy@example.com")
     db_session.add(user)
@@ -165,6 +231,71 @@ def _seed_location(db_session):
     )
     db_session.commit()
     return org, location
+
+
+def _clear_google_ads_settings(monkeypatch):
+    for field_name in GoogleAdsKeywordDataProvider.required_settings:
+        monkeypatch.setattr(settings, field_name, "")
+    monkeypatch.setattr(settings, "GOOGLE_ADS_LOGIN_CUSTOMER_ID", "")
+    monkeypatch.setattr(settings, "GOOGLE_ADS_GEO_TARGET_IDS", "")
+
+
+def test_google_ads_keyword_planner_uses_env_agency_customer_id(monkeypatch, db_session, caplog):
+    org, location = _seed_location(db_session)
+    location.external_ids = {
+        "google_ads_customer_id": "999-999-9999",
+        "google_ads_geo_target_ids": ["1026201"],
+    }
+    db_session.add(location)
+    db_session.commit()
+    monkeypatch.setattr(settings, "GOOGLE_ADS_DEVELOPER_TOKEN", "dev-token")
+    monkeypatch.setattr(settings, "GOOGLE_ADS_CLIENT_ID", "client-id")
+    monkeypatch.setattr(settings, "GOOGLE_ADS_CLIENT_SECRET", "client-secret")
+    monkeypatch.setattr(settings, "GOOGLE_ADS_REFRESH_TOKEN", "refresh-token")
+    monkeypatch.setattr(settings, "GOOGLE_ADS_CUSTOMER_ID", "123-456-7890")
+    monkeypatch.setattr(settings, "GOOGLE_ADS_LOGIN_CUSTOMER_ID", "222-333-4444")
+
+    fake_client = FakeGoogleAdsClient()
+    provider = GoogleAdsKeywordDataProvider(client=fake_client)
+    with caplog.at_level("INFO"):
+        metrics = provider.fetch_service_keyword_ideas(
+            location=location,
+            service_name="ac repair",
+            seed_keywords=["hvac repair"],
+        )
+
+    request = fake_client.idea_service.requests[0]
+    assert request.customer_id == "1234567890"
+    assert request.customer_id != location.external_ids["google_ads_customer_id"].replace("-", "")
+    assert metrics["ac repair austin"].source_query["google_ads_account_scope"] == "agency_owned_global"
+    assert "customer_id" not in metrics["ac repair austin"].source_query
+    assert any(
+        "using configured agency Google Ads account, not a client account" in record.message
+        for record in caplog.records
+    )
+    assert org.id == location.organization_id
+
+
+def test_default_keyword_provider_falls_back_when_google_ads_not_required(monkeypatch):
+    _clear_google_ads_settings(monkeypatch)
+    monkeypatch.setattr(settings, "REQUIRE_GOOGLE_KEYWORD_PLANNER", False)
+
+    provider = KeywordCampaignService._default_keyword_data_provider()
+
+    assert isinstance(provider, HeuristicKeywordDataProvider)
+
+
+def test_missing_google_ads_credentials_only_block_when_required(monkeypatch):
+    _clear_google_ads_settings(monkeypatch)
+    monkeypatch.setattr(settings, "GOOGLE_ADS_DEVELOPER_TOKEN", "dev-token")
+    monkeypatch.setattr(settings, "REQUIRE_GOOGLE_KEYWORD_PLANNER", True)
+
+    try:
+        KeywordCampaignService._default_keyword_data_provider()
+    except ValueError as exc:
+        assert "Google Ads Keyword Planner is required" in str(exc)
+    else:
+        raise AssertionError("Expected missing Google Ads credentials to block required Keyword Planner")
 
 
 def test_keyword_campaign_cycle_generates_full_pipeline(db_session):

@@ -177,6 +177,41 @@ def test_create_checkout_session_supports_base_plan_and_addon_prices(monkeypatch
     assert captured["subscription_data"]["metadata"] == captured["metadata"]
 
 
+def test_create_checkout_session_supports_invite_selected_pricing(monkeypatch):
+    _configure_billing_settings(monkeypatch)
+    monkeypatch.setattr(settings, "STRIPE_PRICE_ID_FRIENDS_FAMILY", "price_129")
+    monkeypatch.setattr(settings, "STRIPE_PRICE_ID_STANDARD", "price_249")
+
+    monkeypatch.setattr(
+        billing_module.stripe.Customer,
+        "list",
+        lambda **kwargs: _FakeStripeList([SimpleNamespace(id="cus_123")]),
+    )
+    monkeypatch.setattr(
+        billing_module.stripe.Subscription,
+        "list",
+        lambda **kwargs: _FakeStripeList([]),
+    )
+
+    captured = {}
+
+    def _fake_checkout_create(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(id="cs_test_123", url="https://checkout.stripe.test/session")
+
+    monkeypatch.setattr(billing_module.stripe.checkout.Session, "create", _fake_checkout_create)
+
+    service = BillingService()
+    service.create_checkout_session(
+        email="Owner@Example.com",
+        company_name="Acme Corp",
+        plan="standard_249",
+    )
+
+    assert captured["line_items"] == [{"price": "price_249", "quantity": 1}]
+    assert captured["metadata"]["plan"] == "standard_249"
+
+
 def test_create_subscription_intent_allows_new_when_previous_subscription_canceled(monkeypatch):
     _configure_billing_settings(monkeypatch)
 
