@@ -5,9 +5,10 @@ from datetime import datetime, timezone
 import pytest
 
 from backend.app.models.identity.organization import Organization
+from backend.app.models.google_business.listing_audit import ListingAudit
 from backend.app.models.google_business.location import Location
 from backend.app.models.content.content_plan import ContentPlan
-from backend.app.models.enums import ContentPlanStatus, PostJobStatus
+from backend.app.models.enums import ContentPlanStatus, LocationStatus, PostJobStatus
 from backend.app.services.posts.post_jobs import PostJobService
 
 
@@ -15,9 +16,24 @@ def _setup(db_session):
     org = Organization(name="Job Org")
     db_session.add(org)
     db_session.flush()
-    loc = Location(name="Job Loc", organization_id=org.id, timezone="UTC")
+    loc = Location(
+        name="Job Loc",
+        organization_id=org.id,
+        timezone="UTC",
+        status=LocationStatus.ACTIVE,
+    )
     db_session.add(loc)
     db_session.flush()
+    loc.google_location_id = f"accounts/job/locations/{loc.id}"
+    db_session.add(
+        ListingAudit(
+            organization_id=org.id,
+            location_id=loc.id,
+            audited_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc),
+            status="completed",
+        )
+    )
     plan = ContentPlan(
         organization_id=org.id,
         location_id=loc.id,

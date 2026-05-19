@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from backend.app.models.content.daily_signal import DailySignal
-from backend.app.models.enums import OrganizationType
+from backend.app.models.enums import LocationStatus, OrganizationType
+from backend.app.models.google_business.listing_audit import ListingAudit
 from backend.app.models.google_business.location import Location
 from backend.app.models.identity.organization import Organization
 from backend.app.models.rank_tracking.gbp_post_keyword_mapping import GbpPostKeywordMapping
@@ -15,8 +16,24 @@ def _setup(db_session):
     org = Organization(name="Candidate Org", org_type=OrganizationType.AGENCY)
     db_session.add(org)
     db_session.flush()
-    location = Location(name="Candidate Location", organization_id=org.id, timezone="UTC")
+    location = Location(
+        name="Candidate Location",
+        organization_id=org.id,
+        timezone="UTC",
+        status=LocationStatus.ACTIVE,
+    )
     db_session.add(location)
+    db_session.flush()
+    location.google_location_id = f"accounts/candidate/locations/{location.id}"
+    db_session.add(
+        ListingAudit(
+            organization_id=org.id,
+            location_id=location.id,
+            audited_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc),
+            status="completed",
+        )
+    )
     db_session.commit()
     return org, location
 

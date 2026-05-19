@@ -837,4 +837,10 @@ class ActionExecutor:
         }
 
     def _handle_noop(self, action: Action) -> dict[str, Any]:
+        payload = action.payload or {}
+        review_request_id = payload.get("review_request_id")
+        if review_request_id:
+            from backend.app.services.reviews.review_requests import ReviewRequestService
+
+            return ReviewRequestService(self.db).deliver_review_request(uuid.UUID(str(review_request_id)))
         return {"status": "no-op"}

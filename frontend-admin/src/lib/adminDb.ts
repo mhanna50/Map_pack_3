@@ -277,7 +277,7 @@ export async function upsertPendingOnboarding(payload: {
     business_name: payload.business_name ?? existing?.business_name ?? "",
     first_name: payload.first_name ?? existing?.first_name ?? "",
     last_name: payload.last_name ?? existing?.last_name ?? "",
-    plan: payload.plan ?? existing?.plan ?? "starter",
+    plan: payload.plan ?? existing?.plan ?? "standard_249",
     location_limit: payload.location_limit ?? existing?.location_limit ?? 1,
     status: payload.status ?? existing?.status ?? "invited",
     invited_at: existing?.invited_at ?? new Date().toISOString(),

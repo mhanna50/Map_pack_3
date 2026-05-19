@@ -20,6 +20,7 @@ from backend.app.features.qna.router import router as qna_router
 from backend.app.features.rank_tracking.competitors_router import router as competitors_router
 from backend.app.features.rank_tracking.keyword_strategy_router import router as keyword_strategy_router
 from backend.app.features.rank_tracking.router import router as rankings_router
+from backend.app.features.reviews.router import router as review_requests_router
 from backend.app.features.stripe_billing.router import router as billing_router
 from backend.app.features.tenants.router import router as orgs_router
 
@@ -41,6 +42,7 @@ api_router.include_router(automation_router)
 api_router.include_router(approvals_router)
 api_router.include_router(dashboard_router)
 api_router.include_router(billing_router)
+api_router.include_router(review_requests_router)
 api_router.include_router(org_gbp_router)
 api_router.include_router(admin_orgs_router)
 api_router.include_router(admin_approvals_router)

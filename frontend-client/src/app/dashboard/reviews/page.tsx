@@ -14,13 +14,21 @@ import { Tabs } from "@/components/ui/tabs";
 import { useTenant } from "@/features/tenants/tenant-context";
 import { listReviewRequests } from "@/lib/db";
 import { format } from "@/lib/date-utils";
+import { fetchBackendJson } from "@/lib/backend-api";
 
 type ReviewRequest = {
   id: string | number;
   customer_name?: string | null;
   customer_phone?: string | null;
+  customer_email?: string | null;
+  contact?: {
+    name?: string | null;
+    phone?: string | null;
+    email?: string | null;
+  } | null;
   status?: string | null;
   created_at?: string | null;
+  sent_at?: string | null;
   last_sent_at?: string | null;
   location_id?: string | null;
 };
@@ -34,13 +42,18 @@ const statusTabs = [
 ];
 
 export default function ReviewsPage() {
-  const { tenantId, selectedLocationId, refresh: refreshTenant } = useTenant();
+  const { tenantId, selectedLocationId, refresh: refreshTenant, supabase } = useTenant();
   const [requests, setRequests] = useState<ReviewRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [statusFilter, setStatusFilter] = useState("all");
   const [sendModal, setSendModal] = useState(false);
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [notes, setNotes] = useState("");
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
   const [resendAfterDays, setResendAfterDays] = useState(7);
 
   const handleRefresh = async () => {
@@ -79,6 +92,41 @@ export default function ReviewsPage() {
     if (statusFilter === "all") return requests;
     return requests.filter((req) => req.status === statusFilter);
   }, [requests, statusFilter]);
+
+  const handleSendRequest = async () => {
+    if (!tenantId) {
+      setSendError("No tenant selected.");
+      return;
+    }
+    setSending(true);
+    setSendError(null);
+    try {
+      await fetchBackendJson<ReviewRequest>(
+        "/review-requests/",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            organization_id: tenantId,
+            location_id: selectedLocationId,
+            customer_name: customerName.trim(),
+            customer_phone: customerPhone.trim(),
+            notes: notes.trim() || undefined,
+            channel: "sms",
+          }),
+        },
+        supabase,
+      );
+      setCustomerName("");
+      setCustomerPhone("");
+      setNotes("");
+      setSendModal(false);
+      setRefreshKey((key) => key + 1);
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : "Unable to send review request");
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
     <DashboardShell onRefresh={handleRefresh}>
@@ -134,8 +182,8 @@ export default function ReviewsPage() {
                   {filtered.map((req, index) => (
                     <TR key={req.id?.toString?.() ?? `req-${index}`}>
                       <TD>
-                        <div className="font-semibold">{req.customer_name ?? "—"}</div>
-                        <p className="text-xs text-muted-foreground">{maskPhone(req.customer_phone)}</p>
+                        <div className="font-semibold">{req.customer_name ?? req.contact?.name ?? "—"}</div>
+                        <p className="text-xs text-muted-foreground">{maskPhone(req.customer_phone ?? req.contact?.phone)}</p>
                       </TD>
                       <TD>
                         <Badge variant={req.status === "review_left" || req.status === "completed" ? "success" : "muted"} className="capitalize">
@@ -143,7 +191,7 @@ export default function ReviewsPage() {
                         </Badge>
                       </TD>
                       <TD>{format(req.created_at)}</TD>
-                      <TD>{format(req.last_sent_at)}</TD>
+                      <TD>{format(req.last_sent_at ?? req.sent_at)}</TD>
                       <TD>
                         <Badge variant="muted">{req.location_id ?? "All"}</Badge>
                       </TD>
@@ -206,27 +254,46 @@ export default function ReviewsPage() {
         open={sendModal}
         onOpenChange={setSendModal}
         title="Send review request"
-        description="UI only — connect to your backend trigger"
+        description="Send an SMS review request through Twilio."
       >
         <div className="space-y-3">
           <label className="text-sm">
             Customer name
-            <input className="mt-1 w-full rounded-lg border border-border px-3 py-2" placeholder="Jane Smith" />
+            <input
+              className="mt-1 w-full rounded-lg border border-border px-3 py-2"
+              placeholder="Jane Smith"
+              value={customerName}
+              onChange={(event) => setCustomerName(event.target.value)}
+            />
           </label>
           <label className="text-sm">
             Phone (E.164)
-            <input className="mt-1 w-full rounded-lg border border-border px-3 py-2" placeholder="+15551234567" />
+            <input
+              className="mt-1 w-full rounded-lg border border-border px-3 py-2"
+              placeholder="+15551234567"
+              value={customerPhone}
+              onChange={(event) => setCustomerPhone(event.target.value)}
+            />
           </label>
           <label className="text-sm">
             Notes
-            <textarea className="mt-1 w-full rounded-lg border border-border px-3 py-2" rows={3} placeholder="Service details" />
+            <textarea
+              className="mt-1 w-full rounded-lg border border-border px-3 py-2"
+              rows={3}
+              placeholder="Service details"
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+            />
           </label>
+          {sendError && <p className="text-sm text-rose-600">{sendError}</p>}
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-border px-6 py-3">
           <Button variant="ghost" onClick={() => setSendModal(false)}>
             Cancel
           </Button>
-          <Button onClick={() => setSendModal(false)}>Send</Button>
+          <Button onClick={handleSendRequest} disabled={sending || !customerName.trim() || !customerPhone.trim()}>
+            {sending ? "Sending..." : "Send"}
+          </Button>
         </div>
       </Dialog>
     </DashboardShell>

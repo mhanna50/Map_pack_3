@@ -82,10 +82,12 @@ class ReviewRequestService:
         contact_id: uuid.UUID,
         job_id: uuid.UUID | None,
         channel: str,
+        location_id: uuid.UUID | None = None,
         send_at: datetime | None = None,
     ) -> ReviewRequest:
         request = ReviewRequest(
             organization_id=organization_id,
+            location_id=location_id,
             contact_id=contact_id,
             job_id=job_id,
             channel=channel,
@@ -99,6 +101,7 @@ class ReviewRequestService:
             action_type=ActionType.CUSTOM,
             run_at=scheduled_for,
             payload={"review_request_id": str(request.id)},
+            location_id=location_id,
         )
         self.audit.log(
             action="review_request.scheduled",
@@ -110,6 +113,18 @@ class ReviewRequestService:
         if scheduled_for <= datetime.now(timezone.utc):
             self._deliver_request(request)
         return request
+
+    def deliver_review_request(self, review_request_id: uuid.UUID) -> dict[str, str]:
+        review_request = self.db.get(ReviewRequest, review_request_id)
+        if not review_request:
+            return {"status": "missing_review_request"}
+        if review_request.status == ReviewRequestStatus.SENT:
+            return {"status": "already_sent"}
+        if review_request.status == ReviewRequestStatus.COMPLETED:
+            return {"status": "already_completed"}
+        self._deliver_request(review_request)
+        self.db.refresh(review_request)
+        return {"status": review_request.status.value}
 
     def mark_sent(self, review_request: ReviewRequest) -> ReviewRequest:
         review_request.status = ReviewRequestStatus.SENT

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 
 import pytest
@@ -20,7 +19,8 @@ class _FakeStripeList:
 
 def _configure_billing_settings(monkeypatch):
     monkeypatch.setattr(settings, "STRIPE_SECRET_KEY", "sk_test_123")
-    monkeypatch.setattr(settings, "STRIPE_PRICE_ID_STARTER", "price_starter")
+    monkeypatch.setattr(settings, "STRIPE_PRICE_ID_STANDARD", "price_249")
+    monkeypatch.setattr(settings, "STRIPE_PRICE_ID_FRIENDS_FAMILY", "price_129")
 
 
 def test_create_subscription_intent_blocks_existing_active_subscription(monkeypatch):
@@ -50,7 +50,7 @@ def test_create_subscription_intent_blocks_existing_active_subscription(monkeypa
         service.create_subscription_intent(
             email="Owner@Example.com",
             company_name="Acme Corp",
-            plan="starter",
+            plan="standard_249",
         )
 
     assert created["called"] is False
@@ -83,7 +83,7 @@ def test_create_checkout_session_blocks_existing_active_subscription(monkeypatch
         service.create_checkout_session(
             email="Owner@Example.com",
             company_name="Acme Corp",
-            plan="starter",
+            plan="standard_249",
         )
 
     assert created["called"] is False
@@ -118,7 +118,7 @@ def test_create_checkout_session_maps_metadata_and_relative_redirects(monkeypatc
     session = service.create_checkout_session(
         email="Owner@Example.com",
         company_name="Acme Corp",
-        plan="starter",
+        plan="standard_249",
         tenant_id="tenant-123",
         user_id="user-123",
         success_path="/onboarding?payment=success",
@@ -134,47 +134,16 @@ def test_create_checkout_session_maps_metadata_and_relative_redirects(monkeypatc
     assert captured["cancel_url"] == "https://app.example.test/onboarding?payment=canceled"
 
 
-def test_create_checkout_session_supports_base_plan_and_addon_prices(monkeypatch):
+def test_create_checkout_session_rejects_retired_addons(monkeypatch):
     _configure_billing_settings(monkeypatch)
-    monkeypatch.setattr(settings, "STRIPE_PRICE_ID_PRO", "price_pro")
-    monkeypatch.setattr(settings, "STRIPE_PRICE_ID_GROWTH_ADDON", "price_growth_addon")
-    monkeypatch.setattr(settings, "STRIPE_PRICE_ID_AUTHORITY_ADDON", "price_authority_addon")
-
-    monkeypatch.setattr(
-        billing_module.stripe.Customer,
-        "list",
-        lambda **kwargs: _FakeStripeList([SimpleNamespace(id="cus_123")]),
-    )
-    monkeypatch.setattr(
-        billing_module.stripe.Subscription,
-        "list",
-        lambda **kwargs: _FakeStripeList([]),
-    )
-
-    captured = {}
-
-    def _fake_checkout_create(**kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(id="cs_test_123", url="https://checkout.stripe.test/session")
-
-    monkeypatch.setattr(billing_module.stripe.checkout.Session, "create", _fake_checkout_create)
-
     service = BillingService()
-    service.create_checkout_session(
-        email="Owner@Example.com",
-        company_name="Acme Corp",
-        plan="99",
-        addons=["Growth Add-On", "authority", "growth"],
-    )
-
-    assert [item["price"] for item in captured["line_items"]] == [
-        "price_pro",
-        "price_growth_addon",
-        "price_authority_addon",
-    ]
-    assert captured["metadata"]["plan"] == "pro"
-    assert json.loads(captured["metadata"]["addons"]) == ["growth_add_on", "authority_add_on"]
-    assert captured["subscription_data"]["metadata"] == captured["metadata"]
+    with pytest.raises(ValueError, match="add-ons are no longer supported"):
+        service.create_checkout_session(
+            email="Owner@Example.com",
+            company_name="Acme Corp",
+            plan="standard_249",
+            addons=["Growth Add-On"],
+        )
 
 
 def test_create_checkout_session_supports_invite_selected_pricing(monkeypatch):
@@ -212,6 +181,19 @@ def test_create_checkout_session_supports_invite_selected_pricing(monkeypatch):
     assert captured["metadata"]["plan"] == "standard_249"
 
 
+def test_create_checkout_session_rejects_retired_starter_pro_agency_plans(monkeypatch):
+    _configure_billing_settings(monkeypatch)
+    service = BillingService()
+
+    for retired_plan in ["starter", "pro", "agency", "75", "99", "149"]:
+        with pytest.raises(ValueError, match="Unknown Stripe billing plan"):
+            service.create_checkout_session(
+                email="Owner@Example.com",
+                company_name="Acme Corp",
+                plan=retired_plan,
+            )
+
+
 def test_create_subscription_intent_allows_new_when_previous_subscription_canceled(monkeypatch):
     _configure_billing_settings(monkeypatch)
 
@@ -241,7 +223,7 @@ def test_create_subscription_intent_allows_new_when_previous_subscription_cancel
     result = service.create_subscription_intent(
         email="Owner@Example.com",
         company_name="Acme Corp",
-        plan="starter",
+        plan="friends_family",
     )
 
     assert result["subscription_id"] == "sub_new"

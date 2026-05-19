@@ -15,6 +15,7 @@ from backend.app.models.enums import (
     OrganizationType,
 )
 from backend.app.models.identity.organization import Organization
+from backend.app.models.google_business.listing_audit import ListingAudit
 from backend.app.models.google_business.location import Location
 from backend.app.models.google_business.location_settings import LocationSettings
 from backend.app.services.media.media_management import MediaManagementService
@@ -22,6 +23,18 @@ from backend.app.services.rank_tracking.competitor_monitoring import CompetitorM
 from backend.app.services.automation.automation_rules import AutomationRuleService
 from backend.app.services.automation.actions import ActionService
 from worker.app import tasks as worker_tasks
+
+
+def _add_completed_listing_audit(db_session, org_id, location_id):
+    db_session.add(
+        ListingAudit(
+            organization_id=org_id,
+            location_id=location_id,
+            audited_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc),
+            status="completed",
+        )
+    )
 
 
 def test_dispatch_due_actions_triggers_execution(
@@ -156,8 +169,16 @@ def test_run_automation_rules_action_triggers_rules(db_session, worker_session_f
     org = Organization(name="Automation Worker Org", org_type=OrganizationType.AGENCY)
     db_session.add(org)
     db_session.flush()
-    location = Location(name="Automation Worker Location", organization_id=org.id, timezone="UTC")
+    location = Location(
+        name="Automation Worker Location",
+        organization_id=org.id,
+        timezone="UTC",
+        status=LocationStatus.ACTIVE,
+    )
     db_session.add(location)
+    db_session.flush()
+    location.google_location_id = f"accounts/1/locations/{location.id}"
+    _add_completed_listing_audit(db_session, org.id, location.id)
     db_session.commit()
     rule_service = AutomationRuleService(db_session)
     rule_service.create_rule(
@@ -205,11 +226,11 @@ def test_schedule_keyword_campaigns_monthly_creates_actions(db_session, worker_s
         organization_id=org.id,
         timezone="UTC",
         status=LocationStatus.ACTIVE,
-        google_location_id="accounts/11/locations/22",
         address={"city": "Austin", "state": "TX", "primaryCategory": "HVAC contractor"},
     )
     db_session.add(location)
     db_session.flush()
+    location.google_location_id = f"accounts/11/locations/{location.id}"
     db_session.add(
         LocationSettings(
             location_id=location.id,
@@ -217,6 +238,7 @@ def test_schedule_keyword_campaigns_monthly_creates_actions(db_session, worker_s
             settings_json={"gbp_ready": True},
         )
     )
+    _add_completed_listing_audit(db_session, org.id, location.id)
     db_session.commit()
 
     result = worker_tasks._schedule_keyword_campaigns_monthly()
@@ -236,11 +258,11 @@ def test_schedule_keyword_campaigns_onboarding_creates_one_action(db_session, wo
         organization_id=org.id,
         timezone="UTC",
         status=LocationStatus.ACTIVE,
-        google_location_id="accounts/33/locations/44",
         address={"city": "Austin", "state": "TX", "primaryCategory": "Plumber"},
     )
     db_session.add(location)
     db_session.flush()
+    location.google_location_id = f"accounts/33/locations/{location.id}"
     db_session.add(
         LocationSettings(
             location_id=location.id,
@@ -248,6 +270,7 @@ def test_schedule_keyword_campaigns_onboarding_creates_one_action(db_session, wo
             settings_json={"gbp_ready": True},
         )
     )
+    _add_completed_listing_audit(db_session, org.id, location.id)
     db_session.commit()
 
     first = worker_tasks._schedule_keyword_campaigns_onboarding()

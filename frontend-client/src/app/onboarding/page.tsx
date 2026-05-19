@@ -26,7 +26,6 @@ const MAX_ONBOARDING_STEP = steps.length - 1;
 const BILLING_PLANS: Record<string, { label: string; price: string; checkoutPlan: string }> = {
   friends_family: { label: "Map Pack 3 Friends & Family", price: "$129/month", checkoutPlan: "friends_family" },
   standard_249: { label: "Map Pack 3 Standard", price: "$249/month", checkoutPlan: "standard_249" },
-  starter: { label: "Map Pack 3 starter", price: "$75/month", checkoutPlan: "starter" },
 };
 
 const ONBOARDING_STATUS_RANK: Record<string, number> = {
@@ -42,9 +41,9 @@ const ONBOARDING_STATUS_RANK: Record<string, number> = {
 };
 const buildScopedKey = (baseKey: string, scope: string) => `${baseKey}:${scope}`;
 const normalizeBillingPlan = (value: unknown) => {
-  if (typeof value !== "string") return "friends_family";
+  if (typeof value !== "string") return "standard_249";
   const normalized = value.trim().toLowerCase().replaceAll(" ", "_").replaceAll("-", "_");
-  return BILLING_PLANS[normalized] ? normalized : "friends_family";
+  return BILLING_PLANS[normalized] ? normalized : "standard_249";
 };
 type LocationInput = {
   city: string;
@@ -353,7 +352,7 @@ function OnboardingContent() {
   const [agreementError, setAgreementError] = useState<string | null>(null);
   const [loadingClaimStatus, setLoadingClaimStatus] = useState(true);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
-  const [billingPlan, setBillingPlan] = useState("friends_family");
+  const [billingPlan, setBillingPlan] = useState("standard_249");
   const [orgInfo, setOrgInfo] = useState<OrgInfoState>(defaultOrgInfo);
   const [creatingOrg, setCreatingOrg] = useState(false);
   const [createOrgError, setCreateOrgError] = useState<string | null>(null);
@@ -1076,7 +1075,7 @@ function OnboardingContent() {
         body: JSON.stringify({
           email: userEmail,
           company_name: companyName || "New client",
-          plan: BILLING_PLANS[billingPlan]?.checkoutPlan ?? "friends_family",
+          plan: BILLING_PLANS[billingPlan]?.checkoutPlan ?? "standard_249",
           tenant_id: tenantId,
           user_id: userStorageScope,
           success_path: "/onboarding?payment=success",
@@ -2412,7 +2411,7 @@ function OnboardingContent() {
               <h2 className="text-xl font-semibold">Stripe payment (final step)</h2>
               <p className="text-sm text-slate-600">
                 You are signing up for the {BILLING_PLANS[billingPlan]?.label ?? "Map Pack 3"} plan at{" "}
-                <span className="font-semibold">{BILLING_PLANS[billingPlan]?.price ?? "$129/month"}</span>.
+                <span className="font-semibold">{BILLING_PLANS[billingPlan]?.price ?? "$249/month"}</span>.
               </p>
               <p className="text-sm text-slate-600">Sign the agreement, continue to Stripe Checkout, then return here after payment is confirmed.</p>
               {stripeError && <p className="text-sm text-rose-600">{stripeError}</p>}
@@ -2430,7 +2429,7 @@ function OnboardingContent() {
               <div className="space-y-3 rounded-2xl border border-slate-200 p-4">
                 <p className="text-sm text-slate-700">
                   By signing below, you agree to recurring billing of{" "}
-                  <span className="font-semibold">{BILLING_PLANS[billingPlan]?.price ?? "$129/month"}</span> for this service until canceled.
+                  <span className="font-semibold">{BILLING_PLANS[billingPlan]?.price ?? "$249/month"}</span> for this service until canceled.
                 </p>
                 <label className="block">
                   <span className="text-sm text-slate-600">Typed signature (full name)</span>

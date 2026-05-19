@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Iterable
 from typing import Any, cast
@@ -15,22 +14,6 @@ logger = logging.getLogger(__name__)
 
 class BillingService:
     _BASE_PLAN_ALIASES = {
-        "starter": "starter",
-        "base_75": "starter",
-        "75": "starter",
-        "$75": "starter",
-        "pro": "pro",
-        "standard": "pro",
-        "base_99": "pro",
-        "99": "pro",
-        "$99": "pro",
-        "agency": "agency",
-        "premium": "agency",
-        "base_149": "agency",
-        "149": "agency",
-        "$149": "agency",
-        "all_in": "agency",
-        "all-in": "agency",
         "friends_family": "friends_family",
         "friends_and_family": "friends_family",
         "family": "friends_family",
@@ -44,9 +27,6 @@ class BillingService:
         "$249": "standard_249",
     }
     _BASE_PLAN_CONFIG = {
-        "starter": ("STRIPE_PRICE_ID_STARTER", "STRIPE_PRICE_AMOUNT_STARTER", "GBP Automations Starter"),
-        "pro": ("STRIPE_PRICE_ID_PRO", "STRIPE_PRICE_AMOUNT_PRO", "GBP Automations Pro"),
-        "agency": ("STRIPE_PRICE_ID_AGENCY", "STRIPE_PRICE_AMOUNT_AGENCY", "GBP Automations Agency"),
         "friends_family": (
             "STRIPE_PRICE_ID_FRIENDS_FAMILY",
             "STRIPE_PRICE_AMOUNT_FRIENDS_FAMILY",
@@ -57,18 +37,6 @@ class BillingService:
             "STRIPE_PRICE_AMOUNT_STANDARD",
             "Map Pack 3 - Standard",
         ),
-    }
-    _ADDON_ALIASES = {
-        "growth": "growth_add_on",
-        "growth_addon": "growth_add_on",
-        "growth_add_on": "growth_add_on",
-        "authority": "authority_add_on",
-        "authority_addon": "authority_add_on",
-        "authority_add_on": "authority_add_on",
-    }
-    _ADDON_CONFIG = {
-        "growth_add_on": ("STRIPE_PRICE_ID_GROWTH_ADDON", "STRIPE_PRICE_AMOUNT_GROWTH_ADDON", "Growth Add-On"),
-        "authority_add_on": ("STRIPE_PRICE_ID_AUTHORITY_ADDON", "STRIPE_PRICE_AMOUNT_AUTHORITY_ADDON", "Authority Add-On"),
     }
     _BLOCKING_SUBSCRIPTION_STATUSES = frozenset(
         {
@@ -99,23 +67,23 @@ class BillingService:
         *,
         email: str,
         company_name: str,
-        plan: str = "starter",
+        plan: str = "standard_249",
         addons: list[str] | None = None,
     ) -> dict[str, str | bool | None]:
         normalized_email = self._normalize_email(email)
         normalized_plan = self._normalize_plan(plan)
-        normalized_addons = self._normalize_addons(addons)
+        self._raise_if_addons_requested(addons)
         self._raise_if_subscription_exists(normalized_email)
         customer = self._get_or_create_customer(normalized_email)
         subscription = stripe.Subscription.create(
             customer=customer.id,
-            items=self._build_subscription_items(normalized_plan, normalized_addons),
+            items=self._build_subscription_items(normalized_plan),
             payment_behavior="default_incomplete",
             payment_settings={
                 "save_default_payment_method": "on_subscription",
                 "payment_method_types": ["card"],
             },
-            metadata=self._build_metadata(company_name=company_name, plan=normalized_plan, addons=normalized_addons),
+            metadata=self._build_metadata(company_name=company_name, plan=normalized_plan),
             expand=["latest_invoice.payment_intent", "pending_setup_intent"],
         )
         intent = subscription.latest_invoice.payment_intent
@@ -148,7 +116,7 @@ class BillingService:
         *,
         email: str,
         company_name: str,
-        plan: str = "starter",
+        plan: str = "standard_249",
         addons: list[str] | None = None,
         tenant_id: str | None = None,
         user_id: str | None = None,
@@ -159,7 +127,7 @@ class BillingService:
             raise ValueError("Stripe secret key must be configured")
         normalized_email = self._normalize_email(email)
         normalized_plan = self._normalize_plan(plan)
-        normalized_addons = self._normalize_addons(addons)
+        self._raise_if_addons_requested(addons)
         self._raise_if_subscription_exists(normalized_email)
         success_url = self._resolve_checkout_redirect_url(
             configured_url=str(settings.STRIPE_SUCCESS_URL) if settings.STRIPE_SUCCESS_URL else None,
@@ -173,7 +141,7 @@ class BillingService:
         )
         success_url = self._with_checkout_session_id(str(success_url))
         cancel_url = str(cancel_url)
-        metadata = self._build_metadata(company_name=company_name, plan=normalized_plan, addons=normalized_addons)
+        metadata = self._build_metadata(company_name=company_name, plan=normalized_plan)
         if tenant_id:
             metadata["tenant_id"] = tenant_id
         if user_id:
@@ -181,7 +149,7 @@ class BillingService:
         session = stripe.checkout.Session.create(
             mode="subscription",
             customer_email=normalized_email,
-            line_items=cast(Any, self._build_line_items(normalized_plan, normalized_addons)),
+            line_items=cast(Any, self._build_line_items(normalized_plan)),
             client_reference_id=tenant_id,
             metadata=metadata,
             subscription_data={"metadata": metadata},
@@ -233,10 +201,7 @@ class BillingService:
     def _resolve_price_id(self, plan: str) -> str | None:
         normalized = self._normalize_plan(plan)
         price_attr, _, _ = self._BASE_PLAN_CONFIG[normalized]
-        price_id = getattr(settings, price_attr)
-        if price_id:
-            return price_id
-        return settings.STRIPE_PRICE_ID
+        return getattr(settings, price_attr) or None
 
     def _resolve_price_amount(self, plan: str) -> int | None:
         normalized = self._normalize_plan(plan)
@@ -246,24 +211,11 @@ class BillingService:
             return amount
         return settings.STRIPE_PRICE_AMOUNT
 
-    def _resolve_addon_price_id(self, addon: str) -> str | None:
-        normalized = self._normalize_addon(addon)
-        price_attr, _, _ = self._ADDON_CONFIG[normalized]
-        return getattr(settings, price_attr) or None
+    def _build_subscription_items(self, plan: str) -> list[dict[str, Any]]:
+        return self._build_line_items(plan)
 
-    def _resolve_addon_price_amount(self, addon: str) -> int | None:
-        normalized = self._normalize_addon(addon)
-        _, amount_attr, _ = self._ADDON_CONFIG[normalized]
-        return getattr(settings, amount_attr)
-
-    def _build_subscription_items(self, plan: str, addons: list[str]) -> list[dict[str, Any]]:
-        return self._build_line_items(plan, addons)
-
-    def _build_line_items(self, plan: str, addons: list[str] | None = None) -> list[dict[str, Any]]:
-        line_items = [self._build_line_item(plan)]
-        for addon in self._normalize_addons(addons):
-            line_items.append(self._build_addon_line_item(addon))
-        return line_items
+    def _build_line_items(self, plan: str) -> list[dict[str, Any]]:
+        return [self._build_line_item(plan)]
 
     def _build_line_item(self, plan: str) -> dict[str, Any]:
         price_id = self._resolve_price_id(plan)
@@ -302,65 +254,21 @@ class BillingService:
             raise ValueError("Unknown Stripe billing plan")
         return normalized
 
-    def _normalize_addon(self, addon: str) -> str:
-        normalized = self._normalize_key(addon)
-        normalized = self._ADDON_ALIASES.get(normalized, normalized)
-        if normalized not in self._ADDON_CONFIG:
-            raise ValueError("Unknown Stripe billing add-on")
-        return normalized
-
-    def _normalize_addons(self, addons: list[str] | None) -> list[str]:
-        normalized_addons: list[str] = []
-        for addon in addons or []:
-            normalized = self._normalize_addon(addon)
-            if normalized not in normalized_addons:
-                normalized_addons.append(normalized)
-        return normalized_addons
-
-    def _build_addon_line_item(self, addon: str) -> dict[str, Any]:
-        normalized = self._normalize_addon(addon)
-        price_id = self._resolve_addon_price_id(normalized)
-        if price_id:
-            return {
-                "price": price_id,
-                "quantity": 1,
-            }
-        amount = self._resolve_addon_price_amount(normalized)
-        if amount is None:
-            raise ValueError("Stripe price id or amount must be configured for this add-on")
-        if amount < 0:
-            raise ValueError("Stripe add-on price amount must be zero or greater")
-        return {
-            "price_data": {
-                "currency": settings.STRIPE_PRICE_CURRENCY,
-                "product_data": {
-                    "name": self._addon_display_name(normalized),
-                },
-                "unit_amount": amount,
-                "recurring": {
-                    "interval": settings.STRIPE_PRICE_INTERVAL,
-                },
-            },
-            "quantity": 1,
-        }
+    @staticmethod
+    def _raise_if_addons_requested(addons: list[str] | None) -> None:
+        if addons:
+            raise ValueError("Stripe billing add-ons are no longer supported")
 
     def _plan_display_name(self, plan: str) -> str:
         normalized = self._normalize_plan(plan)
         return self._BASE_PLAN_CONFIG[normalized][2]
 
-    def _addon_display_name(self, addon: str) -> str:
-        normalized = self._normalize_addon(addon)
-        return self._ADDON_CONFIG[normalized][2]
-
     @staticmethod
-    def _build_metadata(*, company_name: str, plan: str, addons: list[str]) -> dict[str, str]:
-        metadata = {
+    def _build_metadata(*, company_name: str, plan: str) -> dict[str, str]:
+        return {
             "company_name": company_name,
             "plan": plan,
         }
-        if addons:
-            metadata["addons"] = json.dumps(addons)
-        return metadata
 
     @staticmethod
     def _with_checkout_session_id(success_url: str) -> str:
@@ -418,7 +326,7 @@ class BillingService:
         return {
             "email": customer_details.get("email") or session.get("customer_email"),
             "company_name": metadata.get("company_name") or customer_details.get("name") or "New Client",
-            "plan": metadata.get("plan") or "starter",
+            "plan": metadata.get("plan") or "standard_249",
             "reference": session.get("id"),
             "tenant_id": metadata.get("tenant_id") or session.get("client_reference_id"),
             "user_id": metadata.get("user_id"),

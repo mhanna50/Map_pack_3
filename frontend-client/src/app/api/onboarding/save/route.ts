@@ -627,7 +627,7 @@ export async function POST(request: NextRequest) {
     business_name: body.business_name ?? existingRecord?.business_name ?? "",
     first_name: body.first_name ?? existingRecord?.first_name ?? "",
     last_name: body.last_name ?? existingRecord?.last_name ?? "",
-    plan: existingRecord?.plan ?? body.plan ?? "starter",
+    plan: existingRecord?.plan ?? body.plan ?? "standard_249",
     location_limit: existingRecord?.location_limit ?? body.location_limit ?? 1,
     status: mergedStatus,
     invited_at: existingRecord?.invited_at ?? new Date().toISOString(),
@@ -726,7 +726,7 @@ export async function POST(request: NextRequest) {
 
   if (resolvedTenantId) {
     const businessName = String(merged.business_name ?? "").trim();
-    const plan = String(merged.plan ?? "starter").trim() || "starter";
+    const plan = String(merged.plan ?? "standard_249").trim() || "standard_249";
     const locationLimitRaw = Number(merged.location_limit ?? 1);
     const locationLimit = Number.isFinite(locationLimitRaw) && locationLimitRaw > 0 ? locationLimitRaw : 1;
 

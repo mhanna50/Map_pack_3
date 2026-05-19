@@ -2969,7 +2969,7 @@ class KeywordCampaignSchedulerService:
             )
         except ValueError:
             return False
-        return bool(state.get("ready"))
+        return bool(state.get("ready")) and self._has_core_profile_fields(location)
 
     def _has_core_profile_fields(self, location: Location) -> bool:
         settings_json = dict(location.settings.settings_json or {}) if location.settings else {}

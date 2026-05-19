@@ -278,7 +278,7 @@ export async function POST(request: NextRequest) {
         email: normalizedEmail,
         tenantId: profileTenantId,
         businessName: tenant?.business_name ?? "",
-        plan: tenant?.plan_name ?? tenant?.plan_tier ?? "starter",
+        plan: tenant?.plan_name ?? tenant?.plan_tier ?? "standard_249",
       });
       if (compatibilityErr) {
         return NextResponse.json({ error: compatibilityErr }, { status: 400 });
@@ -298,7 +298,7 @@ export async function POST(request: NextRequest) {
         business_name: tenant?.business_name ?? "",
         first_name: "",
         last_name: "",
-        plan_name: tenant?.plan_name ?? tenant?.plan_tier ?? "starter",
+        plan_name: tenant?.plan_name ?? tenant?.plan_tier ?? "standard_249",
         location_limit: tenant?.location_limit ?? 1,
         status: recoveredStatus,
         onboarding_draft: null,
@@ -317,8 +317,8 @@ export async function POST(request: NextRequest) {
       business_name: businessName,
       slug,
       status: "invited",
-      plan_name: "starter",
-      plan_tier: "starter",
+      plan_name: "standard_249",
+      plan_tier: "standard_249",
       location_limit: 1,
     });
     if (tenantErr) {
@@ -331,7 +331,7 @@ export async function POST(request: NextRequest) {
         business_name: businessName,
         first_name: "",
         last_name: "",
-        plan: "starter",
+        plan: "standard_249",
         location_limit: 1,
         status: "in_progress",
         invited_at: new Date().toISOString(),
@@ -359,7 +359,7 @@ export async function POST(request: NextRequest) {
       email: normalizedEmail,
       tenantId,
       businessName,
-      plan: "starter",
+      plan: "standard_249",
     });
     if (compatibilityErr) {
       return NextResponse.json({ error: compatibilityErr }, { status: 400 });
@@ -376,7 +376,7 @@ export async function POST(request: NextRequest) {
       business_name: inserted?.business_name ?? businessName,
       first_name: "",
       last_name: "",
-      plan_name: "starter",
+      plan_name: "standard_249",
       location_limit: 1,
       status: "in_progress",
       onboarding_draft: null,
@@ -410,8 +410,8 @@ export async function POST(request: NextRequest) {
       slug,
       // Keep new tenants non-active until billing/GBP are completed
       status: "invited",
-      plan_name: pending.plan ?? "starter",
-      plan_tier: pending.plan ?? "starter",
+      plan_name: pending.plan ?? "standard_249",
+      plan_tier: pending.plan ?? "standard_249",
       location_limit: pending.location_limit ?? 1,
     });
     if (tenantErr) {
@@ -437,7 +437,7 @@ export async function POST(request: NextRequest) {
     email: normalizedEmail,
     tenantId,
     businessName: pending.business_name ?? "",
-    plan: pending.plan ?? "starter",
+    plan: pending.plan ?? "standard_249",
   });
   if (compatibilityErr) {
     return NextResponse.json({ error: compatibilityErr }, { status: 400 });

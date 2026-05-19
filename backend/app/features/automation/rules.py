@@ -157,7 +157,8 @@ class AutomationRuleService:
             metrics = self._evaluate(rule)
             if metrics["should_trigger"]:
                 action = self._execute(rule, metrics)
-                results.append({"rule_id": str(rule.id), "action_id": str(action.id)})
+                if action:
+                    results.append({"rule_id": str(rule.id), "action_id": str(action.id)})
         return results
 
     def _resolve_conflicts(self, rules: Sequence[AutomationRule]) -> list[AutomationRule]:
@@ -252,10 +253,21 @@ class AutomationRuleService:
         if rule.action_type in {AutomationActionType.CREATE_POST, AutomationActionType.ACCEPT_REVIEW_REPLY} and rule.location_id:
             from backend.app.services.google_business.readiness import GbpReadinessService
 
-            GbpReadinessService(self.db).ensure_ready_for_automation(
-                organization_id=rule.organization_id,
-                location_id=rule.location_id,
-            )
+            try:
+                GbpReadinessService(self.db).ensure_ready_for_automation(
+                    organization_id=rule.organization_id,
+                    location_id=rule.location_id,
+                )
+            except ValueError as exc:
+                self.audit.log(
+                    action="automation.rule.skipped",
+                    organization_id=rule.organization_id,
+                    location_id=rule.location_id,
+                    entity_type="automation_rule",
+                    entity_id=str(rule.id),
+                    metadata={"rule_id": str(rule.id), "reason": str(exc), "metrics": metrics},
+                )
+                return None
         action = self.action_service.schedule_action(
             organization_id=rule.organization_id,
             action_type=self._map_action(rule.action_type),

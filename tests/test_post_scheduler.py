@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from backend.app.models.enums import OrganizationType, PostStatus, PostType
+from backend.app.models.enums import LocationStatus, OrganizationType, PostStatus, PostType
+from backend.app.models.google_business.listing_audit import ListingAudit
 from backend.app.models.google_business.location import Location
 from backend.app.models.identity.organization import Organization
 from backend.app.models.posts.post_candidate import PostCandidate
@@ -14,9 +15,24 @@ def _setup(db_session):
     org = Organization(name="Scheduler Org", org_type=OrganizationType.AGENCY)
     db_session.add(org)
     db_session.flush()
-    location = Location(name="Scheduler Location", organization_id=org.id, timezone="UTC")
+    location = Location(
+        name="Scheduler Location",
+        organization_id=org.id,
+        timezone="UTC",
+        status=LocationStatus.ACTIVE,
+    )
     db_session.add(location)
     db_session.flush()
+    location.google_location_id = f"accounts/scheduler/locations/{location.id}"
+    db_session.add(
+        ListingAudit(
+            organization_id=org.id,
+            location_id=location.id,
+            audited_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc),
+            status="completed",
+        )
+    )
     candidate = PostCandidate(
         organization_id=org.id,
         location_id=location.id,

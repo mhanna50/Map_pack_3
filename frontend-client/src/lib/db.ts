@@ -118,7 +118,7 @@ export async function listReviewRequests(
   const supabase = createClient();
   let query = supabase
     .from("review_requests")
-    .select()
+    .select("*, contact:contacts(name, phone, email)")
     .eq("tenant_id", tenantId)
     .order("created_at", { ascending: false })
     .limit(limit)
