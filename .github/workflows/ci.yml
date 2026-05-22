@@ -200,7 +200,7 @@ jobs:
       - name: Build ${{ matrix.name }} image
         run: |
           if [ -n "${{ matrix.app_dir || '' }}" ]; then
-            docker build -f ${{ matrix.dockerfile }} --build-arg APP_DIR=${{ matrix.app_dir }} -t map-pack-${{ matrix.name }}:ci .
+            docker build -f ${{ matrix.dockerfile }} --build-arg APP_DIR=${{ matrix.app_dir }} --build-arg FRONTEND_MODE=production -t map-pack-${{ matrix.name }}:ci .
           else
             docker build -f ${{ matrix.dockerfile }} -t map-pack-${{ matrix.name }}:ci .
           fi

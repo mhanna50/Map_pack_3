@@ -2,6 +2,7 @@ FROM node:20-alpine
 
 # Name of the frontend app directory (default matches renamed folder)
 ARG APP_DIR=frontend-client
+ARG FRONTEND_MODE=development
 
 WORKDIR /app/${APP_DIR}
 
@@ -12,6 +13,21 @@ ENV NEXT_TELEMETRY_DISABLED=1 \
     NPM_CONFIG_LEGACY_PEER_DEPS=true
 
 COPY ${APP_DIR}/package.json ${APP_DIR}/package-lock.json ./
-RUN npm ci --legacy-peer-deps
+RUN npm ci --legacy-peer-deps --no-audit --no-fund
 
 COPY ${APP_DIR} ./
+RUN if [ "$FRONTEND_MODE" = "production" ]; then \
+      npm run build \
+      && npm prune --omit=dev --legacy-peer-deps --no-audit --no-fund \
+      && rm -rf \
+        /usr/local/bin/npm \
+        /usr/local/bin/npx \
+        /usr/local/bin/corepack \
+        /usr/local/bin/yarn \
+        /usr/local/bin/yarnpkg \
+        /usr/local/lib/node_modules/npm \
+        /usr/local/lib/node_modules/corepack \
+        /opt/yarn-*; \
+    fi
+
+CMD ["node", "node_modules/next/dist/bin/next", "start", "--hostname", "0.0.0.0"]
