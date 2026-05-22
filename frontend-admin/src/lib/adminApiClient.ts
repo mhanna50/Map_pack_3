@@ -46,12 +46,12 @@ export const adminApi = {
       trend?: number;
     }>("/api/admin/kpis"),
   tenants: (params?: { page?: number; pageSize?: number; status?: string; q?: string }) =>
-    apiFetch<{ rows: any[]; total: number }>("/api/admin/tenants", { searchParams: params }),
-  tenant: (id: string) => apiFetch<any>(`/api/admin/tenants/${id}`),
+    apiFetch<{ rows: unknown[]; total: number }>("/api/admin/tenants", { searchParams: params }),
+  tenant: (id: string) => apiFetch<unknown>(`/api/admin/tenants/${id}`),
   setTenantAutomationPaused: (id: string, paused: boolean) =>
     apiFetch<{ tenant_id: string; paused: boolean }>(`/api/admin/tenants/${id}`, { method: "PATCH", body: { paused } }),
   invite: (payload: unknown) => apiFetch<{ link: string | null; emailed: boolean }>("/api/admin/onboarding/invite", { method: "POST", body: payload }),
-  onboardingList: () => apiFetch<{ rows: any[] }>("/api/admin/onboarding/list"),
+  onboardingList: () => apiFetch<{ rows: unknown[] }>("/api/admin/onboarding/list"),
   onboardingCancel: (email: string) =>
     apiFetch<{ canceled: boolean; resendReady: boolean; message?: string | null; deletedAuthUsers?: number; deletedPublicRows?: number }>(
       "/api/admin/onboarding/cancel",
@@ -66,10 +66,10 @@ export const adminApi = {
   impersonateStart: (tenantId: string, reason: string) =>
     apiFetch<{ started: boolean }>("/api/admin/impersonate/start", { method: "POST", body: { tenantId, reason } }),
   impersonateStop: () => apiFetch<{ ended: boolean }>("/api/admin/impersonate/stop", { method: "POST" }),
-  audit: (params?: { page?: number; pageSize?: number }) => apiFetch<{ rows: any[]; total: number }>("/api/admin/audit", { searchParams: params }),
-  billing: () => apiFetch<{ rows: any[] }>("/api/admin/billing"),
-  gbp: () => apiFetch<{ rows: any[] }>("/api/admin/gbp"),
+  audit: (params?: { page?: number; pageSize?: number }) => apiFetch<{ rows: unknown[]; total: number }>("/api/admin/audit", { searchParams: params }),
+  billing: () => apiFetch<{ rows: unknown[] }>("/api/admin/billing"),
+  gbp: () => apiFetch<{ rows: unknown[] }>("/api/admin/gbp"),
   usage: (params?: { from?: string; to?: string; plan?: string }) =>
-    apiFetch<{ aggregates: any; rankings: any[] }>("/api/admin/usage", { searchParams: params }),
-  support: (params?: { status?: string }) => apiFetch<{ rows: any[] }>("/api/admin/support", { searchParams: params }),
+    apiFetch<{ aggregates: Record<string, unknown>; rankings: unknown[] }>("/api/admin/usage", { searchParams: params }),
+  support: (params?: { status?: string }) => apiFetch<{ rows: unknown[] }>("/api/admin/support", { searchParams: params }),
 };
