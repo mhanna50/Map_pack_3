@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import inspect, text
-from sqlalchemy.exc import NoSuchTableError, SQLAlchemyError
+from sqlalchemy import MetaData, Table, insert, select
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError, NoSuchTableError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.app.models.enums import OrganizationType
+
+TENANT_BRIDGE_COLUMNS = ("tenant_id", "business_name", "slug", "tenant_type", "plan_tier")
 
 
 def ensure_tenant_row(
@@ -28,37 +32,42 @@ def ensure_tenant_row(
         return
 
     try:
-        columns = {column["name"] for column in inspect(bind).get_columns("tenants")}
+        connection = db.connection()
+        tenants_table = Table("tenants", MetaData(), autoload_with=connection)
     except (NoSuchTableError, SQLAlchemyError):
         return
 
+    columns = set(tenants_table.c.keys())
+    base_payload = {
+        "tenant_id": str(tenant_id),
+        "business_name": business_name,
+        "slug": slug,
+        "tenant_type": normalized_type,
+        "plan_tier": normalized_plan,
+    }
     payload = {
-        key: value
-        for key, value in {
-            "tenant_id": str(tenant_id),
-            "business_name": business_name,
-            "slug": slug,
-            "tenant_type": normalized_type,
-            "plan_tier": normalized_plan,
-        }.items()
+        key: base_payload[key]
+        for key in TENANT_BRIDGE_COLUMNS
         if key in columns
     }
     if not {"tenant_id", "business_name"}.issubset(payload):
         return
 
     try:
-        column_list = ", ".join(payload.keys())
-        value_list = ", ".join(f":{key}" for key in payload.keys())
-        db.execute(
-            text(
-                f"""
-                insert into tenants ({column_list})
-                values ({value_list})
-                on conflict (tenant_id) do nothing
-                """
-            ),
-            payload,
-        )
+        if connection.dialect.name == "postgresql":
+            statement = postgresql_insert(tenants_table).values(payload).on_conflict_do_nothing()
+        elif connection.dialect.name == "sqlite":
+            statement = sqlite_insert(tenants_table).values(payload).on_conflict_do_nothing()
+        else:
+            existing_tenant = db.execute(
+                select(tenants_table.c.tenant_id).where(tenants_table.c.tenant_id == payload["tenant_id"])
+            ).first()
+            if existing_tenant:
+                return
+            statement = insert(tenants_table).values(payload)
+        db.execute(statement)
+    except IntegrityError:
+        return
     except SQLAlchemyError as exc:
         message = str(exc).lower()
         # Older local schemas may not have tenant tables/types.

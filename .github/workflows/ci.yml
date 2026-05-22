@@ -202,7 +202,7 @@ jobs:
           fi
 
       - name: Scan ${{ matrix.name }} image with Trivy
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: map-pack-${{ matrix.name }}:ci
           format: 'table'

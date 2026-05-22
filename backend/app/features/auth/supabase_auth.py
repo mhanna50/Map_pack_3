@@ -4,7 +4,7 @@ import time
 from typing import Any
 
 import httpx
-from jose import jwt
+import jwt
 
 from backend.app.core.config import settings
 
@@ -45,9 +45,10 @@ class SupabaseTokenVerifier:
         key = next((item for item in keys if item.get("kid") == kid), None)
         if not key:
             raise ValueError("Unable to find matching JWKS key")
+        signing_key = jwt.PyJWK.from_dict(key).key
         return jwt.decode(
             token,
-            key,
+            signing_key,
             algorithms=[alg],
             audience=self.audience,
             issuer=self.issuer,

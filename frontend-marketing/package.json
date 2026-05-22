@@ -10,7 +10,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@lottiefiles/dotlottie-react": "^0.8.12",
+    "@lottiefiles/dotlottie-react": "^0.19.4",
     "@react-three/fiber": "^9.3.0",
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.50.0",
