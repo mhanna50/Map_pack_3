@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Eye, Shield, Ban, PauseCircle, PlayCircle } from "lucide-react";
 import { AdminShell } from "@/features/admin/components/shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -24,6 +25,11 @@ type Tenant = {
   posting_paused?: boolean;
   last_activity?: string;
   created_at?: string;
+  subscription_status?: string;
+  plan?: string | null;
+  active_modules?: string[];
+  open_issues?: string[];
+  mrr?: string | number | null;
 };
 
 type Location = { id: string; name?: string; gbp_location_id?: string | null; is_active?: boolean | null };
@@ -61,7 +67,7 @@ export default function AdminClientsPage() {
       setLoading(true);
       setError(null);
       try {
-        const data = await adminApi.tenants({ page, pageSize, ...filters });
+        const data = await adminApi.monitoringClients({ q: filters.q, status: filters.status });
         if (!active) return;
         setTenants((data.rows ?? []) as Tenant[]);
         setTotal(data.total ?? 0);
@@ -195,8 +201,11 @@ export default function AdminClientsPage() {
                 <THead>
                   <TR>
                     <TH>Client</TH>
-                    <TH>Status</TH>
-                    <TH>Last activity</TH>
+	                    <TH>Subscription</TH>
+	                    <TH>Active modules</TH>
+	                    <TH>Open issues</TH>
+	                    <TH>MRR/plan</TH>
+	                    <TH>Last activity</TH>
                     <TH>Created</TH>
                     <TH>Actions</TH>
                   </TR>
@@ -209,18 +218,24 @@ export default function AdminClientsPage() {
                         <p className="text-xs text-muted-foreground">{tenant.tenant_id}</p>
                       </TD>
                       <TD>
-                        <Badge variant={statusVariant(tenant.status)} className="capitalize">
-                          {tenant.status}
-                        </Badge>
-                      </TD>
-                      <TD>{timeAgo(tenant.last_activity)}</TD>
+	                        <Badge variant={statusVariant(tenant.subscription_status ?? tenant.status)} className="capitalize">
+	                          {tenant.subscription_status ?? tenant.status}
+	                        </Badge>
+	                      </TD>
+	                      <TD className="max-w-[220px] text-xs">{tenant.active_modules?.slice(0, 4).join(", ") || "None"}</TD>
+	                      <TD className="max-w-[220px] text-xs">{tenant.open_issues?.join(", ") || "None"}</TD>
+	                      <TD>{tenant.mrr ? `$${tenant.mrr}` : tenant.plan ?? "-"}</TD>
+	                      <TD>{timeAgo(tenant.last_activity)}</TD>
                       <TD>{formatDate(tenant.created_at)}</TD>
                       <TD>
                         <div className="flex flex-wrap gap-2 text-xs">
-                          <Button variant="outline" size="sm" onClick={() => openDetail(tenant.tenant_id)}>
-                            <Eye className="h-4 w-4" />
-                            View
-                          </Button>
+	                          <Button variant="outline" size="sm" onClick={() => openDetail(tenant.tenant_id)}>
+	                            <Eye className="h-4 w-4" />
+	                            View
+	                          </Button>
+	                          <Link className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold" href={`/admin/clients/${tenant.tenant_id}`}>
+	                            Monitor
+	                          </Link>
                           <Button variant="ghost" size="sm" onClick={() => handleImpersonate(tenant.tenant_id)}>
                             <Shield className="h-4 w-4" />
                             Impersonate

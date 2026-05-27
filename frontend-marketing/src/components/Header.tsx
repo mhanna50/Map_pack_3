@@ -22,7 +22,7 @@ export function Header({ show }: HeaderProps) {
             <div className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-black/40">
               <DotLottieReact src="/lottie/earth.lottie" autoplay loop className="h-10 w-10" />
             </div>
-            Map Pack 3
+            Visora
           </Link>
           <nav className="hidden items-center gap-7 md:flex">
             <a href="#product" className="transition hover:text-sky-300">

@@ -26,6 +26,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "brace-expansion": "^1.1.15",
     "eslint": "^9",
     "eslint-config-next": "^16.1.6",
     "tailwindcss": "^4",
@@ -33,6 +34,7 @@
     "typescript": "^5"
   },
   "overrides": {
+    "ajv": "6.14.0",
     "@eslint/config-array": {
       "minimatch": "3.1.4"
     },
@@ -62,6 +64,12 @@
     },
     "micromatch": {
       "picomatch": "2.3.2"
+    },
+    "minimatch@3.1.4": {
+      "brace-expansion": "1.1.15"
+    },
+    "minimatch@9.0.7": {
+      "brace-expansion": "2.0.3"
     },
     "postcss": "8.5.15",
     "tinyglobby": {

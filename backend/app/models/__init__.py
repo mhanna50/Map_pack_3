@@ -29,6 +29,7 @@ from .identity.invite import OrganizationInvite
 from .identity.membership import Membership
 from .identity.organization import Organization
 from .identity.user import User
+from .lead_recovery import Lead, LeadEvent, LeadMessage, LeadNote, LeadRecoverySettings
 from .media.client_upload import ClientUpload
 from .media.media_album import MediaAlbum
 from .media.media_asset import MediaAsset
@@ -98,6 +99,11 @@ __all__ = [
     "ReviewRequest",
     "Membership",
     "Organization",
+    "LeadRecoverySettings",
+    "Lead",
+    "LeadMessage",
+    "LeadNote",
+    "LeadEvent",
     "Post",
     "PostMediaAttachment",
     "PostRotationMemory",

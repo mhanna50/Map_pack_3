@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Enum, ForeignKey, Index, Integer, String
+from sqlalchemy import Enum, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.db.base import Base
-from backend.app.models.enums import ReviewRating, ReviewStatus, enum_values
+from backend.app.models.enums import ReviewProvider, ReviewRating, ReviewStatus, enum_values
 from backend.app.models.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 
@@ -16,6 +16,8 @@ class Review(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __table_args__ = (
         Index("ix_review_org", "tenant_id"),
         Index("ix_review_location", "location_id"),
+        Index("ix_review_provider", "provider"),
+        UniqueConstraint("provider", "external_review_id", name="uq_review_provider_external_id"),
     )
 
     # Physical DB column is `tenant_id`; keep the Python attribute as
@@ -26,7 +28,13 @@ class Review(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     location_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("locations.id"), nullable=False
     )
+    provider: Mapped[ReviewProvider] = mapped_column(
+        Enum(ReviewProvider, name="review_provider", values_callable=enum_values),
+        nullable=False,
+        default=ReviewProvider.GOOGLE,
+    )
     external_review_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    source_url: Mapped[str | None] = mapped_column(String)
     author_name: Mapped[str | None] = mapped_column(String(255))
     rating: Mapped[ReviewRating] = mapped_column(
         Enum(ReviewRating, name="review_rating", values_callable=enum_values), nullable=False

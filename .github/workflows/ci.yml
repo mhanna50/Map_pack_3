@@ -35,8 +35,48 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.dev.txt
 
+      - name: Verify Python dependency consistency
+        run: pip check
+
       - name: Run pytest
         run: pytest
+
+  dependency-review:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-1.0, AGPL-3.0
+
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, python]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Analyze with CodeQL
+        uses: github/codeql-action/analyze@v3
 
   frontend-lint:
     runs-on: ubuntu-latest
@@ -56,7 +96,7 @@ jobs:
           cache-dependency-path: ${{ matrix.app }}/package-lock.json
 
       - name: Install dependencies
-        run: npm ci --no-audit --no-fund
+        run: npm ci --legacy-peer-deps --no-audit --no-fund
         working-directory: ${{ matrix.app }}
 
       - name: Lint ${{ matrix.app }}
@@ -81,11 +121,61 @@ jobs:
           cache-dependency-path: ${{ matrix.app }}/package-lock.json
 
       - name: Install dependencies
-        run: npm ci --no-audit --no-fund
+        run: npm ci --legacy-peer-deps --no-audit --no-fund
         working-directory: ${{ matrix.app }}
 
       - name: Type check ${{ matrix.app }}
         run: npm run type-check
+        working-directory: ${{ matrix.app }}
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [frontend-client]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps --no-audit --no-fund
+        working-directory: ${{ matrix.app }}
+
+      - name: Test ${{ matrix.app }}
+        run: npm test
+        working-directory: ${{ matrix.app }}
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [frontend-client, frontend-admin, frontend-marketing]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps --no-audit --no-fund
+        working-directory: ${{ matrix.app }}
+
+      - name: Build ${{ matrix.app }}
+        run: npm run build
         working-directory: ${{ matrix.app }}
 
   sast-bandit:
@@ -150,11 +240,15 @@ jobs:
           cache-dependency-path: ${{ matrix.app }}/package-lock.json
 
       - name: Install dependencies
-        run: npm ci --no-audit --no-fund
+        run: npm ci --legacy-peer-deps --no-audit --no-fund
         working-directory: ${{ matrix.app }}
 
-      - name: npm audit (${{ matrix.app }})
+      - name: npm production audit (${{ matrix.app }})
         run: npm audit --audit-level=high --omit=dev
+        working-directory: ${{ matrix.app }}
+
+      - name: npm full dependency audit (${{ matrix.app }})
+        run: npm audit --audit-level=high
         working-directory: ${{ matrix.app }}
 
   secrets-scan:
@@ -168,6 +262,47 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         with:
           args: detect --source . --no-banner
+
+  dockerfile-lint:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dockerfile:
+          - infra/Dockerfile.backend
+          - infra/Dockerfile.frontend
+          - infra/Dockerfile.worker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lint ${{ matrix.dockerfile }}
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ${{ matrix.dockerfile }}
+
+  repository-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      TRIVY_CACHE_DIR: .trivycache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Scan repository with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret
+          format: 'table'
+          exit-code: '1'
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: true
+          cache-dir: .trivycache
 
   container-scan:
     runs-on: ubuntu-latest

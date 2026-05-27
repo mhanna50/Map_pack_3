@@ -5,7 +5,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.enums import ReviewRating, ReviewStatus
+from backend.app.models.enums import ReviewProvider, ReviewRating, ReviewStatus
 from backend.app.models.reviews.review import Review
 from backend.app.models.reviews.review_reply import ReviewReply
 from backend.app.services.automation.approvals import ApprovalService
@@ -20,26 +20,35 @@ class ReviewService:
         *,
         organization_id: uuid.UUID,
         location_id: uuid.UUID,
+        provider: ReviewProvider = ReviewProvider.GOOGLE,
         external_review_id: str,
         rating: ReviewRating,
         comment: str,
         author_name: str | None,
+        source_url: str | None = None,
         metadata: dict | None = None,
     ) -> Review:
-        review = self.db.query(Review).filter_by(external_review_id=external_review_id).one_or_none()
+        review = (
+            self.db.query(Review)
+            .filter_by(provider=provider, external_review_id=external_review_id)
+            .one_or_none()
+        )
         if review:
             review.comment = comment
             review.rating = rating
             review.author_name = author_name or review.author_name
+            review.source_url = source_url or review.source_url
             review.metadata_json = metadata or review.metadata_json
         else:
             review = Review(
                 organization_id=organization_id,
                 location_id=location_id,
+                provider=provider,
                 external_review_id=external_review_id,
                 rating=rating,
                 comment=comment,
                 author_name=author_name,
+                source_url=source_url,
                 metadata_json=metadata or {},
             )
             self.db.add(review)

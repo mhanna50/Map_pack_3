@@ -91,6 +91,22 @@ type SelectedGoogleLocation = {
   connectedLocationId: string | null;
   metadata: Record<string, unknown> | null;
 };
+type LeadRecoveryOnboardingState = {
+  enabled: boolean;
+  business_phone: string;
+  owner_notification_phone: string;
+  owner_notification_email: string;
+  business_name: string;
+  twilio_phone_number: string;
+  twilio_phone_sid: string;
+  forwarding_status: string;
+  verification_status: string;
+  last_verification_attempt_at: string | null;
+  verified_at: string | null;
+  test_call_from_phone: string;
+  last_test_call_sid: string | null;
+  consent_confirmed: boolean;
+};
 type OnboardingDraftState = {
   organizationId?: string;
   orgInfo?: Partial<OrgInfoState>;
@@ -100,6 +116,7 @@ type OnboardingDraftState = {
   selectedGoogleAccountId?: string | null;
   selectedGoogleLocationName?: string | null;
   selectedGoogleLocation?: Partial<SelectedGoogleLocation> | null;
+  leadRecovery?: Partial<LeadRecoveryOnboardingState>;
   googleConnected?: boolean;
   agreementAccepted?: boolean;
   agreementSignature?: string;
@@ -128,6 +145,23 @@ const defaultOrgInfo: OrgInfoState = {
 const defaultBrandVoice: BrandVoiceState = {
   tone: toneOptions[0],
   websiteText: "",
+};
+
+const defaultLeadRecovery: LeadRecoveryOnboardingState = {
+  enabled: false,
+  business_phone: "",
+  owner_notification_phone: "",
+  owner_notification_email: "",
+  business_name: "",
+  twilio_phone_number: "",
+  twilio_phone_sid: "",
+  forwarding_status: "not_configured",
+  verification_status: "not_started",
+  last_verification_attempt_at: null,
+  verified_at: null,
+  test_call_from_phone: "",
+  last_test_call_sid: null,
+  consent_confirmed: false,
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -269,6 +303,35 @@ const normalizeClientError = (error: unknown, fallback: string) => {
   return trimmed;
 };
 
+const normalizePhoneForOnboarding = (value: string) => {
+  const normalized = value.trim().replace(/[\s().-]+/g, "");
+  if (/^\+[1-9]\d{7,14}$/.test(normalized)) return normalized;
+  if (/^\d{10}$/.test(normalized)) return `+1${normalized}`;
+  if (/^1\d{10}$/.test(normalized)) return `+${normalized}`;
+  return null;
+};
+
+const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
+const leadRecoveryStatusLabel = (status: string) => {
+  switch (status) {
+    case "verified":
+    case "active":
+      return "Verified";
+    case "waiting_for_verification":
+      return "Waiting for verification";
+    case "failed":
+    case "error":
+      return "Failed";
+    case "skipped":
+      return "Skipped";
+    case "not_configured":
+      return "Not configured";
+    default:
+      return status.replaceAll("_", " ");
+  }
+};
+
 const extractValidationMessage = (item: unknown) => {
   if (typeof item === "string") return item;
   if (item && typeof item === "object" && "msg" in item) {
@@ -363,6 +426,11 @@ function OnboardingContent() {
   const [inviteMismatch, setInviteMismatch] = useState<InviteMismatchState | null>(null);
   const [switchingAccount, setSwitchingAccount] = useState(false);
   const [brandVoice, setBrandVoice] = useState<BrandVoiceState>(defaultBrandVoice);
+  const [leadRecovery, setLeadRecovery] = useState<LeadRecoveryOnboardingState>(defaultLeadRecovery);
+  const [leadRecoveryLoading, setLeadRecoveryLoading] = useState(false);
+  const [leadRecoverySaving, setLeadRecoverySaving] = useState(false);
+  const [leadRecoveryError, setLeadRecoveryError] = useState<string | null>(null);
+  const [leadRecoveryMessage, setLeadRecoveryMessage] = useState<string | null>(null);
   const [services, setServices] = useState<ServiceEntry[]>([]);
   const [importedBusinessFields, setImportedBusinessFields] = useState<string[]>([]);
   const [googleAccounts, setGoogleAccounts] = useState<GoogleAccountOption[]>([]);
@@ -392,6 +460,7 @@ function OnboardingContent() {
       selectedGoogleAccountId,
       selectedGoogleLocationName,
       selectedGoogleLocation,
+      leadRecovery,
       googleConnected: overrides?.googleConnected ?? googleConnected,
       agreementAccepted,
       agreementSignature,
@@ -402,6 +471,7 @@ function OnboardingContent() {
       agreementSignature,
       brandVoice,
       importedBusinessFields,
+      leadRecovery,
       googleConnected,
       orgInfo,
       organizationId,
@@ -419,6 +489,7 @@ function OnboardingContent() {
     }
     const orgInfoDraft = isRecord(rawDraft.orgInfo) ? rawDraft.orgInfo : null;
     const brandVoiceDraft = isRecord(rawDraft.brandVoice) ? rawDraft.brandVoice : null;
+    const leadRecoveryDraft = isRecord(rawDraft.leadRecovery) ? rawDraft.leadRecovery : null;
 
     if (typeof rawDraft.organizationId === "string" && rawDraft.organizationId.trim()) {
       setOrganizationId(rawDraft.organizationId.trim());
@@ -465,6 +536,53 @@ function OnboardingContent() {
         ...prev,
         tone: typeof brandVoiceDraft.tone === "string" ? brandVoiceDraft.tone : prev.tone,
         websiteText: typeof brandVoiceDraft.websiteText === "string" ? brandVoiceDraft.websiteText : prev.websiteText,
+      }));
+    }
+    if (leadRecoveryDraft) {
+      setLeadRecovery((prev) => ({
+        ...prev,
+        enabled: typeof leadRecoveryDraft.enabled === "boolean" ? leadRecoveryDraft.enabled : prev.enabled,
+        business_phone: typeof leadRecoveryDraft.business_phone === "string" ? leadRecoveryDraft.business_phone : prev.business_phone,
+        owner_notification_phone:
+          typeof leadRecoveryDraft.owner_notification_phone === "string"
+            ? leadRecoveryDraft.owner_notification_phone
+            : prev.owner_notification_phone,
+        owner_notification_email:
+          typeof leadRecoveryDraft.owner_notification_email === "string"
+            ? leadRecoveryDraft.owner_notification_email
+            : prev.owner_notification_email,
+        business_name: typeof leadRecoveryDraft.business_name === "string" ? leadRecoveryDraft.business_name : prev.business_name,
+        twilio_phone_number:
+          typeof leadRecoveryDraft.twilio_phone_number === "string"
+            ? leadRecoveryDraft.twilio_phone_number
+            : prev.twilio_phone_number,
+        twilio_phone_sid:
+          typeof leadRecoveryDraft.twilio_phone_sid === "string" ? leadRecoveryDraft.twilio_phone_sid : prev.twilio_phone_sid,
+        forwarding_status:
+          typeof leadRecoveryDraft.forwarding_status === "string"
+            ? leadRecoveryDraft.forwarding_status
+            : prev.forwarding_status,
+        verification_status:
+          typeof leadRecoveryDraft.verification_status === "string"
+            ? leadRecoveryDraft.verification_status
+            : prev.verification_status,
+        last_verification_attempt_at:
+          typeof leadRecoveryDraft.last_verification_attempt_at === "string"
+            ? leadRecoveryDraft.last_verification_attempt_at
+            : prev.last_verification_attempt_at,
+        verified_at: typeof leadRecoveryDraft.verified_at === "string" ? leadRecoveryDraft.verified_at : prev.verified_at,
+        test_call_from_phone:
+          typeof leadRecoveryDraft.test_call_from_phone === "string"
+            ? leadRecoveryDraft.test_call_from_phone
+            : prev.test_call_from_phone,
+        last_test_call_sid:
+          typeof leadRecoveryDraft.last_test_call_sid === "string"
+            ? leadRecoveryDraft.last_test_call_sid
+            : prev.last_test_call_sid,
+        consent_confirmed:
+          typeof leadRecoveryDraft.consent_confirmed === "boolean"
+            ? leadRecoveryDraft.consent_confirmed
+            : prev.consent_confirmed,
       }));
     }
     const serviceDraft = rawDraft.services;
@@ -655,6 +773,28 @@ function OnboardingContent() {
     [applyOnboardingDraft, getScopedAccessToken],
   );
 
+  const applyLeadRecoverySettings = useCallback((row: unknown) => {
+    if (!isRecord(row)) return;
+    setLeadRecovery((prev) => ({
+      ...prev,
+      enabled: typeof row.enabled === "boolean" ? row.enabled : prev.enabled,
+      business_phone: typeof row.business_phone === "string" ? row.business_phone : "",
+      owner_notification_phone: typeof row.owner_notification_phone === "string" ? row.owner_notification_phone : "",
+      owner_notification_email: typeof row.owner_notification_email === "string" ? row.owner_notification_email : "",
+      business_name: typeof row.business_name === "string" ? row.business_name : "",
+      twilio_phone_number: typeof row.twilio_phone_number === "string" ? row.twilio_phone_number : "",
+      twilio_phone_sid: typeof row.twilio_phone_sid === "string" ? row.twilio_phone_sid : "",
+      forwarding_status: typeof row.forwarding_status === "string" ? row.forwarding_status : "not_configured",
+      verification_status: typeof row.verification_status === "string" ? row.verification_status : "not_started",
+      last_verification_attempt_at:
+        typeof row.last_verification_attempt_at === "string" ? row.last_verification_attempt_at : null,
+      verified_at: typeof row.verified_at === "string" ? row.verified_at : null,
+      test_call_from_phone: typeof row.test_call_from_phone === "string" ? row.test_call_from_phone : "",
+      last_test_call_sid: typeof row.last_test_call_sid === "string" ? row.last_test_call_sid : null,
+      consent_confirmed: typeof row.consent_confirmed === "boolean" ? row.consent_confirmed : false,
+    }));
+  }, []);
+
   useEffect(() => {
     if (!authBootstrapComplete) {
       return;
@@ -822,6 +962,52 @@ function OnboardingContent() {
     router.refresh();
   }, [onboardingFullyCompleted, router, searchParams]);
 
+  useEffect(() => {
+    if (!hasSession || !organizationId) {
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      setLeadRecoveryLoading(true);
+      setLeadRecoveryError(null);
+      try {
+        const accessToken = await getScopedAccessToken();
+        const response = await fetch("/api/onboarding/lead-recovery", {
+          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+        });
+        if (!response.ok) {
+          throw new Error(await readErrorMessage(response, "Unable to load Lead Recovery setup"));
+        }
+        const row = await response.json();
+        if (!cancelled) {
+          applyLeadRecoverySettings(row);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setLeadRecoveryError(normalizeClientError(error, "Unable to load Lead Recovery setup"));
+        }
+      } finally {
+        if (!cancelled) {
+          setLeadRecoveryLoading(false);
+        }
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [applyLeadRecoverySettings, getScopedAccessToken, hasSession, organizationId]);
+
+  useEffect(() => {
+    setLeadRecovery((prev) => ({
+      ...prev,
+      business_phone: prev.business_phone || orgInfo.phone,
+      owner_notification_phone: prev.owner_notification_phone || orgInfo.phone,
+      owner_notification_email: prev.owner_notification_email || orgInfo.contactEmail,
+      business_name: prev.business_name || orgInfo.name,
+    }));
+  }, [orgInfo.contactEmail, orgInfo.name, orgInfo.phone]);
+
   const hasConnectedGbpLocation =
     googleConnected &&
     Boolean(selectedGoogleLocation?.locationName) &&
@@ -861,13 +1047,43 @@ function OnboardingContent() {
       ),
     [services],
   );
+  const leadRecoveryMissingFields = useMemo(() => {
+    if (!leadRecovery.enabled) return [];
+    const missing: string[] = [];
+    if (!normalizePhoneForOnboarding(leadRecovery.business_phone)) missing.push("Valid business phone");
+    const ownerPhoneValid = Boolean(normalizePhoneForOnboarding(leadRecovery.owner_notification_phone));
+    const ownerEmailValid = leadRecovery.owner_notification_email.trim()
+      ? isValidEmail(leadRecovery.owner_notification_email)
+      : false;
+    if (!ownerPhoneValid && !ownerEmailValid) missing.push("Owner notification phone or email");
+    if (leadRecovery.owner_notification_phone.trim() && !ownerPhoneValid) missing.push("Valid owner notification phone");
+    if (leadRecovery.owner_notification_email.trim() && !ownerEmailValid) missing.push("Valid owner notification email");
+    if (!leadRecovery.consent_confirmed) missing.push("Forwarding confirmation");
+    if (!leadRecovery.twilio_phone_number.trim()) missing.push("Recovery number");
+    if (!["verified", "active"].includes(leadRecovery.forwarding_status)) missing.push("Verified call forwarding");
+    return missing;
+  }, [
+    leadRecovery.business_phone,
+    leadRecovery.consent_confirmed,
+    leadRecovery.enabled,
+    leadRecovery.forwarding_status,
+    leadRecovery.owner_notification_email,
+    leadRecovery.owner_notification_phone,
+    leadRecovery.twilio_phone_number,
+  ]);
+  const leadRecoveryOnboardingComplete = !leadRecovery.enabled || leadRecoveryMissingFields.length === 0;
 
   const nextDisabled = useMemo(() => {
     if (currentStep === 0) {
       return checkingSession || !hasSession || !orgInfo.firstName.trim() || !orgInfo.lastName.trim() || !hasConnectedGbpLocation;
     }
     if (currentStep === 1) {
-      return missingBusinessFields.length > 0 || namedServicesCount === 0 || servicesMissingDescriptions.length > 0;
+      return (
+        missingBusinessFields.length > 0 ||
+        namedServicesCount === 0 ||
+        servicesMissingDescriptions.length > 0 ||
+        !leadRecoveryOnboardingComplete
+      );
     }
     return false;
   }, [
@@ -875,6 +1091,7 @@ function OnboardingContent() {
     currentStep,
     hasConnectedGbpLocation,
     hasSession,
+    leadRecoveryOnboardingComplete,
     missingBusinessFields.length,
     namedServicesCount,
     orgInfo.firstName,
@@ -1042,6 +1259,108 @@ function OnboardingContent() {
       setSavingProgress(false);
     }
   }, [buildOnboardingDraft, currentStep, getScopedAccessToken, hasSession, orgInfo.name, organizationId, persistOrganizationDraft, resolvedInviteEmail]);
+
+  const callLeadRecoveryEndpoint = useCallback(
+    async (path: string, init?: RequestInit) => {
+      if (!hasSession) {
+        throw new Error("Sign in to continue.");
+      }
+      const accessToken = await getScopedAccessToken();
+      const headers = new Headers(init?.headers);
+      if (init?.body && !headers.has("Content-Type")) {
+        headers.set("Content-Type", "application/json");
+      }
+      if (accessToken) {
+        headers.set("Authorization", `Bearer ${accessToken}`);
+      }
+      const response = await fetch(`/api/onboarding/lead-recovery${path}`, {
+        ...init,
+        headers,
+      });
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response, "Unable to update Lead Recovery setup"));
+      }
+      const row = await response.json();
+      applyLeadRecoverySettings(row);
+      return row;
+    },
+    [applyLeadRecoverySettings, getScopedAccessToken, hasSession],
+  );
+
+  const saveLeadRecoverySetup = useCallback(async () => {
+    setLeadRecoverySaving(true);
+    setLeadRecoveryError(null);
+    setLeadRecoveryMessage(null);
+    try {
+      await callLeadRecoveryEndpoint("", {
+        method: "PATCH",
+        body: JSON.stringify({
+          enabled: leadRecovery.enabled,
+          business_phone: leadRecovery.business_phone,
+          owner_notification_phone: leadRecovery.owner_notification_phone,
+          owner_notification_email: leadRecovery.owner_notification_email,
+          business_name: leadRecovery.business_name || orgInfo.name,
+          consent_confirmed: leadRecovery.consent_confirmed,
+        }),
+      });
+      const assigned = await callLeadRecoveryEndpoint("/assign-number", { method: "POST" });
+      const recoveryNumber =
+        isRecord(assigned) && typeof assigned.twilio_phone_number === "string"
+          ? assigned.twilio_phone_number
+          : "your recovery number";
+      setLeadRecoveryMessage(`Saved. Your recovery number is ${recoveryNumber}.`);
+    } catch (error) {
+      setLeadRecoveryError(normalizeClientError(error, "Unable to save Lead Recovery setup"));
+    } finally {
+      setLeadRecoverySaving(false);
+    }
+  }, [callLeadRecoveryEndpoint, leadRecovery, orgInfo.name]);
+
+  const startLeadRecoveryVerification = useCallback(async () => {
+    setLeadRecoverySaving(true);
+    setLeadRecoveryError(null);
+    setLeadRecoveryMessage(null);
+    try {
+      await callLeadRecoveryEndpoint("/start-verification", {
+        method: "POST",
+        body: JSON.stringify({
+          test_call_from_phone: leadRecovery.test_call_from_phone || undefined,
+        }),
+      });
+      setLeadRecoveryMessage("Verification started. Call your business phone and let it forward to the recovery number.");
+    } catch (error) {
+      setLeadRecoveryError(normalizeClientError(error, "Unable to start Lead Recovery verification"));
+    } finally {
+      setLeadRecoverySaving(false);
+    }
+  }, [callLeadRecoveryEndpoint, leadRecovery.test_call_from_phone]);
+
+  const refreshLeadRecoveryVerification = useCallback(async () => {
+    setLeadRecoverySaving(true);
+    setLeadRecoveryError(null);
+    try {
+      await callLeadRecoveryEndpoint("/verification-status", { method: "GET" });
+      setLeadRecoveryMessage("Verification status refreshed.");
+    } catch (error) {
+      setLeadRecoveryError(normalizeClientError(error, "Unable to check verification status"));
+    } finally {
+      setLeadRecoverySaving(false);
+    }
+  }, [callLeadRecoveryEndpoint]);
+
+  const skipLeadRecoverySetup = useCallback(async () => {
+    setLeadRecoverySaving(true);
+    setLeadRecoveryError(null);
+    setLeadRecoveryMessage(null);
+    try {
+      await callLeadRecoveryEndpoint("/skip", { method: "POST" });
+      setLeadRecoveryMessage("Lead Recovery setup skipped. You can finish it later from the dashboard.");
+    } catch (error) {
+      setLeadRecoveryError(normalizeClientError(error, "Unable to skip Lead Recovery setup"));
+    } finally {
+      setLeadRecoverySaving(false);
+    }
+  }, [callLeadRecoveryEndpoint]);
 
   const startStripeCheckout = useCallback(async (tenantId: string) => {
     if (!userEmail) {
@@ -2138,6 +2457,225 @@ function OnboardingContent() {
                   />
                 </label>
               </div>
+
+              <section className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Lead Recovery</p>
+                    <p className="mt-1 max-w-2xl text-sm text-slate-600">
+                      Lead Recovery helps recover missed opportunities. If someone calls your business and you miss the call,
+                      we&apos;ll text them automatically, collect what they need, and send the lead details to you.
+                    </p>
+                  </div>
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                      ["verified", "active"].includes(leadRecovery.forwarding_status)
+                        ? "bg-emerald-100 text-emerald-700"
+                        : leadRecovery.forwarding_status === "skipped"
+                          ? "bg-slate-200 text-slate-700"
+                          : leadRecovery.forwarding_status === "failed" || leadRecovery.forwarding_status === "error"
+                            ? "bg-rose-100 text-rose-700"
+                            : "bg-amber-100 text-amber-700"
+                    }`}
+                  >
+                    {leadRecoveryStatusLabel(leadRecovery.forwarding_status)}
+                  </span>
+                </div>
+
+                <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-3">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4"
+                    checked={leadRecovery.enabled}
+                    onChange={(event) =>
+                      setLeadRecovery((prev) => ({
+                        ...prev,
+                        enabled: event.target.checked,
+                        forwarding_status: event.target.checked ? "not_configured" : "skipped",
+                        verification_status: event.target.checked ? "not_started" : "skipped",
+                      }))
+                    }
+                  />
+                  <span>
+                    <span className="block text-sm font-semibold text-slate-900">Enable missed-call text-back and lead recovery</span>
+                    <span className="text-sm text-slate-600">
+                      Keep your current business phone number. We&apos;ll give you a recovery number and verify that missed calls
+                      forward to it.
+                    </span>
+                  </span>
+                </label>
+
+                {leadRecovery.enabled ? (
+                  <>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="block">
+                        <span className="text-slate-600">Business phone number</span>
+                        <input
+                          className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2"
+                          placeholder="(555) 123-4567"
+                          value={leadRecovery.business_phone}
+                          onChange={(event) => setLeadRecovery((prev) => ({ ...prev, business_phone: event.target.value }))}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-slate-600">Business display name</span>
+                        <input
+                          className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2"
+                          placeholder={orgInfo.name || "Business name"}
+                          value={leadRecovery.business_name}
+                          onChange={(event) => setLeadRecovery((prev) => ({ ...prev, business_name: event.target.value }))}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-slate-600">Owner notification phone</span>
+                        <input
+                          className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2"
+                          placeholder="(555) 987-6543"
+                          value={leadRecovery.owner_notification_phone}
+                          onChange={(event) =>
+                            setLeadRecovery((prev) => ({ ...prev, owner_notification_phone: event.target.value }))
+                          }
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-slate-600">Owner notification email</span>
+                        <input
+                          type="email"
+                          className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2"
+                          placeholder="owner@example.com"
+                          value={leadRecovery.owner_notification_email}
+                          onChange={(event) =>
+                            setLeadRecovery((prev) => ({ ...prev, owner_notification_email: event.target.value }))
+                          }
+                        />
+                      </label>
+                    </div>
+
+                    <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-3">
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4"
+                        checked={leadRecovery.consent_confirmed}
+                        onChange={(event) =>
+                          setLeadRecovery((prev) => ({ ...prev, consent_confirmed: event.target.checked }))
+                        }
+                      />
+                      <span className="text-sm text-slate-700">
+                        I understand I need to forward missed or unanswered calls from my current business phone number to the
+                        recovery number shown here.
+                      </span>
+                    </label>
+
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Your recovery number</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-lg font-semibold text-slate-900">
+                          {leadRecovery.twilio_phone_number || "Save setup to assign a number"}
+                        </span>
+                        {leadRecovery.twilio_phone_number && (
+                          <button
+                            type="button"
+                            className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700"
+                            onClick={() => navigator.clipboard?.writeText(leadRecovery.twilio_phone_number)}
+                          >
+                            Copy
+                          </button>
+                        )}
+                      </div>
+                      <p className="mt-2 text-sm text-slate-600">
+                        Set up conditional call forwarding with your phone provider so unanswered, busy, or missed calls forward
+                        to your recovery number. After setup, place a test call to your business phone and do not answer it. When
+                        it forwards to the recovery number, we&apos;ll verify the connection.
+                      </p>
+                    </div>
+
+                    <label className="block">
+                      <span className="text-slate-600">Test call from phone, optional</span>
+                      <input
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2"
+                        placeholder="Phone you will use for the test call"
+                        value={leadRecovery.test_call_from_phone}
+                        onChange={(event) => setLeadRecovery((prev) => ({ ...prev, test_call_from_phone: event.target.value }))}
+                      />
+                    </label>
+
+                    {leadRecovery.forwarding_status === "waiting_for_verification" && (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                        Now call your business phone from another phone and let it ring until it forwards. We&apos;ll detect the
+                        forwarded call automatically.
+                      </div>
+                    )}
+
+                    {["verified", "active"].includes(leadRecovery.forwarding_status) && (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
+                        Lead Recovery is connected.
+                      </div>
+                    )}
+
+                    {(leadRecovery.forwarding_status === "failed" || leadRecovery.forwarding_status === "error") && (
+                      <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                        We have not detected a forwarded call yet. Confirm conditional forwarding is enabled, the forwarding
+                        number matches the recovery number, and the call rings long enough to forward.
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                        onClick={saveLeadRecoverySetup}
+                        disabled={leadRecoverySaving || leadRecoveryLoading}
+                      >
+                        {leadRecoverySaving ? "Saving..." : "Save and get recovery number"}
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60"
+                        onClick={startLeadRecoveryVerification}
+                        disabled={leadRecoverySaving || !leadRecovery.twilio_phone_number}
+                      >
+                        I set up forwarding - start verification
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60"
+                        onClick={refreshLeadRecoveryVerification}
+                        disabled={leadRecoverySaving}
+                      >
+                        Check verification status
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60"
+                        onClick={skipLeadRecoverySetup}
+                        disabled={leadRecoverySaving}
+                      >
+                        Set up later
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                    <p className="text-sm text-slate-600">Lead Recovery is optional during onboarding. You can set it up later.</p>
+                    <button
+                      type="button"
+                      className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60"
+                      onClick={skipLeadRecoverySetup}
+                      disabled={leadRecoverySaving}
+                    >
+                      Save as skipped
+                    </button>
+                  </div>
+                )}
+
+                {leadRecoveryMissingFields.length > 0 && leadRecovery.enabled && (
+                  <p className="text-sm text-rose-600">
+                    Lead Recovery needs: {leadRecoveryMissingFields.join(", ")}.
+                  </p>
+                )}
+                {leadRecoveryError && <p className="text-sm text-rose-600">{leadRecoveryError}</p>}
+                {leadRecoveryMessage && <p className="text-sm font-medium text-slate-700">{leadRecoveryMessage}</p>}
+              </section>
               <div className="grid gap-3 md:grid-cols-2">
                 <label className="block">
                   <span className="flex items-center justify-between text-slate-600">

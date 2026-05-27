@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 
+import { brand } from "@/content/marketing";
 import { createClient } from "@/lib/supabase/client";
 
 const calendlyUrl = "https://calendly.com";
@@ -114,7 +115,7 @@ export default function LoginPage() {
     <div className="min-h-screen bg-background text-foreground">
       <div className="mx-auto flex max-w-5xl flex-col gap-10 px-6 py-10">
         <header className="flex items-center justify-between text-sm font-semibold text-slate-200">
-          <Link href="/">Map Pack 3</Link>
+          <Link href="/">{brand.name}</Link>
           <Link href="/" className="text-accent transition hover:text-accent/80">
             Back to marketing
           </Link>
@@ -167,7 +168,7 @@ export default function LoginPage() {
               </button>
               <p className="text-xs text-slate-400">
                 Having trouble?{" "}
-                <a href="mailto:support@mappack3.com" className="text-accent underline underline-offset-4">
+                <a href={`mailto:${brand.email}`} className="text-accent underline underline-offset-4">
                   Contact support
                 </a>
               </p>

@@ -5,13 +5,14 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Home, Image, Settings, Star, Gauge, LifeBuoy } from "lucide-react";
+import { Home, Image, Settings, Star, Gauge, LifeBuoy, PhoneCall } from "lucide-react";
 
 const navItems = [
   { href: "/dashboard", label: "Overview", icon: Gauge },
   { href: "/dashboard/gbp", label: "GBP Monitoring", icon: Home },
   { href: "/dashboard/keywords", label: "Keyword Strategy", icon: Gauge },
   { href: "/dashboard/reviews", label: "Reviews", icon: Star },
+  { href: "/dashboard/lead-recovery", label: "Lead Recovery", icon: PhoneCall },
   { href: "/dashboard/content", label: "Content", icon: Image },
   { href: "/dashboard/settings", label: "Settings & Billing", icon: Settings },
   { href: "/dashboard/support", label: "Support", icon: LifeBuoy },

@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
     TWILIO_FROM_NUMBER: str = ""
+    TWILIO_MESSAGING_SERVICE_SID: str = ""
+    TWILIO_DEFAULT_FROM_NUMBER: str = ""
+    ALLOW_UNSIGNED_TWILIO_WEBHOOKS: bool = False
+    LEAD_RECOVERY_ENABLED: bool = True
 
     SUPABASE_URL: str = ""
     SUPABASE_JWKS_URL: str = ""

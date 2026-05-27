@@ -1,0 +1,209 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import type React from "react";
+import { Search } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { formatDate } from "@/lib/date-utils";
+
+export type AdminFilters = {
+  tenant_ids?: string;
+  range?: string;
+  module?: string;
+  status?: string;
+  q?: string;
+};
+
+type FilterBarProps = {
+  filters: AdminFilters;
+  onChange: (filters: AdminFilters) => void;
+  clients?: Array<{ tenant_id?: string; business_name?: string }>;
+  modules?: Array<{ id: string; label: string }>;
+  showModule?: boolean;
+  showStatus?: boolean;
+};
+
+export function AdminFilterBar({ filters, onChange, clients = [], modules = [], showModule, showStatus }: FilterBarProps) {
+  const [query, setQuery] = useState(filters.q ?? "");
+  return (
+    <Card>
+      <CardContent className="flex flex-wrap items-end gap-3 p-4">
+        <label className="text-sm">
+          Client
+          <Select
+            className="mt-1 w-56"
+            value={filters.tenant_ids ?? ""}
+            onChange={(event) => onChange({ ...filters, tenant_ids: event.target.value || undefined })}
+            options={[
+              { label: "All clients", value: "" },
+              ...clients.map((client) => ({ label: client.business_name ?? client.tenant_id ?? "Client", value: client.tenant_id ?? "" })),
+            ]}
+          />
+        </label>
+        <label className="text-sm">
+          Date range
+          <Select
+            className="mt-1 w-36"
+            value={filters.range ?? "30d"}
+            onChange={(event) => onChange({ ...filters, range: event.target.value })}
+            options={[
+              { label: "Today", value: "today" },
+              { label: "7 days", value: "7d" },
+              { label: "30 days", value: "30d" },
+              { label: "90 days", value: "90d" },
+            ]}
+          />
+        </label>
+        {showModule && (
+          <label className="text-sm">
+            Module
+            <Select
+              className="mt-1 w-44"
+              value={filters.module ?? ""}
+              onChange={(event) => onChange({ ...filters, module: event.target.value || undefined })}
+              options={[{ label: "All modules", value: "" }, ...modules.map((module) => ({ label: module.label, value: module.id }))]}
+            />
+          </label>
+        )}
+        {showStatus && (
+          <label className="text-sm">
+            Status
+            <Select
+              className="mt-1 w-40"
+              value={filters.status ?? ""}
+              onChange={(event) => onChange({ ...filters, status: event.target.value || undefined })}
+              options={[
+                { label: "Any status", value: "" },
+                { label: "Healthy", value: "healthy" },
+                { label: "Warning", value: "warning" },
+                { label: "Critical", value: "critical" },
+                { label: "Inactive", value: "inactive" },
+              ]}
+            />
+          </label>
+        )}
+        <label className="min-w-56 flex-1 text-sm">
+          Search
+          <div className="relative mt-1">
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              className="pl-9"
+              placeholder="Business, email, tenant id, location"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") onChange({ ...filters, q: query || undefined });
+              }}
+            />
+          </div>
+        </label>
+        <Button variant="outline" onClick={() => onChange({ ...filters, q: query || undefined })}>Apply</Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+export function AdminStatCard({ label, value, description, tone = "default" }: { label: string; value: unknown; description?: string; tone?: "default" | "success" | "warning" | "danger" }) {
+  return (
+    <Card>
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+            <p className="mt-2 text-2xl font-semibold">{String(value ?? "0")}</p>
+            {description && <p className="mt-1 text-xs text-muted-foreground">{description}</p>}
+          </div>
+          <Badge variant={tone === "default" ? "muted" : tone}>{tone}</Badge>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+export function AdminIssueList({ issues }: { issues: Array<Record<string, unknown>> }) {
+  return (
+    <div className="space-y-2">
+      {issues.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No priority issues found for the selected filters.</p>
+      ) : (
+        issues.map((issue, index) => (
+          <div key={`${issue.title}-${index}`} className="rounded-lg border border-border bg-white/70 p-3 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <p className="font-semibold">{String(issue.title ?? "Issue")}</p>
+              <Badge variant={issue.severity === "critical" ? "danger" : issue.severity === "warning" ? "warning" : "muted"}>
+                {String(issue.severity ?? "info")}
+              </Badge>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">{String(issue.client ?? issue.tenant_id ?? "Platform-wide")} · {String(issue.module ?? "general")}</p>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+export function AdminActivityTimeline({ rows }: { rows: Array<Record<string, unknown>> }) {
+  return (
+    <div className="space-y-2">
+      {rows.map((row, index) => (
+        <div key={String(row.id ?? index)} className="rounded-lg border border-border bg-white/70 p-3 text-sm">
+          <div className="flex items-center justify-between gap-3">
+            <p className="font-semibold">{String(row.title ?? row.event_type ?? "Activity")}</p>
+            <Badge variant={row.status === "failed" ? "danger" : row.status === "warning" ? "warning" : "muted"}>{String(row.module ?? "module")}</Badge>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">{String(row.client ?? row.tenant_id ?? "Client")} · {formatDate(String(row.created_at ?? ""))}</p>
+          {Boolean(row.description) && <p className="mt-2 text-muted-foreground">{String(row.description)}</p>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function AdminModuleTable({
+  rows,
+  columns,
+  actions,
+}: {
+  rows: Array<Record<string, unknown>>;
+  columns: Array<{ key: string; label: string; render?: (row: Record<string, unknown>) => React.ReactNode }>;
+  actions?: (row: Record<string, unknown>) => React.ReactNode;
+}) {
+  const visibleRows = useMemo(() => rows.slice(0, 100), [rows]);
+  return (
+    <Table>
+      <THead>
+        <TR>
+          {columns.map((column) => <TH key={column.key}>{column.label}</TH>)}
+          {actions && <TH>Actions</TH>}
+        </TR>
+      </THead>
+      <TBody>
+        {visibleRows.map((row, index) => (
+          <TR key={String(row.id ?? row.tenant_id ?? index)}>
+            {columns.map((column) => (
+              <TD key={column.key}>{column.render ? column.render(row) : String(row[column.key] ?? "-")}</TD>
+            ))}
+            {actions && <TD>{actions(row)}</TD>}
+          </TR>
+        ))}
+      </TBody>
+    </Table>
+  );
+}
+
+export function statusBadge(status: unknown) {
+  const value = String(status ?? "unknown");
+  const variant = ["active", "healthy", "qualified", "booked", "completed", "connected"].includes(value)
+    ? "success"
+    : ["critical", "failed", "lost", "error"].includes(value)
+      ? "danger"
+      : ["warning", "new", "responded", "auto_contacted", "inactive"].includes(value)
+        ? "warning"
+        : "muted";
+  return <Badge variant={variant}>{value.replaceAll("_", " ")}</Badge>;
+}

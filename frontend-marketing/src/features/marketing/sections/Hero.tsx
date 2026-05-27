@@ -33,10 +33,10 @@ export function Hero() {
             <span className="invisible block whitespace-pre-line text-5xl font-semibold leading-tight md:text-6xl lg:text-7xl">
               Welcome to
               {"\n"}
-              Map Pack 3.
+              Visora.
             </span>
             <TypewriterText
-              text={"Welcome to\nMap Pack 3."}
+              text={"Welcome to\nVisora."}
               className="absolute inset-0 whitespace-pre-line text-5xl font-semibold leading-tight md:text-6xl lg:text-7xl"
               speed={61}
               showCaretAfterComplete

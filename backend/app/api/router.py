@@ -14,6 +14,7 @@ from backend.app.features.dashboard.router import router as dashboard_router
 from backend.app.features.google_business.optimization_router import router as optimization_router
 from backend.app.features.google_business.org_gbp_router import router as org_gbp_router
 from backend.app.features.google_business.router import router as google_router
+from backend.app.features.lead_recovery.router import api_router as lead_recovery_router
 from backend.app.features.posts.media_router import router as media_router
 from backend.app.features.posts.router import router as posts_router
 from backend.app.features.qna.router import router as qna_router
@@ -21,6 +22,7 @@ from backend.app.features.rank_tracking.competitors_router import router as comp
 from backend.app.features.rank_tracking.keyword_strategy_router import router as keyword_strategy_router
 from backend.app.features.rank_tracking.router import router as rankings_router
 from backend.app.features.reviews.router import router as review_requests_router
+from backend.app.features.reviews.review_sources_router import router as reviews_router
 from backend.app.features.stripe_billing.router import router as billing_router
 from backend.app.features.tenants.router import router as orgs_router
 
@@ -43,6 +45,8 @@ api_router.include_router(approvals_router)
 api_router.include_router(dashboard_router)
 api_router.include_router(billing_router)
 api_router.include_router(review_requests_router)
+api_router.include_router(reviews_router)
+api_router.include_router(lead_recovery_router)
 api_router.include_router(org_gbp_router)
 api_router.include_router(admin_orgs_router)
 api_router.include_router(admin_approvals_router)

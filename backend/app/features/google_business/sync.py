@@ -5,7 +5,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.enums import MediaStatus, MediaType, ReviewRating, ReviewStatus
+from backend.app.models.enums import MediaStatus, MediaType, ReviewProvider, ReviewRating, ReviewStatus
 from backend.app.models.google_business.location import Location
 from backend.app.models.media.media_asset import MediaAsset
 from backend.app.models.posts.post import Post
@@ -33,7 +33,11 @@ class GbpSyncService:
                 continue
             review = (
                 self.db.query(Review)
-                .filter(Review.organization_id == organization_id, Review.external_review_id == review_name)
+                .filter(
+                    Review.organization_id == organization_id,
+                    Review.provider == ReviewProvider.GOOGLE,
+                    Review.external_review_id == review_name,
+                )
                 .one_or_none()
             )
             rating_value = str(data.get("starRating", "3"))
@@ -48,11 +52,13 @@ class GbpSyncService:
                 review = Review(
                     organization_id=organization_id,
                     location_id=location_id,
+                    provider=ReviewProvider.GOOGLE,
                     external_review_id=review_name,
                     rating=rating,
                     comment=comment,
                     author_name=author_name,
                 )
+            review.source_url = data.get("reviewReply", {}).get("name") or data.get("name")
             review.metadata_json = data
             self.db.add(review)
             count += 1

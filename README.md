@@ -350,6 +350,15 @@ Core primitives (multi-tenant orgs/locations, action queue, Google OAuth, audit 
 - **Plan & usage tooling**  
   Organizations can be assigned tiers/limits via `python scripts/set_plan_tier.py <org_id> <plan> [posts_per_month] [locations]`, keeping dashboards and enforcement logic in sync with billing entitlements.
 
+## Lead Recovery Onboarding
+
+- **Client setup flow**
+  The client onboarding business-info step now includes Lead Recovery setup. Clients can enable the module, save their business phone, owner notification phone/email, consent to conditional call forwarding, receive the assigned recovery number, and start verification.
+- **Twilio verification**
+  Set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_DEFAULT_FROM_NUMBER` for local testing. When a pending verification call reaches `/api/webhooks/twilio/voice`, the backend marks the tenant setup as verified and does not create a normal lead for that call.
+- **Local webhook testing**
+  Run the backend locally, expose it with ngrok, and configure the Twilio number voice webhook to `https://<ngrok-host>/api/webhooks/twilio/voice`. In onboarding, click “I set up forwarding - start verification,” then call the client business phone and let it forward to the recovery number.
+
 ---
 
 ## Roadmap

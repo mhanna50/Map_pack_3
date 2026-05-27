@@ -689,3 +689,472 @@ export async function fetchSupport(params: { status?: string }) {
   if (error) throw error;
   return { rows: data ?? [] };
 }
+
+export type AdminMonitoringFilters = {
+  tenantIds?: string[];
+  range?: "today" | "7d" | "30d" | "90d" | "custom";
+  from?: string;
+  to?: string;
+  module?: string;
+  status?: string;
+  q?: string;
+};
+
+const ADMIN_MODULES = [
+  { id: "lead_recovery", label: "Lead Recovery", clientPath: "/dashboard/lead-recovery" },
+  { id: "gbp_posting", label: "GBP Posting", clientPath: "/dashboard/content" },
+  { id: "gbp_audits", label: "GBP Audits", clientPath: "/dashboard/gbp-audit" },
+  { id: "reviews", label: "Reviews", clientPath: "/dashboard/reviews" },
+  { id: "citations", label: "Citations", clientPath: "/dashboard/gbp" },
+  { id: "visibility", label: "Visibility", clientPath: "/dashboard/keywords" },
+  { id: "images", label: "Images", clientPath: "/dashboard/content" },
+  { id: "qa", label: "Q&A", clientPath: "/dashboard/gbp" },
+  { id: "website_audits", label: "Website Audits", clientPath: "/dashboard/gbp-audit" },
+] as const;
+
+type TenantRow = Record<string, unknown> & { tenant_id?: string; business_name?: string; status?: string; created_at?: string };
+type CountResult = { count: number; error?: unknown };
+
+function dateRange(filters: AdminMonitoringFilters = {}) {
+  const now = new Date();
+  let from = filters.from;
+  const to = filters.to ?? now.toISOString();
+  if (!from) {
+    const start = new Date(now);
+    if (filters.range === "today") start.setHours(0, 0, 0, 0);
+    else if (filters.range === "90d") start.setDate(start.getDate() - 90);
+    else if (filters.range === "7d") start.setDate(start.getDate() - 7);
+    else start.setDate(start.getDate() - 30);
+    from = start.toISOString();
+  }
+  return { from, to };
+}
+
+function tenantIdsFromParam(raw?: string | string[] | null): string[] | undefined {
+  if (!raw) return undefined;
+  const values = Array.isArray(raw) ? raw : String(raw).split(",");
+  const ids = values.map((value) => value.trim()).filter(Boolean);
+  return ids.length ? ids : undefined;
+}
+
+export function parseAdminMonitoringFilters(searchParams: URLSearchParams): AdminMonitoringFilters {
+  return {
+    tenantIds: tenantIdsFromParam(searchParams.get("tenant_ids") ?? searchParams.get("tenant_id")),
+    range: (searchParams.get("range") as AdminMonitoringFilters["range"]) ?? "30d",
+    from: searchParams.get("from") ?? undefined,
+    to: searchParams.get("to") ?? undefined,
+    module: searchParams.get("module") ?? undefined,
+    status: searchParams.get("status") ?? undefined,
+    q: searchParams.get("q") ?? undefined,
+  };
+}
+
+async function safeCount(table: string, filters: AdminMonitoringFilters = {}, dateColumn = "created_at"): Promise<CountResult> {
+  try {
+    const svc = requireService();
+    const { from, to } = dateRange(filters);
+    let query = svc.from(table).select("id", { count: "exact", head: true });
+    if (dateColumn) query = query.gte(dateColumn, from).lte(dateColumn, to);
+    if (filters.tenantIds?.length) query = query.in("tenant_id", filters.tenantIds);
+    const { count, error } = await query;
+    if (error && isSchemaCompatibilityError(error)) return { count: 0, error };
+    if (error) throw error;
+    return { count: count ?? 0 };
+  } catch (error) {
+    if (isSchemaCompatibilityError(error)) return { count: 0, error };
+    throw error;
+  }
+}
+
+async function loadTenantsForMonitoring(filters: AdminMonitoringFilters = {}): Promise<TenantRow[]> {
+  const svc = requireService();
+  let query = svc.from("tenants").select("*").order("business_name", { ascending: true });
+  if (filters.tenantIds?.length) query = query.in("tenant_id", filters.tenantIds);
+  if (filters.q) query = query.ilike("business_name", `%${filters.q}%`);
+  const { data, error } = await query;
+  if (error && isSchemaCompatibilityError(error)) return [];
+  if (error) throw error;
+  return (data ?? []) as TenantRow[];
+}
+
+async function loadBillingByTenant(tenantIds?: string[]) {
+  const svc = requireService();
+  let query = svc.from("billing_subscriptions").select("*").order("created_at", { ascending: false });
+  if (tenantIds?.length) query = query.in("tenant_id", tenantIds);
+  const { data, error } = await query;
+  if (error && isSchemaCompatibilityError(error)) return new Map<string, Record<string, unknown>>();
+  if (error) throw error;
+  const byTenant = new Map<string, Record<string, unknown>>();
+  (data ?? []).forEach((row: Record<string, unknown>) => {
+    const tenantId = String(row.tenant_id ?? "");
+    if (tenantId && !byTenant.has(tenantId)) byTenant.set(tenantId, row);
+  });
+  return byTenant;
+}
+
+async function loadRows(table: string, filters: AdminMonitoringFilters = {}, options: { limit?: number; dateColumn?: string } = {}) {
+  try {
+    const svc = requireService();
+    const { from, to } = dateRange(filters);
+    let query = svc.from(table).select("*").order(options.dateColumn ?? "created_at", { ascending: false }).limit(options.limit ?? 500);
+    if (filters.tenantIds?.length) query = query.in("tenant_id", filters.tenantIds);
+    if (options.dateColumn !== "") query = query.gte(options.dateColumn ?? "created_at", from).lte(options.dateColumn ?? "created_at", to);
+    const { data, error } = await query;
+    if (error && isSchemaCompatibilityError(error)) return [];
+    if (error) throw error;
+    return (data ?? []) as Record<string, unknown>[];
+  } catch (error) {
+    if (isSchemaCompatibilityError(error)) return [];
+    throw error;
+  }
+}
+
+async function buildModuleHealth(tenants: TenantRow[], filters: AdminMonitoringFilters = {}) {
+  const tenantIds = tenants.map((tenant) => String(tenant.tenant_id)).filter(Boolean);
+  const scopedFilters = { ...filters, tenantIds: filters.tenantIds ?? tenantIds };
+  const [leadSettings, gbpConnections, locations, leadEvents, posts, audits, reviews, reviewRequests, mediaRequests, qnaRows, ranks] =
+    await Promise.all([
+      loadRows("lead_recovery_settings", { ...scopedFilters }, { dateColumn: "", limit: 10000 }),
+      loadRows("gbp_connections", scopedFilters, { dateColumn: "", limit: 10000 }),
+      loadRows("locations", scopedFilters, { dateColumn: "", limit: 10000 }),
+      loadRows("lead_events", scopedFilters, { limit: 10000 }),
+      safeCount("post_history", scopedFilters, "published_at"),
+      safeCount("listing_audits", scopedFilters, "audited_at"),
+      safeCount("reviews", scopedFilters, "created_at"),
+      safeCount("review_requests", scopedFilters, "created_at"),
+      safeCount("media_upload_requests", scopedFilters, "created_at"),
+      safeCount("qna_entries", scopedFilters, "created_at"),
+      safeCount("rank_snapshots", scopedFilters, "created_at"),
+    ]);
+  const leadActive = new Set(leadSettings.filter(leadRecoveryIsActive).map((row) => String(row.tenant_id)));
+  const gbpActive = new Set(gbpConnections.filter((row) => ["connected", "active"].includes(String(row.status ?? "").toLowerCase())).map((row) => String(row.tenant_id)));
+  const hasLocations = new Set(locations.map((row) => String(row.tenant_id)));
+  const tenantCount = tenantIds.length || tenants.length || 0;
+
+  return [
+    moduleHealth("lead_recovery", "Lead Recovery", leadActive.size, tenantCount, leadEvents.length, leadSettings.filter((row) => row.enabled === true && !leadRecoveryIsActive(row)).length),
+    moduleHealth("gbp_posting", "GBP Posting", gbpActive.size || hasLocations.size, tenantCount, posts.count, 0),
+    moduleHealth("gbp_audits", "GBP Audits", hasLocations.size, tenantCount, audits.count, 0),
+    moduleHealth("reviews", "Reviews", gbpActive.size || hasLocations.size, tenantCount, reviews.count + reviewRequests.count, 0),
+    moduleHealth("citations", "Citations", 0, tenantCount, 0, 0),
+    moduleHealth("visibility", "Visibility", hasLocations.size, tenantCount, ranks.count, 0),
+    moduleHealth("images", "Images", hasLocations.size, tenantCount, mediaRequests.count, 0),
+    moduleHealth("qa", "Q&A", hasLocations.size, tenantCount, qnaRows.count, 0),
+    moduleHealth("website_audits", "Website Audits", 0, tenantCount, 0, 0),
+  ];
+}
+
+function moduleHealth(id: string, label: string, active: number, total: number, activity: number, issues: number) {
+  return {
+    id,
+    label,
+    active_clients: active,
+    inactive_clients: Math.max(0, total - active),
+    activity_count: activity,
+    issue_count: issues,
+    status: issues > 0 ? "warning" : active > 0 ? "healthy" : "inactive",
+    client_path: ADMIN_MODULES.find((module) => module.id === id)?.clientPath ?? "/dashboard",
+  };
+}
+
+function leadRecoveryIsActive(row: Record<string, unknown>) {
+  return row.enabled === true && ["active", "verified"].includes(String(row.forwarding_status ?? "").toLowerCase());
+}
+
+export async function getAdminOverviewStats(filters: AdminMonitoringFilters = {}) {
+  const tenants = await loadTenantsForMonitoring(filters);
+  const tenantIds = tenants.map((tenant) => String(tenant.tenant_id)).filter(Boolean);
+  const scopedFilters = { ...filters, tenantIds: filters.tenantIds ?? tenantIds };
+  const [billing, pending, leadSettings, leads, ownerNotifications, posts, reviewRequests, reviews, activity, jobs, alerts] =
+    await Promise.all([
+      loadBillingByTenant(scopedFilters.tenantIds),
+      safeCount("pending_onboarding", filters, "created_at"),
+      loadRows("lead_recovery_settings", scopedFilters, { dateColumn: "", limit: 10000 }),
+      safeCount("leads", scopedFilters, "created_at"),
+      safeCount("lead_events", { ...scopedFilters, status: undefined }, "created_at"),
+      safeCount("post_history", scopedFilters, "published_at"),
+      safeCount("review_requests", scopedFilters, "created_at"),
+      safeCount("reviews", scopedFilters, "created_at"),
+      loadRows("client_activity_events", scopedFilters, { limit: 100 }),
+      loadRows("jobs", scopedFilters, { limit: 100 }),
+      loadRows("alerts", scopedFilters, { limit: 100 }),
+    ]);
+  const moduleHealth = await buildModuleHealth(tenants, scopedFilters);
+  const activeClients = tenants.filter((tenant) => String(tenant.status ?? "").toLowerCase() === "active").length;
+  const inactiveBilling = Array.from(billing.values()).filter((row) => !["active", "trialing"].includes(String(row.status ?? "").toLowerCase())).length;
+  const leadSetupIssues = leadSettings.filter((row) => row.enabled === true && (!row.twilio_phone_number || !leadRecoveryIsActive(row))).length;
+  const failedJobs = jobs.filter((job) => ["failed", "dead_lettered"].includes(String(job.status ?? "").toLowerCase())).length;
+  const openAlerts = alerts.filter((alert) => String(alert.status ?? "").toLowerCase() !== "resolved").length;
+  const attention = buildAttentionList({ tenants, billing, leadSettings, failedJobs, openAlerts });
+
+  return {
+    filters: scopedFilters,
+    stats: {
+      total_clients: tenants.length,
+      active_clients: activeClients,
+      onboarding_clients: pending.count,
+      incomplete_setup_clients: leadSetupIssues,
+      failed_integrations_clients: inactiveBilling,
+      inactive_automations_clients: moduleHealth.reduce((sum, module) => sum + module.inactive_clients, 0),
+      attention_clients: attention.length,
+      recent_posts: posts.count,
+      recent_review_requests: reviewRequests.count,
+      recent_reviews: reviews.count,
+      recent_leads: leads.count,
+      recent_owner_notifications: ownerNotifications.count,
+      failed_jobs: failedJobs,
+      open_alerts: openAlerts,
+    },
+    module_health: moduleHealth,
+    recent_activity: normalizeActivityRows(activity, tenants).slice(0, 50),
+    attention,
+  };
+}
+
+function buildAttentionList(input: {
+  tenants: TenantRow[];
+  billing: Map<string, Record<string, unknown>>;
+  leadSettings: Record<string, unknown>[];
+  failedJobs: number;
+  openAlerts: number;
+}) {
+  const tenantName = new Map(input.tenants.map((tenant) => [String(tenant.tenant_id), String(tenant.business_name ?? "Client")]));
+  const issues: Record<string, unknown>[] = [];
+  input.billing.forEach((billing, tenantId) => {
+    const status = String(billing.status ?? "").toLowerCase();
+    if (status && !["active", "trialing"].includes(status)) {
+      issues.push({ severity: "critical", tenant_id: tenantId, client: tenantName.get(tenantId), title: "Subscription inactive or payment issue", module: "billing" });
+    }
+  });
+  input.leadSettings.forEach((setting) => {
+    const tenantId = String(setting.tenant_id ?? "");
+    if (setting.enabled === true && !setting.twilio_phone_number) {
+      issues.push({ severity: "critical", tenant_id: tenantId, client: tenantName.get(tenantId), title: "Lead Recovery Twilio number missing", module: "lead_recovery" });
+    } else if (setting.enabled === true && !leadRecoveryIsActive(setting)) {
+      issues.push({ severity: "warning", tenant_id: tenantId, client: tenantName.get(tenantId), title: "Lead Recovery forwarding not configured", module: "lead_recovery" });
+    }
+    if (setting.enabled === true && !setting.owner_notification_phone && !setting.owner_notification_email) {
+      issues.push({ severity: "warning", tenant_id: tenantId, client: tenantName.get(tenantId), title: "Owner notification destination missing", module: "lead_recovery" });
+    }
+  });
+  if (input.failedJobs > 0) issues.push({ severity: "critical", title: `${input.failedJobs} failed background jobs`, module: "automation" });
+  if (input.openAlerts > 0) issues.push({ severity: "warning", title: `${input.openAlerts} open alerts`, module: "alerts" });
+  return issues.slice(0, 100);
+}
+
+function normalizeActivityRows(rows: Record<string, unknown>[], tenants: TenantRow[]) {
+  const tenantName = new Map(tenants.map((tenant) => [String(tenant.tenant_id), String(tenant.business_name ?? "Client")]));
+  return rows.map((row) => ({
+    id: row.id,
+    tenant_id: row.tenant_id,
+    client: tenantName.get(String(row.tenant_id)) ?? "Client",
+    module: row.module,
+    event_type: row.event_type,
+    status: row.status,
+    title: row.title ?? row.event_type,
+    description: row.description,
+    created_at: row.created_at,
+  }));
+}
+
+export async function getAdminClientsMonitor(filters: AdminMonitoringFilters = {}) {
+  const tenants = await loadTenantsForMonitoring(filters);
+  const tenantIds = tenants.map((tenant) => String(tenant.tenant_id)).filter(Boolean);
+  const [billing, moduleHealth, leadSettings, activity] = await Promise.all([
+    loadBillingByTenant(tenantIds),
+    buildModuleHealth(tenants, { ...filters, tenantIds }),
+    loadRows("lead_recovery_settings", { ...filters, tenantIds }, { dateColumn: "", limit: 10000 }),
+    loadRows("client_activity_events", { ...filters, tenantIds }, { limit: 500 }),
+  ]);
+  const leadByTenant = new Map(leadSettings.map((row) => [String(row.tenant_id), row]));
+  const activityByTenant = new Map<string, string>();
+  activity.forEach((row) => {
+    const tenantId = String(row.tenant_id ?? "");
+    if (tenantId && !activityByTenant.has(tenantId)) activityByTenant.set(tenantId, String(row.created_at ?? ""));
+  });
+  const rows = tenants.map((tenant) => {
+    const tenantId = String(tenant.tenant_id);
+    const activeModules = moduleHealth.filter((module) => module.active_clients > 0).map((module) => module.label);
+    const billingRow = billing.get(tenantId);
+    const leadSetting = leadByTenant.get(tenantId);
+    const issues = [
+      billingRow && !["active", "trialing"].includes(String(billingRow.status ?? "").toLowerCase()) ? "Billing issue" : null,
+      leadSetting?.enabled === true && !leadRecoveryIsActive(leadSetting) ? "Lead forwarding setup" : null,
+      leadSetting?.enabled === true && !leadSetting.owner_notification_phone && !leadSetting.owner_notification_email ? "Owner notification missing" : null,
+    ].filter(Boolean);
+    return {
+      ...tenant,
+      subscription_status: billingRow?.status ?? tenant.status ?? "unknown",
+      plan: billingRow?.plan ?? tenant.plan ?? null,
+      active_modules: activeModules,
+      last_activity: activityByTenant.get(tenantId) ?? tenant.last_activity ?? tenant.updated_at ?? tenant.created_at,
+      open_issues: issues,
+      mrr: billingRow?.amount ?? billingRow?.price_amount ?? null,
+    };
+  });
+  return { rows, total: rows.length, module_health: moduleHealth };
+}
+
+export async function getAdminModuleHealth(filters: AdminMonitoringFilters = {}) {
+  const tenants = await loadTenantsForMonitoring(filters);
+  return { rows: await buildModuleHealth(tenants, filters), modules: ADMIN_MODULES };
+}
+
+export async function getAdminClientStats(tenantId: string, filters: AdminMonitoringFilters = {}) {
+  const [clientData, notes, activity, moduleHealth] = await Promise.all([
+    fetchTenantDetail(tenantId),
+    getAdminClientNotes(tenantId),
+    loadRows("client_activity_events", { ...filters, tenantIds: [tenantId] }, { limit: 100 }),
+    getAdminModuleHealth({ ...filters, tenantIds: [tenantId] }),
+  ]);
+  const overview = await getAdminOverviewStats({ ...filters, tenantIds: [tenantId] });
+  return {
+    ...clientData,
+    stats: overview.stats,
+    module_health: moduleHealth.rows,
+    recent_activity: normalizeActivityRows(activity, clientData.tenant ? [clientData.tenant as TenantRow] : []),
+    attention: overview.attention,
+    notes: notes.rows,
+  };
+}
+
+export async function getAdminLeadRecoveryStats(filters: AdminMonitoringFilters = {}) {
+  const tenants = await loadTenantsForMonitoring(filters);
+  const tenantIds = tenants.map((tenant) => String(tenant.tenant_id)).filter(Boolean);
+  const scoped = { ...filters, tenantIds: filters.tenantIds ?? tenantIds };
+  const [settingsRows, leads, messages, events] = await Promise.all([
+    loadRows("lead_recovery_settings", scoped, { dateColumn: "", limit: 10000 }),
+    loadRows("leads", scoped, { limit: 10000 }),
+    loadRows("lead_messages", scoped, { limit: 10000 }),
+    loadRows("lead_events", scoped, { limit: 10000 }),
+  ]);
+  const tenantName = new Map(tenants.map((tenant) => [String(tenant.tenant_id), String(tenant.business_name ?? "Client")]));
+  const missedCalls = events.filter((event) => event.event_type === "missed_call_received").length;
+  const textbacks = messages.filter((message) => message.direction === "outbound" && message.channel === "sms").length;
+  const customerResponses = messages.filter((message) => message.direction === "inbound" && message.channel === "sms").length;
+  const qualified = leads.filter((lead) => lead.status === "qualified").length;
+  const booked = leads.filter((lead) => lead.status === "booked").length;
+  const lost = leads.filter((lead) => lead.status === "lost").length;
+  const completed = leads.filter((lead) => lead.status === "completed").length;
+  const ownerNotifications = events.filter((event) => event.event_type === "owner_notified").length;
+  const rows = leads.map((lead) => ({
+    ...lead,
+    client: tenantName.get(String(lead.tenant_id)) ?? "Client",
+    owner_notified: events.some((event) => event.lead_id === lead.id && event.event_type === "owner_notified"),
+    booked: lead.status === "booked" || lead.status === "completed",
+  }));
+  return {
+    stats: {
+      missed_calls: missedCalls,
+      textbacks,
+      customer_responses: customerResponses,
+      qualified_leads: qualified,
+      owner_notifications: ownerNotifications,
+      booked_leads: booked,
+      lost_leads: lost,
+      completed_leads: completed,
+      response_rate: missedCalls ? Math.round((customerResponses / missedCalls) * 100) : 0,
+      booking_rate: qualified ? Math.round(((booked + completed) / qualified) * 100) : 0,
+      average_response_minutes: null,
+      needs_follow_up: leads.filter((lead) => ["new", "auto_contacted", "responded", "qualified"].includes(String(lead.status))).length,
+      no_owner_action: leads.filter((lead) => !events.some((event) => event.lead_id === lead.id && event.event_type === "owner_notified")).length,
+      delivery_failures: events.filter((event) => String(event.status ?? "").toLowerCase() === "failed").length,
+      forwarding_not_configured: settingsRows.filter((setting) => setting.enabled === true && !leadRecoveryIsActive(setting)).length,
+      waiting_for_verification: settingsRows.filter((setting) => setting.forwarding_status === "waiting_for_verification").length,
+      verification_failed: settingsRows.filter((setting) => ["failed", "error"].includes(String(setting.forwarding_status))).length,
+      skipped_clients: settingsRows.filter((setting) => setting.forwarding_status === "skipped").length,
+      disabled_clients: settingsRows.filter((setting) => setting.enabled !== true).length,
+    },
+    rows,
+  };
+}
+
+export async function getAdminLeadDetail(leadId: string) {
+  const svc = requireService();
+  const { data: lead, error } = await svc.from("leads").select("*").eq("id", leadId).maybeSingle();
+  if (error) throw error;
+  if (!lead) throw new Error("Lead not found");
+  const [messages, events, notes] = await Promise.all([
+    svc.from("lead_messages").select("*").eq("lead_id", leadId).order("created_at", { ascending: true }),
+    svc.from("lead_events").select("*").eq("lead_id", leadId).order("created_at", { ascending: false }),
+    svc.from("lead_notes").select("*").eq("lead_id", leadId).order("created_at", { ascending: false }),
+  ]);
+  if (messages.error && !isSchemaCompatibilityError(messages.error)) throw messages.error;
+  if (events.error && !isSchemaCompatibilityError(events.error)) throw events.error;
+  if (notes.error && !isSchemaCompatibilityError(notes.error)) throw notes.error;
+  return { lead, messages: messages.data ?? [], events: events.data ?? [], notes: notes.data ?? [] };
+}
+
+export async function getAdminModuleStats(moduleId: string, filters: AdminMonitoringFilters = {}) {
+  if (moduleId === "lead-recovery" || moduleId === "lead_recovery") return getAdminLeadRecoveryStats(filters);
+  const tableByModule: Record<string, { table: string; dateColumn?: string; title: string }> = {
+    "gbp-posting": { table: "post_history", dateColumn: "published_at", title: "GBP Posting" },
+    gbp_posting: { table: "post_history", dateColumn: "published_at", title: "GBP Posting" },
+    "gbp-audits": { table: "listing_audits", dateColumn: "audited_at", title: "GBP Audits" },
+    gbp_audits: { table: "listing_audits", dateColumn: "audited_at", title: "GBP Audits" },
+    reviews: { table: "reviews", title: "Reviews" },
+    citations: { table: "client_activity_events", title: "Citations" },
+    visibility: { table: "rank_snapshots", title: "Visibility" },
+    images: { table: "media_upload_requests", title: "Images" },
+    qa: { table: "qna_entries", title: "Q&A" },
+    "website-audits": { table: "client_activity_events", title: "Website Audits" },
+    website_audits: { table: "client_activity_events", title: "Website Audits" },
+  };
+  const config = tableByModule[moduleId] ?? { table: "client_activity_events", title: moduleId };
+  const rows = await loadRows(config.table, filters, { dateColumn: config.dateColumn, limit: 500 });
+  return {
+    stats: {
+      total: rows.length,
+      failed: rows.filter((row) => ["failed", "error"].includes(String(row.status ?? "").toLowerCase())).length,
+      active_clients: new Set(rows.map((row) => row.tenant_id).filter(Boolean)).size,
+    },
+    rows,
+    title: config.title,
+  };
+}
+
+export async function getAdminClientNotes(tenantId: string) {
+  const rows = await loadRows("admin_client_notes", { tenantIds: [tenantId] }, { dateColumn: "", limit: 100 });
+  return { rows };
+}
+
+export async function addAdminClientNote(tenantId: string, note: string, adminUserId: string, pinned = false) {
+  const svc = requireService();
+  const payload = {
+    id: crypto.randomUUID(),
+    tenant_id: tenantId,
+    note,
+    created_by: adminUserId,
+    pinned,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await svc.from("admin_client_notes").insert(payload).select().maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+export async function recordAdminImpersonationAudit(input: {
+  adminUserId: string;
+  tenantId: string;
+  action: "started" | "stopped" | "deep_link" | "opened_tab";
+  targetUserId?: string | null;
+  metadata?: Record<string, unknown>;
+}) {
+  const svc = requireService();
+  const payload = {
+    id: crypto.randomUUID(),
+    admin_user_id: input.adminUserId,
+    target_user_id: input.targetUserId ?? null,
+    tenant_id: input.tenantId,
+    action: input.action,
+    metadata_json: input.metadata ?? {},
+    created_at: new Date().toISOString(),
+  };
+  const { data, error } = await svc.from("admin_impersonation_audit").insert(payload).select().maybeSingle();
+  if (error && isSchemaCompatibilityError(error)) return payload;
+  if (error) throw error;
+  return data ?? payload;
+}
+
+export { ADMIN_MODULES };

@@ -174,6 +174,19 @@ class ReviewStatus(str, Enum):
     FLAGGED = "flagged"
 
 
+class ReviewProvider(str, Enum):
+    GOOGLE = "google"
+    YELP = "yelp"
+    FACEBOOK = "facebook"
+    TRIPADVISOR = "tripadvisor"
+    TRUSTPILOT = "trustpilot"
+    BBB = "bbb"
+    ANGI = "angi"
+    NEXTDOOR = "nextdoor"
+    HEALTHGRADES = "healthgrades"
+    OPENTABLE = "opentable"
+
+
 class ReviewRequestStatus(str, Enum):
     PENDING = "pending"
     SENT = "sent"

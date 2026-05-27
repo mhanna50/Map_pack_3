@@ -33,6 +33,24 @@ type ReviewRequest = {
   location_id?: string | null;
 };
 
+type ReviewProviderStatus = {
+  provider: string;
+  display_name: string;
+  supports_sync: boolean;
+  supports_reply: boolean;
+  requirements: string[];
+  configured: boolean;
+  mapped_reviews: number;
+  notes?: string | null;
+};
+
+type SyncProviderResult = {
+  provider: string;
+  status: string;
+  count: number;
+  message?: string | null;
+};
+
 const statusTabs = [
   { value: "all", label: "All" },
   { value: "sent", label: "Sent" },
@@ -55,6 +73,10 @@ export default function ReviewsPage() {
   const [sendError, setSendError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [resendAfterDays, setResendAfterDays] = useState(7);
+  const [providers, setProviders] = useState<ReviewProviderStatus[]>([]);
+  const [selectedProvider, setSelectedProvider] = useState("google");
+  const [syncingProvider, setSyncingProvider] = useState(false);
+  const [providerMessage, setProviderMessage] = useState<string | null>(null);
 
   const handleRefresh = async () => {
     await refreshTenant();
@@ -71,9 +93,27 @@ export default function ReviewsPage() {
       setLoading(true);
       setError(null);
       try {
-        const data = await listReviewRequests(tenantId, selectedLocationId ?? undefined, { limit: 50 });
+        const [data, providerRows] = await Promise.all([
+          listReviewRequests(tenantId, selectedLocationId ?? undefined, { limit: 50 }),
+          fetchBackendJson<ReviewProviderStatus[]>(
+            "/reviews/providers",
+            {
+              query: {
+                organization_id: tenantId,
+                location_id: selectedLocationId ?? undefined,
+              },
+            },
+            supabase,
+          ),
+        ]);
         if (!active) return;
         setRequests((data ?? []) as ReviewRequest[]);
+        setProviders(providerRows ?? []);
+        setSelectedProvider((currentProvider) =>
+          providerRows?.some((provider) => provider.provider === currentProvider)
+            ? currentProvider
+            : providerRows?.[0]?.provider ?? "google",
+        );
       } catch (err: unknown) {
         if (!active) return;
         const message = err instanceof Error ? err.message : "Failed to load review requests";
@@ -86,12 +126,56 @@ export default function ReviewsPage() {
     return () => {
       active = false;
     };
-  }, [tenantId, selectedLocationId, refreshKey]);
+  }, [tenantId, selectedLocationId, refreshKey, supabase]);
 
   const filtered = useMemo(() => {
     if (statusFilter === "all") return requests;
     return requests.filter((req) => req.status === statusFilter);
   }, [requests, statusFilter]);
+
+  const activeProvider = useMemo(
+    () => providers.find((provider) => provider.provider === selectedProvider) ?? providers[0] ?? null,
+    [providers, selectedProvider],
+  );
+
+  const connectedCount = useMemo(
+    () => providers.filter((provider) => provider.configured).length,
+    [providers],
+  );
+
+  const handleSyncProvider = async () => {
+    if (!tenantId || !selectedLocationId || !activeProvider) {
+      setProviderMessage("Select a location before syncing reviews.");
+      return;
+    }
+    setSyncingProvider(true);
+    setProviderMessage(null);
+    try {
+      const results = await fetchBackendJson<SyncProviderResult[]>(
+        "/reviews/sync",
+        {
+          method: "POST",
+          query: {
+            organization_id: tenantId,
+            location_id: selectedLocationId,
+            provider: activeProvider.provider,
+          },
+        },
+        supabase,
+      );
+      const result = results[0];
+      setProviderMessage(
+        result?.status === "synced"
+          ? `${activeProvider.display_name}: synced ${result.count} review${result.count === 1 ? "" : "s"}.`
+          : result?.message ?? `${activeProvider.display_name}: ${result?.status ?? "not configured"}.`,
+      );
+      setRefreshKey((key) => key + 1);
+    } catch (err) {
+      setProviderMessage(err instanceof Error ? err.message : "Unable to sync provider");
+    } finally {
+      setSyncingProvider(false);
+    }
+  };
 
   const handleSendRequest = async () => {
     if (!tenantId) {
@@ -146,6 +230,75 @@ export default function ReviewsPage() {
             </Button>
           </div>
         </header>
+
+        <Card>
+          <CardHeader className="flex flex-row items-start justify-between gap-4">
+            <div>
+              <CardTitle>Review sources</CardTitle>
+              <CardDescription>Connected providers and API readiness</CardDescription>
+            </div>
+            <Badge variant={connectedCount > 0 ? "success" : "warning"}>
+              {connectedCount}/{providers.length || 10} connected
+            </Badge>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+              <label className="text-sm">
+                Provider
+                <select
+                  value={selectedProvider}
+                  onChange={(event) => {
+                    setSelectedProvider(event.target.value);
+                    setProviderMessage(null);
+                  }}
+                  className="mt-1 w-full rounded-lg border border-border bg-white px-3 py-2"
+                >
+                  {providers.length === 0 ? (
+                    <option value="google">Google Business Profile</option>
+                  ) : (
+                    providers.map((provider) => (
+                      <option key={provider.provider} value={provider.provider}>
+                        {provider.display_name} - {provider.configured ? "connected" : "not connected"}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </label>
+              <div className="flex items-end">
+                <Button
+                  onClick={handleSyncProvider}
+                  disabled={syncingProvider || !selectedLocationId || !activeProvider}
+                >
+                  {syncingProvider ? "Syncing..." : "Sync selected"}
+                </Button>
+              </div>
+            </div>
+
+            {activeProvider && (
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold">{activeProvider.display_name}</span>
+                  <Badge variant={activeProvider.configured ? "success" : "warning"}>
+                    {activeProvider.configured ? "Connected" : "Needs credentials"}
+                  </Badge>
+                  <Badge variant="muted">{activeProvider.mapped_reviews} reviews</Badge>
+                  <Badge variant={activeProvider.supports_reply ? "success" : "muted"}>
+                    {activeProvider.supports_reply ? "Replies supported" : "Replies pending"}
+                  </Badge>
+                </div>
+                {!activeProvider.configured && (
+                  <ul className="mt-3 list-disc space-y-1 pl-5 text-muted-foreground">
+                    {activeProvider.requirements.map((requirement) => (
+                      <li key={requirement}>{requirement}</li>
+                    ))}
+                  </ul>
+                )}
+                {activeProvider.notes && <p className="mt-3 text-muted-foreground">{activeProvider.notes}</p>}
+                {providerMessage && <p className="mt-3 font-medium text-foreground">{providerMessage}</p>}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
