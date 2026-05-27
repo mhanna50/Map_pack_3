@@ -4,7 +4,7 @@ anyio==4.12.0
 certifi==2025.11.12
 click==8.1.7
 twilio==8.2.0
-cryptography==46.0.7
+cryptography==48.0.0
 fastapi==0.136.1
 google-ads==30.1.0
 h11==0.16.0
