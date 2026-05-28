@@ -48,71 +48,71 @@
 
 :root {
   --radius: 0.625rem;
-  --background: #020617;
-  --foreground: #e2e8f0;
-  --card: #0f172a;
-  --card-foreground: #e2e8f0;
-  --popover: #0f172a;
-  --popover-foreground: #e2e8f0;
-  --primary: #1e3a8a;
-  --primary-foreground: #f8fafc;
-  --secondary: #1d4ed8;
-  --secondary-foreground: #f8fafc;
-  --muted: #0b1225;
-  --muted-foreground: #94a3b8;
-  --accent: #38bdf8;
-  --accent-foreground: #020617;
+  --background: #F8F3EA;
+  --foreground: #14213D;
+  --card: #FFFDF8;
+  --card-foreground: #14213D;
+  --popover: #FFFDF8;
+  --popover-foreground: #14213D;
+  --primary: #14213D;
+  --primary-foreground: #FFFDF8;
+  --secondary: #B86B4B;
+  --secondary-foreground: #FFFDF8;
+  --muted: #F8F3EA;
+  --muted-foreground: #5F6673;
+  --accent: #B86B4B;
+  --accent-foreground: #FFFDF8;
   --destructive: #ef4444;
-  --border: #1e293b;
-  --input: #1e293b;
-  --ring: #38bdf8;
-  --chart-1: #1e3a8a;
-  --chart-2: #1d4ed8;
-  --chart-3: #38bdf8;
-  --chart-4: #0ea5e9;
-  --chart-5: #60a5fa;
-  --sidebar: #0f172a;
-  --sidebar-foreground: #e2e8f0;
-  --sidebar-primary: #1e3a8a;
-  --sidebar-primary-foreground: #f8fafc;
-  --sidebar-accent: #1d4ed8;
-  --sidebar-accent-foreground: #f8fafc;
-  --sidebar-border: #1e293b;
-  --sidebar-ring: #38bdf8;
+  --border: #D8CFC1;
+  --input: #D8CFC1;
+  --ring: #B86B4B;
+  --chart-1: #14213D;
+  --chart-2: #B86B4B;
+  --chart-3: #7A8463;
+  --chart-4: #E6C98F;
+  --chart-5: #5F6673;
+  --sidebar: #FFFDF8;
+  --sidebar-foreground: #14213D;
+  --sidebar-primary: #14213D;
+  --sidebar-primary-foreground: #FFFDF8;
+  --sidebar-accent: #B86B4B;
+  --sidebar-accent-foreground: #FFFDF8;
+  --sidebar-border: #D8CFC1;
+  --sidebar-ring: #B86B4B;
 }
 
 .dark {
-  --background: #020617;
-  --foreground: #e2e8f0;
-  --card: #0f172a;
-  --card-foreground: #e2e8f0;
-  --popover: #0f172a;
-  --popover-foreground: #e2e8f0;
-  --primary: #1e3a8a;
-  --primary-foreground: #f8fafc;
-  --secondary: #1d4ed8;
-  --secondary-foreground: #f8fafc;
-  --muted: #0b1225;
-  --muted-foreground: #94a3b8;
-  --accent: #38bdf8;
-  --accent-foreground: #020617;
+  --background: #14213D;
+  --foreground: #F8F3EA;
+  --card: #1D2B4A;
+  --card-foreground: #F8F3EA;
+  --popover: #1D2B4A;
+  --popover-foreground: #F8F3EA;
+  --primary: #F8F3EA;
+  --primary-foreground: #14213D;
+  --secondary: #B86B4B;
+  --secondary-foreground: #FFFDF8;
+  --muted: #24304D;
+  --muted-foreground: #D8CFC1;
+  --accent: #E6C98F;
+  --accent-foreground: #14213D;
   --destructive: #ef4444;
-  --border: #1e293b;
-  --input: #1e293b;
-  --ring: #38bdf8;
-  --chart-1: #1e3a8a;
-  --chart-2: #1d4ed8;
-  --chart-3: #38bdf8;
-  --chart-4: #0ea5e9;
-  --chart-5: #60a5fa;
-  --sidebar: #0f172a;
-  --sidebar-foreground: #e2e8f0;
-  --sidebar-primary: #1e3a8a;
-  --sidebar-primary-foreground: #f8fafc;
-  --sidebar-accent: #1d4ed8;
-  --sidebar-accent-foreground: #f8fafc;
-  --sidebar-border: #1e293b;
-  --sidebar-ring: #38bdf8;
+  --border: rgba(216, 207, 193, 0.2);
+  --input: rgba(216, 207, 193, 0.2);
+  --ring: #E6C98F;
+  --chart-1: #E6C98F;
+  --chart-2: #B86B4B;
+  --chart-3: #7A8463;
+  --chart-4: #F8F3EA;
+  --chart-5: #D8CFC1;
+  --sidebar: #1D2B4A;
+  --sidebar-foreground: #F8F3EA;
+  --sidebar-primary: #F8F3EA;
+  --sidebar-primary-foreground: #14213D;
+  --sidebar-accent: #B86B4B;
+  --sidebar-accent-foreground: #FFFDF8;
+  --sidebar-border: rgba(216, 207, 193, 0.2);
+  --sidebar-ring: #E6C98F;
 }
 
 @layer base {
@@ -130,18 +130,18 @@
   }
 
   ::selection {
-    background: #d86f45;
-    color: #fff8ec;
+    background: #B86B4B;
+    color: #F8F3EA;
   }
 }
 
 @layer components {
   .marketing-site {
     background:
-      linear-gradient(180deg, rgba(255, 250, 240, 0.92), rgba(248, 241, 227, 0.98)),
-      radial-gradient(circle at 20% 0%, rgba(231, 179, 95, 0.18), transparent 34%),
-      radial-gradient(circle at 100% 18%, rgba(81, 129, 125, 0.14), transparent 30%),
-      #f8f1e3;
+      linear-gradient(180deg, rgba(248, 243, 234, 0.96), rgba(248, 243, 234, 0.98)),
+      radial-gradient(circle at 18% 0%, rgba(230, 201, 143, 0.18), transparent 34%),
+      radial-gradient(circle at 100% 18%, rgba(122, 132, 99, 0.12), transparent 30%),
+      #F8F3EA;
   }
 
   .marketing-site::before {
@@ -152,8 +152,8 @@
     pointer-events: none;
     opacity: 0.3;
     background-image:
-      linear-gradient(rgba(23, 32, 46, 0.035) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(23, 32, 46, 0.03) 1px, transparent 1px);
+      linear-gradient(rgba(20, 33, 61, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(20, 33, 61, 0.03) 1px, transparent 1px);
     background-size: 36px 36px;
     mask-image: linear-gradient(to bottom, transparent, black 12%, black 82%, transparent);
   }

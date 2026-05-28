@@ -32,11 +32,11 @@ export function AdminFilterBar({ filters, onChange, clients = [], modules = [], 
   const [query, setQuery] = useState(filters.q ?? "");
   return (
     <Card>
-      <CardContent className="flex flex-wrap items-end gap-3 p-4">
-        <label className="text-sm">
+      <CardContent className="grid gap-3 p-4 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-end">
+        <label className="min-w-0 text-sm">
           Client
           <Select
-            className="mt-1 w-56"
+            className="mt-1 w-full lg:w-56"
             value={filters.tenant_ids ?? ""}
             onChange={(event) => onChange({ ...filters, tenant_ids: event.target.value || undefined })}
             options={[
@@ -45,10 +45,10 @@ export function AdminFilterBar({ filters, onChange, clients = [], modules = [], 
             ]}
           />
         </label>
-        <label className="text-sm">
+        <label className="min-w-0 text-sm">
           Date range
           <Select
-            className="mt-1 w-36"
+            className="mt-1 w-full lg:w-36"
             value={filters.range ?? "30d"}
             onChange={(event) => onChange({ ...filters, range: event.target.value })}
             options={[
@@ -60,10 +60,10 @@ export function AdminFilterBar({ filters, onChange, clients = [], modules = [], 
           />
         </label>
         {showModule && (
-          <label className="text-sm">
+          <label className="min-w-0 text-sm">
             Module
             <Select
-              className="mt-1 w-44"
+              className="mt-1 w-full lg:w-44"
               value={filters.module ?? ""}
               onChange={(event) => onChange({ ...filters, module: event.target.value || undefined })}
               options={[{ label: "All modules", value: "" }, ...modules.map((module) => ({ label: module.label, value: module.id }))]}
@@ -71,10 +71,10 @@ export function AdminFilterBar({ filters, onChange, clients = [], modules = [], 
           </label>
         )}
         {showStatus && (
-          <label className="text-sm">
+          <label className="min-w-0 text-sm">
             Status
             <Select
-              className="mt-1 w-40"
+              className="mt-1 w-full lg:w-40"
               value={filters.status ?? ""}
               onChange={(event) => onChange({ ...filters, status: event.target.value || undefined })}
               options={[
@@ -87,7 +87,7 @@ export function AdminFilterBar({ filters, onChange, clients = [], modules = [], 
             />
           </label>
         )}
-        <label className="min-w-56 flex-1 text-sm">
+        <label className="min-w-0 text-sm lg:flex-1">
           Search
           <div className="relative mt-1">
             <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -102,7 +102,7 @@ export function AdminFilterBar({ filters, onChange, clients = [], modules = [], 
             />
           </div>
         </label>
-        <Button variant="outline" onClick={() => onChange({ ...filters, q: query || undefined })}>Apply</Button>
+        <Button variant="outline" className="w-full lg:w-auto" onClick={() => onChange({ ...filters, q: query || undefined })}>Apply</Button>
       </CardContent>
     </Card>
   );
@@ -133,7 +133,7 @@ export function AdminIssueList({ issues }: { issues: Array<Record<string, unknow
       ) : (
         issues.map((issue, index) => (
           <div key={`${issue.title}-${index}`} className="rounded-lg border border-border bg-white/70 p-3 text-sm">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="font-semibold">{String(issue.title ?? "Issue")}</p>
               <Badge variant={issue.severity === "critical" ? "danger" : issue.severity === "warning" ? "warning" : "muted"}>
                 {String(issue.severity ?? "info")}
@@ -152,7 +152,7 @@ export function AdminActivityTimeline({ rows }: { rows: Array<Record<string, unk
     <div className="space-y-2">
       {rows.map((row, index) => (
         <div key={String(row.id ?? index)} className="rounded-lg border border-border bg-white/70 p-3 text-sm">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="font-semibold">{String(row.title ?? row.event_type ?? "Activity")}</p>
             <Badge variant={row.status === "failed" ? "danger" : row.status === "warning" ? "warning" : "muted"}>{String(row.module ?? "module")}</Badge>
           </div>

@@ -26,6 +26,9 @@ type Tenant = {
   last_activity?: string;
   created_at?: string;
   subscription_status?: string;
+  client_stage?: "active" | "past" | "prospective" | string;
+  email?: string;
+  is_prospective?: boolean;
   plan?: string | null;
   active_modules?: string[];
   open_issues?: string[];
@@ -152,7 +155,7 @@ export default function AdminClientsPage() {
           <div>
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Clients</p>
             <h1 className="text-2xl font-semibold">All tenants</h1>
-            <p className="text-sm text-muted-foreground">Subscribed clients only, including active and canceled accounts.</p>
+            <p className="text-sm text-muted-foreground">Active, past, and prospective clients from subscriptions and pending invites.</p>
           </div>
           <Badge variant="muted">Total {total}</Badge>
         </div>
@@ -172,7 +175,8 @@ export default function AdminClientsPage() {
                 options={[
                   { label: "All status", value: "" },
                   { label: "Active", value: "active" },
-                  { label: "Canceled", value: "canceled" },
+                  { label: "Past", value: "past" },
+                  { label: "Prospective", value: "prospective" },
                 ]}
               />
               <Button variant="outline" size="sm" onClick={() => setPage(1)}>
@@ -183,7 +187,7 @@ export default function AdminClientsPage() {
         </Card>
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-col items-start justify-between sm:flex-row sm:items-center">
             <CardTitle>Tenants</CardTitle>
             <Button variant="outline" size="sm" onClick={() => setPage(1)}>
               Refresh
@@ -215,11 +219,11 @@ export default function AdminClientsPage() {
                     <TR key={tenant.tenant_id}>
                       <TD>
                         <div className="font-semibold">{tenant.business_name}</div>
-                        <p className="text-xs text-muted-foreground">{tenant.tenant_id}</p>
+                        <p className="text-xs text-muted-foreground">{tenant.email ?? tenant.tenant_id}</p>
                       </TD>
                       <TD>
 	                        <Badge variant={statusVariant(tenant.subscription_status ?? tenant.status)} className="capitalize">
-	                          {tenant.subscription_status ?? tenant.status}
+	                          {tenant.client_stage ?? tenant.subscription_status ?? tenant.status}
 	                        </Badge>
 	                      </TD>
 	                      <TD className="max-w-[220px] text-xs">{tenant.active_modules?.slice(0, 4).join(", ") || "None"}</TD>
@@ -229,6 +233,10 @@ export default function AdminClientsPage() {
                       <TD>{formatDate(tenant.created_at)}</TD>
                       <TD>
                         <div className="flex flex-wrap gap-2 text-xs">
+                          {tenant.is_prospective ? (
+                            <Badge variant="muted">Awaiting signup</Badge>
+                          ) : (
+                            <>
 	                          <Button variant="outline" size="sm" onClick={() => openDetail(tenant.tenant_id)}>
 	                            <Eye className="h-4 w-4" />
 	                            View
@@ -244,6 +252,8 @@ export default function AdminClientsPage() {
                             <Ban className="h-4 w-4" />
                             Terminate
                           </Button>
+                            </>
+                          )}
                         </div>
                       </TD>
                     </TR>
@@ -384,7 +394,9 @@ function statusVariant(status?: string) {
     case "trialing":
       return "success";
     case "past_due":
+    case "prospective":
       return "warning";
+    case "past":
     case "churned":
     case "canceled":
       return "danger";

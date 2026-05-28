@@ -2,13 +2,16 @@ import type { Metadata } from "next";
 
 import { MarketingShell } from "@/components/marketing/MarketingShell";
 import { PageHero } from "@/components/marketing/PageHero";
+import { StructuredData } from "@/components/marketing/StructuredData";
 import { brand } from "@/content/marketing";
+import { breadcrumbSchema, createMarketingMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Privacy Policy draft",
+export const metadata: Metadata = createMarketingMetadata({
+  title: "Privacy Policy | Visora",
   description:
-    "A practical draft privacy policy for Visora covering contact info, business data, Google data, reviews, listings, lead recovery metadata, providers, retention, and choices.",
-};
+    "Visora privacy policy draft covering business data, Google data, reviews, listings, lead recovery metadata, providers, retention, and choices.",
+  path: "/privacy",
+});
 
 const sections = [
   {
@@ -48,6 +51,12 @@ const sections = [
 export default function PrivacyPage() {
   return (
     <MarketingShell>
+      <StructuredData
+        data={breadcrumbSchema([
+          { name: "Home", path: "/" },
+          { name: "Privacy Policy", path: "/privacy" },
+        ])}
+      />
       <PageHero
         eyebrow="Legal"
         title="Privacy Policy draft."
@@ -56,9 +65,9 @@ export default function PrivacyPage() {
       <section className="px-6 py-16">
         <div className="mx-auto grid max-w-4xl gap-5">
           {sections.map((section) => (
-            <section key={section.title} className="rounded-lg border border-[#dcc6a4] bg-[#fffaf0] p-6">
-              <h2 className="text-xl font-semibold text-[#17202e]">{section.title}</h2>
-              <p className="mt-3 text-sm leading-7 text-[#53605a]">{section.body}</p>
+            <section key={section.title} className="rounded-lg border border-[#D8CFC1] bg-[#FFFDF8] p-6">
+              <h2 className="text-xl font-semibold text-[#14213D]">{section.title}</h2>
+              <p className="mt-3 text-sm leading-7 text-[#5F6673]">{section.body}</p>
             </section>
           ))}
         </div>
@@ -66,4 +75,3 @@ export default function PrivacyPage() {
     </MarketingShell>
   );
 }
-

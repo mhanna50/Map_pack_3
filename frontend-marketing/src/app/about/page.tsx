@@ -4,17 +4,30 @@ import { CTASection } from "@/components/marketing/CTASection";
 import { MarketingShell } from "@/components/marketing/MarketingShell";
 import { PageHero } from "@/components/marketing/PageHero";
 import { SectionHeader } from "@/components/marketing/SectionHeader";
+import { StructuredData } from "@/components/marketing/StructuredData";
 import { TrustCard } from "@/components/marketing/TrustCard";
+import { breadcrumbSchema, createMarketingMetadata, organizationSchema } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "About Visora",
+export const metadata: Metadata = createMarketingMetadata({
+  title: "About Visora | Visora",
   description:
-    "Learn why Visora exists: practical, AI-assisted local visibility software for real local businesses that need clarity, consistency, and better follow-up.",
-};
+    "Learn why Visora exists: practical, AI-assisted local SEO software for businesses that need clarity, consistency, and better follow-up.",
+  path: "/about",
+  keywords: ["about Visora", "local SEO platform for local businesses"],
+});
 
 export default function AboutPage() {
   return (
     <MarketingShell>
+      <StructuredData
+        data={[
+          breadcrumbSchema([
+            { name: "Home", path: "/" },
+            { name: "About", path: "/about" },
+          ]),
+          organizationSchema(),
+        ]}
+      />
       <PageHero
         eyebrow="About"
         title="Built for real local businesses, not vague SEO promises."
@@ -28,7 +41,7 @@ export default function AboutPage() {
             title="Practical help beats mysterious reports."
             description="The best local visibility work is usually not glamorous. It is keeping the profile current, asking for reviews, fixing mismatched listings, watching competitors, checking the website, and following up when someone calls."
           />
-          <div className="space-y-5 text-base leading-8 text-[#53605a]">
+          <div className="space-y-5 text-base leading-8 text-[#5F6673]">
             <p>
               Visora is designed around that reality. The platform uses AI where it can save time:
               drafting posts, summarizing leads, spotting profile gaps, shaping Q&A answers, and turning
@@ -46,7 +59,7 @@ export default function AboutPage() {
         </div>
       </section>
 
-      <section className="bg-[#f5e8d1] px-6 py-16">
+      <section className="bg-[#F8F3EA] px-6 py-16">
         <div className="mx-auto max-w-6xl">
           <SectionHeader
             eyebrow="What we believe"
@@ -75,4 +88,3 @@ export default function AboutPage() {
     </MarketingShell>
   );
 }
-

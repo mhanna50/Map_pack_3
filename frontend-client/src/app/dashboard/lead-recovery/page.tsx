@@ -262,7 +262,7 @@ export default function LeadRecoveryPage() {
         ) : (
           <>
             <Card>
-              <CardHeader className="flex flex-row items-start justify-between gap-4">
+              <CardHeader className="flex flex-col items-start justify-between sm:flex-row gap-4">
                 <div>
                   <CardTitle>Setup status</CardTitle>
                   <CardDescription>

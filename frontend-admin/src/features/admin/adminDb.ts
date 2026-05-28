@@ -712,7 +712,14 @@ const ADMIN_MODULES = [
   { id: "website_audits", label: "Website Audits", clientPath: "/dashboard/gbp-audit" },
 ] as const;
 
-type TenantRow = Record<string, unknown> & { tenant_id?: string; business_name?: string; status?: string; created_at?: string };
+type TenantRow = Record<string, unknown> & {
+  tenant_id?: string;
+  business_name?: string;
+  status?: string;
+  created_at?: string;
+  client_stage?: string;
+  subscription_status?: string;
+};
 type CountResult = { count: number; error?: unknown };
 
 function dateRange(filters: AdminMonitoringFilters = {}) {
@@ -790,6 +797,49 @@ async function loadBillingByTenant(tenantIds?: string[]) {
     if (tenantId && !byTenant.has(tenantId)) byTenant.set(tenantId, row);
   });
   return byTenant;
+}
+
+async function loadProspectiveClientsForMonitoring(filters: AdminMonitoringFilters = {}): Promise<TenantRow[]> {
+  if (filters.tenantIds?.length) return [];
+  try {
+    const svc = requireService();
+    let query = svc
+      .from("pending_onboarding")
+      .select("*")
+      .order("invited_at", { ascending: false })
+      .limit(500);
+    if (filters.q) {
+      query = query.or(`business_name.ilike.%${filters.q}%,email.ilike.%${filters.q}%`);
+    }
+    const { data, error } = await query;
+    if (error && isSchemaCompatibilityError(error)) return [];
+    if (error) throw error;
+    return (data ?? [])
+      .filter((row: Record<string, unknown>) => {
+        const status = String(row.status ?? "").toLowerCase();
+        return !["completed", "activated", "google_connected", "canceled"].includes(status);
+      })
+      .map((row: Record<string, unknown>) => {
+        const email = String(row.email ?? "");
+        return {
+          tenant_id: `prospective:${email || row.id || row.invited_at}`,
+          business_name: String(row.business_name ?? email ?? "Prospective client"),
+          status: "prospective",
+          subscription_status: "prospective",
+          client_stage: "prospective",
+          email,
+          plan: row.plan ?? null,
+          created_at: String(row.invited_at ?? row.created_at ?? ""),
+          last_activity: String(row.invited_at ?? row.created_at ?? ""),
+          open_issues: ["Invite not completed"],
+          active_modules: [],
+          is_prospective: true,
+        } as TenantRow;
+      });
+  } catch (error) {
+    if (isSchemaCompatibilityError(error)) return [];
+    throw error;
+  }
 }
 
 async function loadRows(table: string, filters: AdminMonitoringFilters = {}, options: { limit?: number; dateColumn?: string } = {}) {
@@ -972,11 +1022,13 @@ export async function getAdminClientsMonitor(filters: AdminMonitoringFilters = {
     const tenantId = String(row.tenant_id ?? "");
     if (tenantId && !activityByTenant.has(tenantId)) activityByTenant.set(tenantId, String(row.created_at ?? ""));
   });
-  const rows = tenants.map((tenant) => {
+  const tenantRows = tenants.map((tenant) => {
     const tenantId = String(tenant.tenant_id);
     const activeModules = moduleHealth.filter((module) => module.active_clients > 0).map((module) => module.label);
     const billingRow = billing.get(tenantId);
     const leadSetting = leadByTenant.get(tenantId);
+    const subscriptionStatus = String(billingRow?.status ?? tenant.status ?? "unknown").toLowerCase();
+    const clientStage = ["active", "trialing", "past_due"].includes(subscriptionStatus) ? "active" : "past";
     const issues = [
       billingRow && !["active", "trialing"].includes(String(billingRow.status ?? "").toLowerCase()) ? "Billing issue" : null,
       leadSetting?.enabled === true && !leadRecoveryIsActive(leadSetting) ? "Lead forwarding setup" : null,
@@ -985,12 +1037,22 @@ export async function getAdminClientsMonitor(filters: AdminMonitoringFilters = {
     return {
       ...tenant,
       subscription_status: billingRow?.status ?? tenant.status ?? "unknown",
+      client_stage: clientStage,
       plan: billingRow?.plan ?? tenant.plan ?? null,
       active_modules: activeModules,
       last_activity: activityByTenant.get(tenantId) ?? tenant.last_activity ?? tenant.updated_at ?? tenant.created_at,
       open_issues: issues,
       mrr: billingRow?.amount ?? billingRow?.price_amount ?? null,
     };
+  });
+  const prospects = await loadProspectiveClientsForMonitoring(filters);
+  const rows = [...tenantRows, ...prospects].filter((row) => {
+    const requested = String(filters.status ?? "").toLowerCase();
+    if (!requested) return true;
+    if (requested === "past") return row.client_stage === "past";
+    if (requested === "prospective") return row.client_stage === "prospective";
+    if (requested === "active") return row.client_stage === "active";
+    return String(row.subscription_status ?? row.status ?? "").toLowerCase() === requested;
   });
   return { rows, total: rows.length, module_health: moduleHealth };
 }

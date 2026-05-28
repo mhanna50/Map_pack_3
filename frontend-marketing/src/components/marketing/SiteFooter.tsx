@@ -54,19 +54,19 @@ const footerGroups = [
 
 export function SiteFooter() {
   return (
-    <footer className="border-t border-[#d9c4a4] bg-[#17202e] px-6 py-12 text-[#fff8ec]">
+    <footer className="border-t border-[#D8CFC1] bg-[#14213D] px-6 py-12 text-[#F8F3EA]">
       <div className="mx-auto grid max-w-6xl gap-10 lg:grid-cols-[1.3fr_2fr]">
         <div className="space-y-4">
           <Link href="/" className="text-2xl font-semibold">
             {brand.name}
           </Link>
-          <p className="max-w-sm text-sm leading-6 text-[#dcd2bd]">
+          <p className="max-w-sm text-sm leading-6 text-[#D8CFC1]">
             AI-assisted local visibility software for businesses that want to get found, look trustworthy,
             stay consistent, and recover more leads.
           </p>
-          <p className="text-sm leading-6 text-[#c7bda8]">
+          <p className="text-sm leading-6 text-[#D8CFC1]">
             Support:{" "}
-            <a className="underline underline-offset-4 hover:text-white" href={`mailto:${brand.email}`}>
+            <a className="underline underline-offset-4 hover:text-[#FFFDF8]" href={`mailto:${brand.email}`}>
               {brand.email}
             </a>
           </p>
@@ -75,13 +75,13 @@ export function SiteFooter() {
         <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-5">
           {footerGroups.map((group) => (
             <div key={group.heading}>
-              <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-[#e7b35f]">
+              <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-[#E6C98F]">
                 {group.heading}
               </h2>
               <ul className="mt-4 space-y-2">
                 {group.links.map((link) => (
                   <li key={`${group.heading}-${link.href}`}>
-                    <Link className="text-sm text-[#dcd2bd] hover:text-white" href={link.href}>
+                    <Link className="text-sm text-[#D8CFC1] hover:text-[#FFFDF8]" href={link.href}>
                       {link.label}
                     </Link>
                   </li>
@@ -91,10 +91,9 @@ export function SiteFooter() {
           ))}
         </div>
       </div>
-      <div className="mx-auto mt-10 max-w-6xl border-t border-white/10 pt-5 text-xs text-[#c7bda8]">
+      <div className="mx-auto mt-10 max-w-6xl border-t border-white/10 pt-5 text-xs text-[#D8CFC1]">
         Copyright {new Date().getFullYear()} {brand.name}. Draft legal pages should be reviewed before production use.
       </div>
     </footer>
   );
 }
-

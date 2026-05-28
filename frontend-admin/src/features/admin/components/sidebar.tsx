@@ -54,22 +54,22 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "flex h-[calc(100vh-2rem)] flex-col rounded-2xl border border-border bg-white/80 p-4 shadow-sm transition-all",
-        collapsed ? "w-16" : "w-64",
+        "flex w-full flex-col rounded-2xl border border-border bg-white/80 p-3 shadow-sm transition-all lg:sticky lg:top-6 lg:h-[calc(100vh-3rem)] lg:p-4",
+        collapsed ? "lg:w-16" : "lg:w-64",
       )}
     >
       <div className="flex items-center justify-between">
         <div className={cn("text-lg font-semibold", collapsed && "hidden")}>Owner Admin</div>
         <button
           aria-label="Toggle sidebar"
-          className="rounded-lg p-1 text-muted-foreground hover:bg-muted/50"
+          className="hidden rounded-lg p-1 text-muted-foreground hover:bg-muted/50 lg:inline-flex"
           onClick={() => setCollapsed((v) => !v)}
         >
           {collapsed ? "»" : "«"}
         </button>
       </div>
 
-      <nav className="mt-6 space-y-1">
+      <nav className="mt-4 flex gap-1 overflow-x-auto pb-1 lg:mt-6 lg:block lg:space-y-1 lg:overflow-y-auto lg:overflow-x-visible lg:pb-0">
         {navItems.map((item) => {
           const Icon = item.icon;
           const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -78,19 +78,19 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               className={cn(
-                "flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition",
+                "flex shrink-0 items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition",
                 active ? "bg-primary/10 text-primary shadow-inner" : "text-muted-foreground hover:bg-muted/60",
                 collapsed && "justify-center",
               )}
             >
-              <Icon className="h-4 w-4" />
+              <Icon className="h-4 w-4 shrink-0" />
               {!collapsed && <span>{item.label}</span>}
             </Link>
           );
         })}
       </nav>
 
-      <div className={cn("mt-auto space-y-3 rounded-xl border border-dashed border-border bg-muted/30 p-4 text-sm text-muted-foreground", collapsed && "hidden")}>
+      <div className={cn("mt-auto hidden space-y-3 rounded-xl border border-dashed border-border bg-muted/30 p-4 text-sm text-muted-foreground lg:block", collapsed && "lg:hidden")}>
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Billing sync</p>
         <div className="flex items-center justify-between text-xs">
           <span>Stripe events</span>

@@ -44,6 +44,11 @@ export type LearnPage = {
   }[];
 };
 
+export type RelatedLink = {
+  label: string;
+  href: string;
+};
+
 export const outcomeFramework = [
   {
     title: "Get found",
@@ -685,6 +690,456 @@ export const learnPages: LearnPage[] = [
   },
 ];
 
+export const serviceFaqs: Record<string, FAQItem[]> = {
+  "google-business-profile": [
+    {
+      question: "What is a Google Business Profile?",
+      answer:
+        "A Google Business Profile is the listing for your business on Google Search and Maps. It includes hours, services, photos, reviews, posts, questions, directions, and call links.",
+    },
+    {
+      question: "Why does my profile need to be complete?",
+      answer:
+        "A complete profile helps customers quickly understand what you do, where you serve, whether you are open, and whether your business feels active and trustworthy.",
+    },
+    {
+      question: "Can an outdated profile hurt trust?",
+      answer:
+        "Yes. Old hours, missing services, stale photos, or unanswered questions can make a good business look harder to choose, even when the business itself is strong.",
+    },
+    {
+      question: "How often should a profile be reviewed?",
+      answer:
+        "Review the basics whenever hours, services, locations, policies, or contact details change. A broader profile audit is useful on a regular monthly or quarterly rhythm.",
+    },
+  ],
+  "gbp-posting": [
+    {
+      question: "What should I post on my Google Business Profile?",
+      answer:
+        "Helpful GBP posts can include service highlights, seasonal reminders, limited offers, project updates, hiring notes, business announcements, and answers to common customer questions.",
+    },
+    {
+      question: "How often should a local business post?",
+      answer:
+        "A steady rhythm matters more than volume. Many local businesses benefit from weekly or seasonal updates that are useful to customers and aligned with real services.",
+    },
+    {
+      question: "Can posts promote services and offers?",
+      answer:
+        "Yes, as long as the post is accurate and not misleading. Offers, service reminders, and local updates can help customers understand what to do next.",
+    },
+  ],
+  "gbp-audits": [
+    {
+      question: "What does a Google Business Profile audit check?",
+      answer:
+        "A GBP audit reviews business details, categories, services, photos, posts, Q&A, reviews, hours, service areas, and whether the profile clearly explains why a customer should call.",
+    },
+    {
+      question: "Why do missing services matter?",
+      answer:
+        "Customers often search for specific services. If a service is missing or vague, your profile may feel less relevant or less helpful than nearby competitors.",
+    },
+    {
+      question: "Does a profile audit guarantee better rankings?",
+      answer:
+        "No. An audit finds issues and opportunities. Rankings depend on many factors, but fixing weak or outdated profile content can improve trust and clarity.",
+    },
+  ],
+  "review-management": [
+    {
+      question: "Why do reviews matter for local businesses?",
+      answer:
+        "Reviews shape trust before someone calls. Customers look at rating, count, recency, details in the comments, and whether the business responds thoughtfully.",
+    },
+    {
+      question: "When should I ask for a review?",
+      answer:
+        "Ask after a positive service moment, completed job, appointment, or customer interaction while the experience is still fresh and the request feels natural.",
+    },
+    {
+      question: "Can I automate review requests?",
+      answer:
+        "Yes. Review request automation can save time, but the message should still be respectful, accurate, and compliant with platform rules.",
+    },
+    {
+      question: "Should I respond to negative reviews?",
+      answer:
+        "Usually yes. A calm response can show future customers that you listen and handle concerns professionally. Avoid arguments and protect private details.",
+    },
+  ],
+  "review-monitoring": [
+    {
+      question: "What is multi-source review monitoring?",
+      answer:
+        "It means watching reviews from more than one platform so owners can see new feedback, urgent complaints, and repeated themes without checking each site manually.",
+    },
+    {
+      question: "Which review sources matter most?",
+      answer:
+        "Google is central for many local searches, but Facebook, Yelp, industry directories, and niche platforms can also matter depending on the business.",
+    },
+    {
+      question: "Can review monitoring show patterns?",
+      answer:
+        "Yes. Monitoring can reveal repeated praise, recurring complaints, service issues, response gaps, and customer language that should guide business decisions.",
+    },
+  ],
+  "citation-management": [
+    {
+      question: "What are local citations?",
+      answer:
+        "Local citations are online listings of your business name, address, and phone number on directories, maps, industry sites, and local data sources.",
+    },
+    {
+      question: "What does NAP mean?",
+      answer:
+        "NAP means name, address, and phone. NAP consistency means those details match across the places where customers find your business.",
+    },
+    {
+      question: "Why do incorrect listings matter?",
+      answer:
+        "Incorrect listings can send customers to the wrong phone number, address, or website. They also make the business look less organized.",
+    },
+    {
+      question: "Which directories matter?",
+      answer:
+        "The right directories vary by industry and market. Common sources include Google, Apple Maps, Bing, Yelp, Facebook, and relevant industry directories.",
+    },
+  ],
+  "local-rank-tracking": [
+    {
+      question: "Why do rankings change by location?",
+      answer:
+        "Local results depend on relevance, distance, competition, and trust signals. A business may be visible near its office but weaker in a neighboring town.",
+    },
+    {
+      question: "What keywords should a local business track?",
+      answer:
+        "Track real service searches customers use, such as emergency HVAC service, roof repair, plumber near me, med spa consultation, or auto detailer near me.",
+    },
+    {
+      question: "What is local visibility?",
+      answer:
+        "Local visibility is how easy it is for nearby customers to find and compare your business when they search for services you provide.",
+    },
+  ],
+  "competitor-monitoring": [
+    {
+      question: "What should I monitor about local competitors?",
+      answer:
+        "Useful signals include review count, review recency, rating, posting frequency, services promoted, profile completeness, photos, and ranking movement.",
+    },
+    {
+      question: "Is competitor tracking about copying competitors?",
+      answer:
+        "No. It is about understanding what customers see when they compare options so you can improve your own profile, reviews, content, and follow-up.",
+    },
+    {
+      question: "Can competitor monitoring show why they are more visible?",
+      answer:
+        "It can show useful clues, but it cannot prove every ranking factor. Local results are influenced by many signals and by searcher location.",
+    },
+  ],
+  "local-website-seo-audits": [
+    {
+      question: "Why does a local business website still matter?",
+      answer:
+        "Many customers click from Google to the website before calling. A clear, fast, mobile-friendly site can support trust and turn visibility into action.",
+    },
+    {
+      question: "What should a local website audit include?",
+      answer:
+        "Useful checks include mobile experience, speed, service pages, location pages, title tags, schema, calls to action, contact details, and page clarity.",
+    },
+    {
+      question: "Do I need a new website to improve local SEO?",
+      answer:
+        "Not always. Many businesses can start by improving pages, calls to action, titles, service descriptions, and contact information on the existing site.",
+    },
+  ],
+  "photo-image-requests": [
+    {
+      question: "Why do photos matter for a local business?",
+      answer:
+        "Photos help customers see the work, team, location, equipment, and results. Recent real photos can make the business feel more active and trustworthy.",
+    },
+    {
+      question: "What photos should a local business collect?",
+      answer:
+        "Useful photos include finished work, before-and-after examples, team photos, vehicles, storefronts, treatment rooms, service areas, and seasonal work.",
+    },
+    {
+      question: "Can photos support Google Business Profile posts?",
+      answer:
+        "Yes. Practical photos can make posts more useful and help customers understand the service or result being discussed.",
+    },
+  ],
+  "qa-management": [
+    {
+      question: "What is Google Business Profile Q&A?",
+      answer:
+        "Google Q&A is the question-and-answer section on a Google Business Profile where people can ask about services, availability, pricing, policies, and booking.",
+    },
+    {
+      question: "Why should a business answer Q&A?",
+      answer:
+        "Helpful answers reduce confusion before someone calls and can prevent unanswered questions from making the business look inactive.",
+    },
+    {
+      question: "Can Q&A answers be drafted automatically?",
+      answer:
+        "AI-assisted drafts can save time, but owners should review answers so policies, pricing guidance, service areas, and guarantees stay accurate.",
+    },
+  ],
+  "lead-recovery": [
+    {
+      question: "Do I need to change my phone number?",
+      answer:
+        "Not necessarily. Option B lets you keep your current number and forward missed or unanswered calls to a recovery number where that setup is enabled.",
+    },
+    {
+      question: "What happens when I miss a call?",
+      answer:
+        "The workflow can text the missed caller, ask what they need, collect basic job details, and send the owner a summary for follow-up.",
+    },
+    {
+      question: "Can the system collect job details?",
+      answer:
+        "Yes. It can collect service needed, location, urgency, preferred time, name, and contact details so the owner has context before calling back.",
+    },
+    {
+      question: "Does this replace my receptionist?",
+      answer:
+        "No. Lead recovery helps when calls are missed or unanswered. It supports your team; it does not replace live customer service.",
+    },
+    {
+      question: "Can I turn it off?",
+      answer:
+        "Yes. Lead recovery workflows should be adjustable or paused when the business needs to change how follow-up works.",
+    },
+  ],
+  reporting: [
+    {
+      question: "What should local SEO reporting show?",
+      answer:
+        "Useful reporting shows what was done, what changed, what needs attention, and how profile, review, citation, visibility, and lead recovery work connect.",
+    },
+    {
+      question: "Is reporting only for SEO experts?",
+      answer:
+        "No. Visora reporting is designed to explain local visibility work in owner-friendly language, not bury decisions in technical charts.",
+    },
+    {
+      question: "Can reporting show open issues?",
+      answer:
+        "Yes. Reporting can highlight profile gaps, stale content, review response needs, citation issues, missed calls, and other items that need attention.",
+    },
+  ],
+};
+
+export const serviceRelatedLinks: Record<string, RelatedLink[]> = {
+  "google-business-profile": [
+    { label: "GBP posting and content", href: "/services/gbp-posting" },
+    { label: "GBP content audits", href: "/services/gbp-audits" },
+    { label: "Review management", href: "/services/review-management" },
+    { label: "Google Q&A management", href: "/services/qa-management" },
+  ],
+  "gbp-posting": [
+    { label: "Google Business Profile management", href: "/services/google-business-profile" },
+    { label: "Photo and image requests", href: "/services/photo-image-requests" },
+    { label: "Google Q&A management", href: "/services/qa-management" },
+    { label: "Local SEO checklist", href: "/learn/local-seo-checklist" },
+  ],
+  "gbp-audits": [
+    { label: "Google Business Profile management", href: "/services/google-business-profile" },
+    { label: "Local website SEO audits", href: "/services/local-website-seo-audits" },
+    { label: "Local SEO checklist", href: "/learn/local-seo-checklist" },
+  ],
+  "review-management": [
+    { label: "Multi-source review monitoring", href: "/services/review-monitoring" },
+    { label: "Why reviews matter", href: "/learn/why-reviews-matter" },
+    { label: "Lead recovery", href: "/services/lead-recovery" },
+  ],
+  "review-monitoring": [
+    { label: "Review management", href: "/services/review-management" },
+    { label: "Reporting dashboard", href: "/services/reporting" },
+    { label: "Why reviews matter", href: "/learn/why-reviews-matter" },
+  ],
+  "citation-management": [
+    { label: "What are citations?", href: "/learn/what-are-citations" },
+    { label: "Local SEO checklist", href: "/learn/local-seo-checklist" },
+    { label: "Platform overview", href: "/platform" },
+  ],
+  "local-rank-tracking": [
+    { label: "What is the Google Map Pack?", href: "/learn/google-map-pack" },
+    { label: "Competitor monitoring", href: "/services/competitor-monitoring" },
+    { label: "Reporting dashboard", href: "/services/reporting" },
+  ],
+  "competitor-monitoring": [
+    { label: "Local rank tracking", href: "/services/local-rank-tracking" },
+    { label: "Review management", href: "/services/review-management" },
+    { label: "Google Business Profile management", href: "/services/google-business-profile" },
+  ],
+  "local-website-seo-audits": [
+    { label: "What is local SEO?", href: "/learn/what-is-local-seo" },
+    { label: "Local SEO checklist", href: "/learn/local-seo-checklist" },
+    { label: "Platform overview", href: "/platform" },
+  ],
+  "photo-image-requests": [
+    { label: "GBP posting and content", href: "/services/gbp-posting" },
+    { label: "Google Business Profile management", href: "/services/google-business-profile" },
+    { label: "Review management", href: "/services/review-management" },
+  ],
+  "qa-management": [
+    { label: "Google Business Profile management", href: "/services/google-business-profile" },
+    { label: "Local SEO checklist", href: "/learn/local-seo-checklist" },
+    { label: "FAQ", href: "/faq" },
+  ],
+  "lead-recovery": [
+    { label: "Platform overview", href: "/platform" },
+    { label: "Review management", href: "/services/review-management" },
+    { label: "Reporting dashboard", href: "/services/reporting" },
+    { label: "Pricing", href: "/pricing" },
+  ],
+  reporting: [
+    { label: "Platform overview", href: "/platform" },
+    { label: "Local rank tracking", href: "/services/local-rank-tracking" },
+    { label: "Review management", href: "/services/review-management" },
+    { label: "Citation management", href: "/services/citation-management" },
+  ],
+};
+
+export const learnFaqs: Record<string, FAQItem[]> = {
+  "what-is-local-seo": [
+    {
+      question: "What is local SEO in simple terms?",
+      answer:
+        "Local SEO is the work of helping nearby customers find, trust, and contact your business through Google, maps, reviews, listings, local pages, and consistent business information.",
+    },
+    {
+      question: "What are examples of local searches?",
+      answer:
+        "Examples include plumber near me, roof repair in my city, med spa consultation, emergency HVAC service, dentist near me, and auto detailer nearby.",
+    },
+    {
+      question: "What should a local business improve first?",
+      answer:
+        "Start with accurate Google Business Profile details, clear services, recent reviews, consistent listings, useful photos, and a website that makes calling easy.",
+    },
+  ],
+  "google-map-pack": [
+    {
+      question: "What is the Google Map Pack?",
+      answer:
+        "The Google Map Pack is the map and short list of local businesses that Google shows for many nearby service searches.",
+    },
+    {
+      question: "Can a business guarantee Map Pack rankings?",
+      answer:
+        "No. Map Pack visibility depends on many factors, including relevance, distance, competition, reviews, profile quality, and trust signals.",
+    },
+  ],
+  "google-business-profile": [
+    {
+      question: "Is a Google Business Profile free?",
+      answer:
+        "Creating a Google Business Profile is generally free, but keeping it accurate, active, and useful still takes ongoing attention.",
+    },
+    {
+      question: "What belongs on a Google Business Profile?",
+      answer:
+        "Important elements include name, address, phone, hours, service areas, categories, services, description, photos, posts, Q&A, reviews, and website links.",
+    },
+  ],
+  "why-reviews-matter": [
+    {
+      question: "Do reviews help local SEO?",
+      answer:
+        "Reviews can support local trust and visibility signals, but they also matter because real customers use them to decide who to call.",
+    },
+    {
+      question: "Should a business respond to reviews?",
+      answer:
+        "Yes. Thoughtful responses show future customers that the business pays attention, appreciates feedback, and handles concerns professionally.",
+    },
+  ],
+  "what-are-citations": [
+    {
+      question: "What does NAP consistency mean?",
+      answer:
+        "NAP consistency means your business name, address, and phone number match across Google, maps, directories, social profiles, and local listing sites.",
+    },
+    {
+      question: "Why do citations matter?",
+      answer:
+        "Citations help customers find correct business information and reduce confusion caused by old addresses, wrong phone numbers, or mismatched names.",
+    },
+  ],
+  "local-seo-checklist": [
+    {
+      question: "How often should I review a local SEO checklist?",
+      answer:
+        "Review the basics monthly or any time your hours, services, phone number, location, website, or business policies change.",
+    },
+    {
+      question: "Can a checklist replace local SEO software?",
+      answer:
+        "A checklist helps you see the work. Software helps monitor, remind, organize, automate, and report on that work over time.",
+    },
+  ],
+  "local-seo-for-service-businesses": [
+    {
+      question: "Why is local SEO different for service businesses?",
+      answer:
+        "Service businesses need to explain what they do, where they serve, how quickly they respond, and why customers should trust them before booking or calling.",
+    },
+    {
+      question: "Which industries can use local SEO?",
+      answer:
+        "Contractors, HVAC companies, plumbers, roofers, landscapers, cleaners, med spas, salons, dentists, auto repair shops, and professional services can all benefit.",
+    },
+  ],
+};
+
+export const learnRelatedLinks: Record<string, RelatedLink[]> = {
+  "what-is-local-seo": [
+    { label: "Google Map Pack guide", href: "/learn/google-map-pack" },
+    { label: "Google Business Profile guide", href: "/learn/google-business-profile" },
+    { label: "Citation basics", href: "/learn/what-are-citations" },
+    { label: "Local SEO checklist", href: "/learn/local-seo-checklist" },
+  ],
+  "google-map-pack": [
+    { label: "Local rank tracking", href: "/services/local-rank-tracking" },
+    { label: "Google Business Profile management", href: "/services/google-business-profile" },
+  ],
+  "google-business-profile": [
+    { label: "Google Business Profile management", href: "/services/google-business-profile" },
+    { label: "GBP posting", href: "/services/gbp-posting" },
+    { label: "GBP Q&A", href: "/services/qa-management" },
+  ],
+  "why-reviews-matter": [
+    { label: "Review management", href: "/services/review-management" },
+    { label: "Review monitoring", href: "/services/review-monitoring" },
+  ],
+  "what-are-citations": [
+    { label: "Citation management", href: "/services/citation-management" },
+    { label: "Local SEO checklist", href: "/learn/local-seo-checklist" },
+  ],
+  "local-seo-checklist": [
+    { label: "Google Business Profile management", href: "/services/google-business-profile" },
+    { label: "Review management", href: "/services/review-management" },
+    { label: "Citation management", href: "/services/citation-management" },
+    { label: "Lead recovery", href: "/services/lead-recovery" },
+  ],
+  "local-seo-for-service-businesses": [
+    { label: "Website SEO audits", href: "/services/local-website-seo-audits" },
+    { label: "Local rank tracking", href: "/services/local-rank-tracking" },
+    { label: "Lead recovery", href: "/services/lead-recovery" },
+  ],
+};
+
 export const faqGroups: { heading: string; items: FAQItem[] }[] = [
   {
     heading: "General",
@@ -870,3 +1325,18 @@ export function getLearnPage(slug: string) {
   return learnPages.find((page) => page.slug === slug);
 }
 
+export function getServiceFaqs(slug: string) {
+  return serviceFaqs[slug] ?? [];
+}
+
+export function getLearnFaqs(slug: string) {
+  return learnFaqs[slug] ?? [];
+}
+
+export function getServiceRelatedLinks(slug: string) {
+  return serviceRelatedLinks[slug] ?? [];
+}
+
+export function getLearnRelatedLinks(slug: string) {
+  return learnRelatedLinks[slug] ?? [];
+}

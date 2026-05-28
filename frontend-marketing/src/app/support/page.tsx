@@ -4,16 +4,26 @@ import Link from "next/link";
 import { MarketingShell } from "@/components/marketing/MarketingShell";
 import { PageHero } from "@/components/marketing/PageHero";
 import { SectionHeader } from "@/components/marketing/SectionHeader";
+import { StructuredData } from "@/components/marketing/StructuredData";
 import { brand } from "@/content/marketing";
+import { breadcrumbSchema, createMarketingMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Support",
-  description: "Get support for Visora login, onboarding, integrations, billing, and platform questions.",
-};
+export const metadata: Metadata = createMarketingMetadata({
+  title: "Visora Support | Visora",
+  description:
+    "Get support for Visora login, onboarding, Google Business Profile integrations, billing, lead recovery, and platform questions.",
+  path: "/support",
+});
 
 export default function SupportPage() {
   return (
     <MarketingShell>
+      <StructuredData
+        data={breadcrumbSchema([
+          { name: "Home", path: "/" },
+          { name: "Support", path: "/support" },
+        ])}
+      />
       <PageHero
         eyebrow="Support"
         title="Need help with Visora?"
@@ -28,17 +38,17 @@ export default function SupportPage() {
               description="Include your business name, account email, and the page or workflow you need help with."
             />
           </div>
-          <div className="rounded-lg border border-[#dcc6a4] bg-[#fffaf0] p-6 md:col-span-2">
-            <p className="text-base leading-7 text-[#53605a]">
+          <div className="rounded-lg border border-[#D8CFC1] bg-[#FFFDF8] p-6 md:col-span-2">
+            <p className="text-base leading-7 text-[#5F6673]">
               Email{" "}
-              <a className="font-semibold text-[#8a4b31] underline underline-offset-4" href={`mailto:${brand.email}`}>
+              <a className="font-semibold text-[#B86B4B] underline underline-offset-4" href={`mailto:${brand.email}`}>
                 {brand.email}
               </a>{" "}
               for account support. If you are not a customer yet, use the contact page to book a demo.
             </p>
             <Link
               href="/contact"
-              className="mt-6 inline-flex rounded-full bg-[#d86f45] px-5 py-3 text-sm font-semibold text-white hover:bg-[#bf5f3b]"
+              className="mt-6 inline-flex rounded-full bg-[#B86B4B] px-5 py-3 text-sm font-semibold text-white hover:bg-[#A75F43]"
             >
               Contact / Book Demo
             </Link>
@@ -48,4 +58,3 @@ export default function SupportPage() {
     </MarketingShell>
   );
 }
-

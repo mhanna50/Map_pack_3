@@ -315,6 +315,19 @@ class BillingService:
             raise ValueError("Stripe secret key must be configured")
         return stripe.Subscription.retrieve(subscription_id, expand=["customer"])
 
+    def set_subscription_cancel_at_period_end(
+        self,
+        subscription_id: str,
+        *,
+        cancel_at_period_end: bool,
+    ) -> stripe.Subscription:
+        if not settings.STRIPE_SECRET_KEY:
+            raise ValueError("Stripe secret key must be configured")
+        return stripe.Subscription.modify(
+            subscription_id,
+            cancel_at_period_end=cancel_at_period_end,
+        )
+
     @staticmethod
     def extract_checkout_data(session: dict[str, Any]) -> dict[str, Any]:
         metadata = session.get("metadata") or {}

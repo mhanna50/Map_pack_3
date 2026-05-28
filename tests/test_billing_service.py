@@ -229,3 +229,22 @@ def test_create_subscription_intent_allows_new_when_previous_subscription_cancel
     assert result["subscription_id"] == "sub_new"
     assert result["client_secret"] == "pi_secret_123"
     assert result["requires_payment_method"] is True
+
+
+def test_set_subscription_cancel_at_period_end_updates_stripe(monkeypatch):
+    _configure_billing_settings(monkeypatch)
+    captured = {}
+
+    def _fake_modify(subscription_id, **kwargs):
+        captured["subscription_id"] = subscription_id
+        captured.update(kwargs)
+        return SimpleNamespace(id=subscription_id, cancel_at_period_end=kwargs["cancel_at_period_end"])
+
+    monkeypatch.setattr(billing_module.stripe.Subscription, "modify", _fake_modify)
+
+    service = BillingService()
+    subscription = service.set_subscription_cancel_at_period_end("sub_123", cancel_at_period_end=True)
+
+    assert subscription.id == "sub_123"
+    assert subscription.cancel_at_period_end is True
+    assert captured == {"subscription_id": "sub_123", "cancel_at_period_end": True}

@@ -37,6 +37,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     redirect("/sign-in?redirect=/app&error=invalid_role");
   }
   if (!access.completed) {
+    if (access.destination?.startsWith("/account/subscription")) {
+      redirect(access.destination);
+    }
     const onboardingTarget = access.destination && access.destination.startsWith("/onboarding")
       ? access.destination
       : "/onboarding";
@@ -44,16 +47,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen overflow-x-hidden bg-slate-50">
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-4">
+        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-4 sm:px-6 md:flex-row md:items-center md:justify-between">
+          <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
             <Link href="/" className="text-lg font-semibold">
               Map Pack 3
             </Link>
             <LocationSwitcher orgName="Acme HVAC" locations={mockLocations} />
           </div>
-          <div className="flex items-center gap-3 text-sm">
+          <div className="flex flex-wrap items-center gap-3 text-sm md:justify-end">
             <button className="rounded-full bg-primary px-4 py-2 font-semibold text-white">Create</button>
             <button className="rounded-full border border-slate-200 p-2 text-slate-500" aria-label="Notifications">
               🔔
@@ -65,19 +68,19 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </div>
         </div>
       </header>
-      <div className="mx-auto flex max-w-6xl gap-8 px-6 py-8">
-        <aside className="w-48 shrink-0 space-y-2 text-sm">
+      <div className="mx-auto flex max-w-6xl flex-col gap-5 px-4 py-5 sm:px-6 md:py-8 lg:flex-row lg:gap-8">
+        <aside className="flex gap-2 overflow-x-auto text-sm lg:block lg:w-48 lg:shrink-0 lg:space-y-2 lg:overflow-visible">
           {navLinks.map((link) => (
             <Link
               key={link.href}
               href={link.href}
-              className="block rounded-xl px-4 py-2 text-slate-600 transition hover:bg-slate-100"
+              className="block shrink-0 rounded-xl px-4 py-2 text-slate-600 transition hover:bg-slate-100"
             >
               {link.label}
             </Link>
           ))}
         </aside>
-        <main className="flex-1 pb-16">{children}</main>
+        <main className="min-w-0 flex-1 pb-16">{children}</main>
       </div>
     </div>
   );

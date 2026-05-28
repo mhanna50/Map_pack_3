@@ -10,7 +10,7 @@ export const Card = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      "rounded-xl border border-border bg-card text-card-foreground shadow-sm",
+      "min-w-0 rounded-xl border border-border bg-card text-card-foreground shadow-sm",
       muted && "bg-muted/50",
       className,
     )}
@@ -23,7 +23,7 @@ export const CardHeader = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
 >(({ className, ...props }, ref) => (
-  <div ref={ref} className={cn("space-y-1.5 p-6", className)} {...props} />
+  <div ref={ref} className={cn("min-w-0 space-y-1.5 p-4 sm:p-6", className)} {...props} />
 ));
 CardHeader.displayName = "CardHeader";
 
@@ -51,7 +51,7 @@ export const CardContent = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
 >(({ className, ...props }, ref) => (
-  <div ref={ref} className={cn("p-6 pt-0", className)} {...props} />
+  <div ref={ref} className={cn("min-w-0 p-4 pt-0 sm:p-6 sm:pt-0", className)} {...props} />
 ));
 CardContent.displayName = "CardContent";
 

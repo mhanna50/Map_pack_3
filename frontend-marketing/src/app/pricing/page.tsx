@@ -8,13 +8,17 @@ import { MarketingShell } from "@/components/marketing/MarketingShell";
 import { PageHero } from "@/components/marketing/PageHero";
 import { PricingCard } from "@/components/marketing/PricingCard";
 import { SectionHeader } from "@/components/marketing/SectionHeader";
+import { StructuredData } from "@/components/marketing/StructuredData";
 import { faqGroups, pricingPlans } from "@/content/marketing";
+import { breadcrumbSchema, createMarketingMetadata, faqSchema } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Pricing for local visibility software",
+export const metadata: Metadata = createMarketingMetadata({
+  title: "Local SEO Software Pricing | Visora",
   description:
-    "Simple pricing tiers for local presence, visibility, reputation, citations, rank tracking, lead recovery, and reporting.",
-};
+    "Simple local SEO software pricing for GBP management, reviews, citations, rank tracking, lead recovery, and reporting.",
+  path: "/pricing",
+  keywords: ["local SEO software pricing", "Google Business Profile management pricing", "review management pricing"],
+});
 
 const pricingFaq = faqGroups
   .flatMap((group) => group.items)
@@ -33,9 +37,18 @@ const pricingFaq = faqGroups
 export default function PricingPage() {
   return (
     <MarketingShell>
+      <StructuredData
+        data={[
+          breadcrumbSchema([
+            { name: "Home", path: "/" },
+            { name: "Pricing", path: "/pricing" },
+          ]),
+          faqSchema(pricingFaq),
+        ]}
+      />
       <PageHero
         eyebrow="Pricing"
-        title="Simple tiers for presence, visibility, and lead recovery."
+        title="Local SEO software pricing for presence, visibility, and lead recovery."
         description="Choose the level that fits where your business is today. Pricing uses starting points where existing plans are configured, and Pro is scoped through a demo."
       />
 
@@ -46,7 +59,7 @@ export default function PricingPage() {
               <PricingCard key={plan.name} plan={plan} />
             ))}
           </div>
-          <div className="mt-8 rounded-lg border border-[#dcc6a4] bg-[#f5e8d1] p-5 text-sm leading-6 text-[#53605a]">
+          <div className="mt-8 rounded-lg border border-[#D8CFC1] bg-[#F8F3EA] p-5 text-sm leading-6 text-[#5F6673]">
             Prices are shown as starting points based on available plan configuration. Final pricing can vary by
             locations, integrations, lead recovery needs, and support scope. No Stripe price IDs are hardcoded
             on this marketing page.
@@ -54,23 +67,23 @@ export default function PricingPage() {
         </div>
       </section>
 
-      <section className="bg-[#fff8ec] px-6 py-16">
+      <section className="bg-[#F8F3EA] px-6 py-16">
         <div className="mx-auto grid max-w-6xl gap-10 lg:grid-cols-[0.85fr_1.15fr]">
           <SectionHeader
             eyebrow="Not sure?"
             title="Start with the problem you actually need solved."
             description="If your profile is thin, start with Presence. If competitors are outranking you, look at Visibility. If missed calls are costing jobs, Pro is worth discussing."
           />
-          <div className="rounded-lg border border-[#dcc6a4] bg-[#fffaf0] p-6">
-            <h2 className="text-2xl font-semibold text-[#17202e]">A good demo should answer three questions.</h2>
-            <ol className="mt-5 space-y-3 text-sm leading-6 text-[#53605a]">
+          <div className="rounded-lg border border-[#D8CFC1] bg-[#FFFDF8] p-6">
+            <h2 className="text-2xl font-semibold text-[#14213D]">A good demo should answer three questions.</h2>
+            <ol className="mt-5 space-y-3 text-sm leading-6 text-[#5F6673]">
               <li>1. What is hurting trust or visibility today?</li>
               <li>2. Which pieces can be automated safely?</li>
               <li>3. What should stay in owner approval?</li>
             </ol>
             <Link
               href="/contact"
-              className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-[#8a4b31] hover:text-[#d86f45]"
+              className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-[#B86B4B] hover:text-[#B86B4B]"
             >
               Book a demo
               <ArrowRight className="h-4 w-4" aria-hidden="true" />
@@ -95,4 +108,3 @@ export default function PricingPage() {
     </MarketingShell>
   );
 }
-

@@ -8,15 +8,15 @@ export function ComparisonTable({
   rows: { left: string; right: string }[];
 }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-[#dcc6a4] bg-[#fffaf0]">
-      <div className="grid grid-cols-2 border-b border-[#dcc6a4] bg-[#f5e8d1] text-sm font-semibold text-[#17202e]">
+    <div className="overflow-hidden rounded-lg border border-[#D8CFC1] bg-[#FFFDF8]">
+      <div className="grid border-b border-[#D8CFC1] bg-[#F8F3EA] text-sm font-semibold text-[#14213D] sm:grid-cols-2">
         <div className="p-4">{leftTitle}</div>
-        <div className="border-l border-[#dcc6a4] p-4">{rightTitle}</div>
+        <div className="border-t border-[#D8CFC1] p-4 sm:border-l sm:border-t-0">{rightTitle}</div>
       </div>
       {rows.map((row) => (
-        <div key={row.left} className="grid grid-cols-2 border-b border-[#ead9bd] last:border-b-0">
-          <div className="p-4 text-sm leading-6 text-[#6a5b4a]">{row.left}</div>
-          <div className="border-l border-[#ead9bd] p-4 text-sm leading-6 text-[#35413c]">
+        <div key={row.left} className="grid border-b border-[#D8CFC1] last:border-b-0 sm:grid-cols-2">
+          <div className="p-4 text-sm leading-6 text-[#5F6673]">{row.left}</div>
+          <div className="border-t border-[#D8CFC1] p-4 text-sm leading-6 text-[#14213D] sm:border-l sm:border-t-0">
             {row.right}
           </div>
         </div>
@@ -24,4 +24,3 @@ export function ComparisonTable({
     </div>
   );
 }
-

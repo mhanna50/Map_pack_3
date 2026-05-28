@@ -87,7 +87,7 @@ export default function SupportPage() {
           </Card>
 
           <Card>
-            <CardHeader className="flex flex-row items-center gap-2">
+            <CardHeader className="flex flex-col items-start gap-2">
               <LifeBuoy className="h-4 w-4 text-primary" />
               <div>
                 <CardTitle>Contact support</CardTitle>

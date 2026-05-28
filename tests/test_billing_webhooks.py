@@ -31,6 +31,7 @@ def _stripe_subscription(
     status: str,
     plan: str = "starter",
     addons: str | None = None,
+    cancel_at_period_end: bool = False,
 ) -> dict:
     metadata = {
         "tenant_id": str(tenant_id),
@@ -44,7 +45,7 @@ def _stripe_subscription(
         "customer": {"id": "cus_123", "email": "owner@example.com"},
         "status": status,
         "current_period_end": PERIOD_END,
-        "cancel_at_period_end": False,
+        "cancel_at_period_end": cancel_at_period_end,
         "items": {"data": [{"price": {"nickname": "Stripe nickname"}}]},
     }
 
@@ -113,6 +114,31 @@ def test_failed_or_incomplete_subscription_webhook_does_not_unlock_dashboard(db_
     assert org.posting_paused is True
     assert sub.status == "canceled"
     assert sub.status not in {"active", "trialing"}
+
+
+def test_scheduled_cancellation_keeps_org_active_until_period_end(db_session):
+    org = _org(db_session)
+    billing = _FakeBilling(
+        {
+            "sub_canceling": _stripe_subscription(
+                tenant_id=org.id,
+                subscription_id="sub_canceling",
+                status="active",
+                cancel_at_period_end=True,
+            )
+        }
+    )
+
+    _update_org_status(db_session, billing, "sub_canceling", "active", PERIOD_END, True)
+
+    db_session.refresh(org)
+    sub = db_session.query(BillingSubscription).filter_by(tenant_id=org.id).one()
+    assert org.is_active is True
+    assert org.posting_paused is False
+    assert sub.status == "active"
+    assert sub.canceled_at.replace(tzinfo=timezone.utc) == datetime.fromtimestamp(PERIOD_END, tz=timezone.utc)
+    assert sub.metadata_json["cancel_at_period_end"] is True
+    assert sub.metadata_json["retention_until"]
 
 
 def test_duplicate_subscription_updates_are_idempotent(db_session):

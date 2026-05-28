@@ -3,17 +3,27 @@ import type { Metadata } from "next";
 import { MarketingShell } from "@/components/marketing/MarketingShell";
 import { PageHero } from "@/components/marketing/PageHero";
 import { SectionHeader } from "@/components/marketing/SectionHeader";
+import { StructuredData } from "@/components/marketing/StructuredData";
 import { TrustCard } from "@/components/marketing/TrustCard";
+import { breadcrumbSchema, createMarketingMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Security and data handling",
+export const metadata: Metadata = createMarketingMetadata({
+  title: "Visora Security and Data Handling | Visora",
   description:
-    "How Visora is designed to handle business data, permissions, tenant scoping, integrations, automations, and customer control.",
-};
+    "How Visora is designed to handle local business data, permissions, tenant scoping, integrations, automations, and customer control.",
+  path: "/security",
+  keywords: ["Visora security", "local SEO platform data security"],
+});
 
 export default function SecurityPage() {
   return (
     <MarketingShell>
+      <StructuredData
+        data={breadcrumbSchema([
+          { name: "Home", path: "/" },
+          { name: "Security", path: "/security" },
+        ])}
+      />
       <PageHero
         eyebrow="Trust"
         title="Security and data handling, explained plainly."
@@ -59,4 +69,3 @@ export default function SecurityPage() {
     </MarketingShell>
   );
 }
-

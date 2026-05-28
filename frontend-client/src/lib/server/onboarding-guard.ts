@@ -24,6 +24,7 @@ type OnboardingAccessState = {
 // Legacy google_* statuses are treated as complete for backward compatibility.
 const COMPLETED_PENDING_STATUSES = new Set(["google_connected", "completed", "activated"]);
 const ACTIVE_BILLING_STATUSES = new Set(["active", "trialing", "past_due"]);
+const INACTIVE_BILLING_STATUSES = new Set(["canceled", "cancelled", "incomplete", "incomplete_expired", "unpaid", "paused"]);
 
 const ONBOARDING_STATUS_RANK: Record<string, number> = {
   in_progress: 0,
@@ -80,6 +81,36 @@ const pickPreferredPendingRow = <T extends { status?: unknown; invited_at?: stri
   return sortPendingRows(rows)[0];
 };
 
+const billingBlocksDashboard = async (tenantId: string | null): Promise<boolean> => {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  if (!tenantId || !supabaseUrl || !serviceRoleKey) return false;
+  const svc = createServiceClient(supabaseUrl, serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  const { data, error } = await svc
+    .from("billing_subscriptions")
+    .select("status, current_period_end, metadata_json, created_at")
+    .eq("tenant_id", tenantId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) {
+    console.warn("Failed to load billing status for dashboard guard", { tenantId, error });
+    return false;
+  }
+  const row = data?.[0];
+  if (!row) return false;
+  const status = normalizeStatus(row.status);
+  if (INACTIVE_BILLING_STATUSES.has(status)) return true;
+
+  const metadata = row.metadata_json && typeof row.metadata_json === "object"
+    ? (row.metadata_json as Record<string, unknown>)
+    : {};
+  const cancelAtPeriodEnd = metadata.cancel_at_period_end === true;
+  const periodEnd = typeof row.current_period_end === "string" ? Date.parse(row.current_period_end) : Number.NaN;
+  return cancelAtPeriodEnd && Number.isFinite(periodEnd) && periodEnd <= Date.now();
+};
+
 export async function getOnboardingAccessState(): Promise<OnboardingAccessState> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -128,6 +159,7 @@ export async function getOnboardingAccessState(): Promise<OnboardingAccessState>
   if (!routeErr) {
     const route = normalizePostLoginResolution(routeData);
     const eligible = route.role === "client";
+    const blockedByBilling = eligible ? await billingBlocksDashboard(route.tenantId) : false;
     logAuthRouting("client_guard.rpc_resolution", {
       userId: user.id,
       email: user.email.toLowerCase(),
@@ -136,14 +168,15 @@ export async function getOnboardingAccessState(): Promise<OnboardingAccessState>
       onboardingComplete: route.onboardingComplete,
       nextStep: route.nextStep,
       tenantId: route.tenantId,
+      blockedByBilling,
     });
     return {
       signedIn: true,
       eligible,
-      completed: eligible && route.onboardingComplete,
+      completed: eligible && route.onboardingComplete && !blockedByBilling,
       role: route.role,
-      destination: route.destination,
-      nextStep: route.nextStep,
+      destination: blockedByBilling ? "/account/subscription" : route.destination,
+      nextStep: blockedByBilling ? "subscription_canceled" : route.nextStep,
       tenantId: route.tenantId,
     };
   }
@@ -252,16 +285,18 @@ export async function getOnboardingAccessState(): Promise<OnboardingAccessState>
   // Active billing is enough to unlock dashboard access; GBP can be connected later.
   const completedFromInfra = tenantActive || hasActiveBilling;
   const eligible = hasActiveInvite || Boolean(tenantId);
-  const completed = eligible && (completedFromPending || completedFromInfra);
+  const blockedByBilling = eligible ? await billingBlocksDashboard(tenantId) : false;
+  const completed = eligible && (completedFromPending || completedFromInfra) && !blockedByBilling;
   logAuthRouting("client_guard.fallback_resolution", {
     userId: user.id,
     email: user.email.toLowerCase(),
     role: eligible ? "client" : "invalid",
-    destination: eligible ? (completed ? "/dashboard" : "/onboarding") : "/sign-in?error=invalid_role",
+    destination: eligible ? (blockedByBilling ? "/account/subscription" : completed ? "/dashboard" : "/onboarding") : "/sign-in?error=invalid_role",
     onboardingComplete: completed,
-    nextStep: completed ? "done" : "google_profile",
+    nextStep: blockedByBilling ? "subscription_canceled" : completed ? "done" : "google_profile",
     tenantId,
     source: "fallback_pending_onboarding",
+    blockedByBilling,
   });
   return {
     signedIn: true,
@@ -269,11 +304,13 @@ export async function getOnboardingAccessState(): Promise<OnboardingAccessState>
     completed,
     role: eligible ? "client" : "invalid",
     destination: eligible
-      ? completed
+      ? blockedByBilling
+        ? "/account/subscription"
+        : completed
         ? "/dashboard"
         : "/onboarding"
       : "/sign-in?error=invalid_role",
-    nextStep: completed ? "done" : "google_profile",
+    nextStep: blockedByBilling ? "subscription_canceled" : completed ? "done" : "google_profile",
     tenantId,
   };
 }

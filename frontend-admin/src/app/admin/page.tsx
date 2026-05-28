@@ -104,7 +104,7 @@ export default function AdminOverviewPage() {
 
             <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
               <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
+                <CardHeader className="flex flex-col items-start justify-between sm:flex-row sm:items-center">
                   <div>
                     <CardTitle>Module health</CardTitle>
                     <CardDescription>Reusable status model across all client dashboard tabs</CardDescription>

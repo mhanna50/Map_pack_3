@@ -194,7 +194,7 @@ export default function GbpAuditPage() {
 
             {sections.map(({ title, items, icon: Icon }) => (
               <Card key={title}>
-                <CardHeader className="flex flex-row items-center justify-between">
+                <CardHeader className="flex flex-col items-start justify-between sm:flex-row sm:items-center">
                   <div>
                     <CardTitle className="flex items-center gap-2"><Icon className="h-4 w-4" />{title}</CardTitle>
                     <CardDescription>{items.length} item{items.length === 1 ? "" : "s"}</CardDescription>

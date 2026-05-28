@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Home, Image, Settings, Star, Gauge, LifeBuoy, PhoneCall } from "lucide-react";
 
-const navItems = [
+export const dashboardNavItems = [
   { href: "/dashboard", label: "Overview", icon: Gauge },
   { href: "/dashboard/gbp", label: "GBP Monitoring", icon: Home },
   { href: "/dashboard/keywords", label: "Keyword Strategy", icon: Gauge },
@@ -22,7 +22,7 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="hidden h-[calc(100vh-2rem)] w-64 flex-col rounded-2xl border border-border bg-white/80 p-4 shadow-sm lg:flex">
+    <aside className="sticky top-6 hidden h-[calc(100vh-3rem)] w-64 flex-col rounded-2xl border border-border bg-white/80 p-4 shadow-sm lg:flex">
       <div className="flex items-center justify-between rounded-xl border border-border bg-muted/60 px-3 py-2">
         <div>
           <p className="text-xs font-semibold text-muted-foreground">Automation</p>
@@ -31,7 +31,7 @@ export function Sidebar() {
         <Badge variant="success">Live</Badge>
       </div>
       <nav className="mt-6 space-y-1">
-        {navItems.map((item) => {
+        {dashboardNavItems.map((item) => {
           const Icon = item.icon;
           const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
@@ -43,7 +43,7 @@ export function Sidebar() {
                 active ? "bg-primary/10 text-primary shadow-inner" : "text-muted-foreground hover:bg-muted/60",
               )}
             >
-              <Icon className="h-4 w-4" />
+              <Icon className="h-4 w-4 shrink-0" />
               <span>{item.label}</span>
             </Link>
           );
@@ -63,5 +63,34 @@ export function Sidebar() {
         </Button>
       </div>
     </aside>
+  );
+}
+
+export function MobileDashboardNav() {
+  const pathname = usePathname();
+
+  return (
+    <nav
+      className="flex gap-2 overflow-x-auto rounded-2xl border border-border bg-white/90 p-2 shadow-sm lg:hidden"
+      aria-label="Dashboard navigation"
+    >
+      {dashboardNavItems.map((item) => {
+        const Icon = item.icon;
+        const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={cn(
+              "flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition",
+              active ? "bg-primary/10 text-primary shadow-inner" : "text-muted-foreground hover:bg-muted/60",
+            )}
+          >
+            <Icon className="h-4 w-4 shrink-0" />
+            <span>{item.label}</span>
+          </Link>
+        );
+      })}
+    </nav>
   );
 }

@@ -5,8 +5,8 @@ import { cn } from "@/lib/utils";
 
 export const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
   ({ className, ...props }, ref) => (
-    <div className="overflow-hidden rounded-xl border border-border bg-white shadow-sm">
-      <table ref={ref} className={cn("w-full border-collapse text-sm", className)} {...props} />
+    <div className="overflow-x-auto rounded-xl border border-border bg-white shadow-sm">
+      <table ref={ref} className={cn("min-w-max border-collapse text-sm", className)} {...props} />
     </div>
   ),
 );
@@ -23,9 +23,9 @@ export const TR = ({ children, className }: { children: React.ReactNode; classNa
 );
 
 export const TH = ({ children, className }: { children: React.ReactNode; className?: string }) => (
-  <th className={cn("px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide", className)}>{children}</th>
+  <th className={cn("whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide", className)}>{children}</th>
 );
 
 export const TD = ({ children, className }: { children: React.ReactNode; className?: string }) => (
-  <td className={cn("px-4 py-3 align-middle text-sm", className)}>{children}</td>
+  <td className={cn("whitespace-nowrap px-4 py-3 align-middle text-sm", className)}>{children}</td>
 );

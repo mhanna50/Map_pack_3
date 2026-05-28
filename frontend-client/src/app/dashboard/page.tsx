@@ -383,7 +383,7 @@ export default function DashboardPage() {
 
         <div className="grid gap-4 lg:grid-cols-3">
           <Card className="lg:col-span-2">
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-col items-start justify-between sm:flex-row sm:items-center">
               <div>
                 <CardTitle>Automation status</CardTitle>
                 <CardDescription>GBP connection and scheduling health</CardDescription>
@@ -439,7 +439,7 @@ export default function DashboardPage() {
         </div>
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-col items-start justify-between sm:flex-row sm:items-center">
             <div>
               <CardTitle>Recent activity</CardTitle>
               <CardDescription>Last posts and review requests</CardDescription>

@@ -20,6 +20,10 @@ type Subscription = {
   plan?: string;
   location_limit?: number;
   current_period_end?: string;
+  canceled_at?: string;
+  metadata_json?: {
+    cancel_at_period_end?: boolean;
+  } | null;
 };
 
 export default function BillingPage() {
@@ -62,7 +66,7 @@ export default function BillingPage() {
         </div>
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-col items-start justify-between sm:flex-row sm:items-center">
             <div>
               <CardTitle>Subscriptions</CardTitle>
               <CardDescription>Track status and renewal dates</CardDescription>
@@ -83,7 +87,7 @@ export default function BillingPage() {
                     <TH>Status</TH>
                     <TH>Plan</TH>
                     <TH>Location limit</TH>
-                    <TH>Renews</TH>
+                    <TH>Renews / access ends</TH>
                     <TH>Actions</TH>
                   </TR>
                 </THead>
@@ -95,8 +99,8 @@ export default function BillingPage() {
                         <p className="text-xs text-muted-foreground">{sub.stripe_customer_id}</p>
                       </TD>
                       <TD>
-                        <Badge variant={statusVariant(sub.status)} className="capitalize">
-                          {sub.status ?? "unknown"}
+                        <Badge variant={statusVariant(sub.status, sub.metadata_json?.cancel_at_period_end)} className="capitalize">
+                          {sub.metadata_json?.cancel_at_period_end ? "canceling" : sub.status ?? "unknown"}
                         </Badge>
                       </TD>
                       <TD className="capitalize">{sub.plan ?? "—"}</TD>
@@ -163,7 +167,8 @@ export default function BillingPage() {
   );
 }
 
-function statusVariant(status?: string) {
+function statusVariant(status?: string, canceling?: boolean) {
+  if (canceling) return "warning";
   switch (status) {
     case "active":
       return "success";

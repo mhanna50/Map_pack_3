@@ -232,7 +232,7 @@ export default function ReviewsPage() {
         </header>
 
         <Card>
-          <CardHeader className="flex flex-row items-start justify-between gap-4">
+          <CardHeader className="flex flex-col items-start justify-between sm:flex-row gap-4">
             <div>
               <CardTitle>Review sources</CardTitle>
               <CardDescription>Connected providers and API readiness</CardDescription>
@@ -301,7 +301,7 @@ export default function ReviewsPage() {
         </Card>
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-col items-start justify-between sm:flex-row sm:items-center">
             <div>
               <CardTitle>Requests</CardTitle>
               <CardDescription>Track delivery status and completions</CardDescription>
@@ -358,7 +358,7 @@ export default function ReviewsPage() {
 
         <div className="grid gap-4 lg:grid-cols-3">
           <Card className="lg:col-span-2">
-            <CardHeader className="flex flex-row items-center gap-3">
+            <CardHeader className="flex flex-col items-start gap-3">
               <Filter className="h-5 w-5 text-primary" />
               <div>
                 <CardTitle>Status automation</CardTitle>

@@ -11,15 +11,16 @@ from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.db.session import get_db
-from backend.app.api.deps import get_current_staff
+from backend.app.api.deps import get_current_staff, get_current_user
 from backend.app.services.billing.billing import BillingService
 from backend.app.services.onboarding.provisioning import ClientProvisioningService
+from backend.app.services.auth.access import AccessDeniedError, AccessService
 from backend.app.models.identity.organization import Organization
 from backend.app.models.identity.membership import Membership
 from backend.app.models.identity.user import User
 from backend.app.models.billing.billing_subscription import BillingSubscription
 from backend.app.models.billing.stripe_webhook_event import StripeWebhookEvent
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +101,25 @@ class WebhookSubscriptionUpdate(BaseModel):
     current_period_end: int | None = None
 
 
+class SubscriptionStatusResponse(BaseModel):
+    tenant_id: uuid.UUID
+    status: str | None = None
+    plan: str | None = None
+    current_period_end: datetime | None = None
+    canceled_at: datetime | None = None
+    retention_until: datetime | None = None
+    cancel_at_period_end: bool = False
+    stripe_subscription_id: str | None = None
+    can_cancel: bool = False
+    can_reactivate: bool = False
+    access_active: bool = False
+
+
+class ReactivateSubscriptionResponse(SubscriptionStatusResponse):
+    checkout_url: str | None = None
+    session_id: str | None = None
+
+
 @router.post("/checkout", response_model=CheckoutResponse)
 def create_checkout_session(payload: CheckoutRequest) -> CheckoutResponse:
     service = BillingService()
@@ -156,6 +176,212 @@ def create_subscription(payload: SubscriptionRequest) -> SubscriptionResponse:
         logger.warning("Stripe subscribe failed for %s (%s): %s", payload.email, payload.plan, exc)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return SubscriptionResponse(**result)
+
+
+@router.get("/subscription", response_model=SubscriptionStatusResponse)
+def get_subscription_status(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SubscriptionStatusResponse:
+    org = _resolve_client_org(db, current_user)
+    return _subscription_status_response(org, _latest_tenant_subscription(db, org.id))
+
+
+@router.post("/subscription/cancel", response_model=SubscriptionStatusResponse)
+def cancel_subscription(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SubscriptionStatusResponse:
+    org = _resolve_client_org(db, current_user)
+    sub = _latest_tenant_subscription(db, org.id)
+    if not sub or not sub.stripe_subscription_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No Stripe subscription found")
+    if _subscription_cancel_at_period_end(sub):
+        return _subscription_status_response(org, sub)
+    if not _subscription_can_cancel(sub):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Subscription is not active")
+
+    billing = BillingService()
+    try:
+        billing.set_subscription_cancel_at_period_end(
+            sub.stripe_subscription_id,
+            cancel_at_period_end=True,
+        )
+        _update_org_status(
+            db,
+            billing,
+            sub.stripe_subscription_id,
+            sub.status,
+            _timestamp_from_datetime(sub.current_period_end),
+            True,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to cancel subscription %s", sub.stripe_subscription_id)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to update Stripe subscription") from exc
+
+    refreshed = _latest_tenant_subscription(db, org.id)
+    db.refresh(org)
+    return _subscription_status_response(org, refreshed)
+
+
+@router.post("/subscription/reactivate", response_model=ReactivateSubscriptionResponse)
+def reactivate_subscription(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ReactivateSubscriptionResponse:
+    org = _resolve_client_org(db, current_user)
+    sub = _latest_tenant_subscription(db, org.id)
+    billing = BillingService()
+
+    if sub and sub.stripe_subscription_id and _subscription_cancel_at_period_end(sub) and _subscription_is_access_active(sub):
+        try:
+            billing.set_subscription_cancel_at_period_end(
+                sub.stripe_subscription_id,
+                cancel_at_period_end=False,
+            )
+            _update_org_status(
+                db,
+                billing,
+                sub.stripe_subscription_id,
+                sub.status,
+                _timestamp_from_datetime(sub.current_period_end),
+                False,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to reactivate subscription %s", sub.stripe_subscription_id)
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to update Stripe subscription") from exc
+
+        refreshed = _latest_tenant_subscription(db, org.id)
+        db.refresh(org)
+        return ReactivateSubscriptionResponse(**_subscription_status_response(org, refreshed).model_dump())
+
+    try:
+        session = billing.create_checkout_session(
+            email=current_user.email,
+            company_name=org.name,
+            plan=_subscription_plan(sub, org),
+            tenant_id=str(org.id),
+            user_id=str(current_user.id),
+            success_path="/account/subscription?reactivated=1",
+            cancel_path="/account/subscription",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if not session.url:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Stripe session missing URL")
+
+    response = _subscription_status_response(org, sub).model_dump()
+    return ReactivateSubscriptionResponse(**response, checkout_url=session.url, session_id=session.id)
+
+
+def _resolve_client_org(db: Session, current_user: User) -> Organization:
+    access = AccessService(db)
+    try:
+        organizations = access.member_orgs(current_user.id)
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    if not organizations:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No client organization found")
+    return organizations[0]
+
+
+def _latest_tenant_subscription(db: Session, tenant_id: uuid.UUID) -> BillingSubscription | None:
+    return (
+        db.query(BillingSubscription)
+        .filter(BillingSubscription.tenant_id == tenant_id)
+        .order_by(BillingSubscription.updated_at.desc(), BillingSubscription.created_at.desc())
+        .first()
+    )
+
+
+def _subscription_status_response(
+    org: Organization,
+    sub: BillingSubscription | None,
+) -> SubscriptionStatusResponse:
+    return SubscriptionStatusResponse(
+        tenant_id=org.id,
+        status=sub.status if sub else None,
+        plan=_subscription_plan(sub, org),
+        current_period_end=sub.current_period_end if sub else None,
+        canceled_at=sub.canceled_at if sub else None,
+        retention_until=_subscription_retention_until(sub),
+        cancel_at_period_end=_subscription_cancel_at_period_end(sub),
+        stripe_subscription_id=sub.stripe_subscription_id if sub else None,
+        can_cancel=_subscription_can_cancel(sub),
+        can_reactivate=_subscription_can_reactivate(sub),
+        access_active=_subscription_is_access_active(sub),
+    )
+
+
+def _subscription_plan(sub: BillingSubscription | None, org: Organization) -> str:
+    metadata = sub.metadata_json if sub and isinstance(sub.metadata_json, dict) else {}
+    plan = sub.plan if sub and sub.plan else metadata.get("plan") or org.plan_tier or "standard_249"
+    normalized = str(plan).strip().lower()
+    if normalized in {"friends_family", "friends_and_family", "family", "base_129", "129", "$129"}:
+        return "friends_family"
+    if normalized in {"standard_249", "map_pack_standard", "base_249", "249", "$249"}:
+        return "standard_249"
+    return "standard_249"
+
+
+def _subscription_cancel_at_period_end(sub: BillingSubscription | None) -> bool:
+    metadata = sub.metadata_json if sub and isinstance(sub.metadata_json, dict) else {}
+    return bool(metadata.get("cancel_at_period_end"))
+
+
+def _subscription_retention_until(sub: BillingSubscription | None) -> datetime | None:
+    metadata = sub.metadata_json if sub and isinstance(sub.metadata_json, dict) else {}
+    raw_value = metadata.get("retention_until")
+    if isinstance(raw_value, str):
+        try:
+            return datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+
+def _subscription_is_access_active(sub: BillingSubscription | None) -> bool:
+    if not sub:
+        return False
+    normalized = _normalize_billing_status(sub.status)
+    if normalized in {"active", "trialing", "past_due"}:
+        if _subscription_cancel_at_period_end(sub) and sub.current_period_end:
+            period_end = sub.current_period_end
+            if period_end.tzinfo is None:
+                period_end = period_end.replace(tzinfo=timezone.utc)
+            return period_end > datetime.now(timezone.utc)
+        return True
+    return False
+
+
+def _subscription_can_cancel(sub: BillingSubscription | None) -> bool:
+    return bool(
+        sub
+        and sub.stripe_subscription_id
+        and _subscription_is_access_active(sub)
+        and not _subscription_cancel_at_period_end(sub)
+    )
+
+
+def _subscription_can_reactivate(sub: BillingSubscription | None) -> bool:
+    if not sub:
+        return False
+    normalized = _normalize_billing_status(sub.status)
+    if _subscription_cancel_at_period_end(sub) and _subscription_is_access_active(sub):
+        return True
+    return normalized == "canceled"
+
+
+def _timestamp_from_datetime(value: datetime | None) -> int | None:
+    if not value:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return int(value.timestamp())
 
 
 @router.post("/webhook")
@@ -337,6 +563,15 @@ def _update_org_status(
         metadata["current_period_end"] = current_period_end
     if cancel_at_period_end is not None:
         metadata["cancel_at_period_end"] = cancel_at_period_end
+    if cancel_at_period_end or subscription_status == "canceled":
+        retention_base = (
+            datetime.fromtimestamp(current_period_end, tz=timezone.utc)
+            if current_period_end
+            else datetime.now(timezone.utc)
+        )
+        metadata["retention_until"] = (retention_base + timedelta(days=90)).isoformat()
+    elif metadata.get("retention_until"):
+        metadata.pop("retention_until", None)
     org.metadata_json = metadata
     org.posting_paused = not org_active
     org.is_active = org_active

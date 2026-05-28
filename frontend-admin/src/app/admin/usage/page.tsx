@@ -172,7 +172,7 @@ export default function UsagePage() {
         </div>
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-col items-start justify-between sm:flex-row sm:items-center">
             <div>
               <CardTitle>Per-tenant ranking</CardTitle>
               <CardDescription>Top activity by posts + reviews</CardDescription>

@@ -183,7 +183,7 @@ export default function GbpPage() {
         </Card>
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-col items-start justify-between sm:flex-row sm:items-center">
             <div>
               <CardTitle>Posts history</CardTitle>
               <CardDescription>Latest posts with performance metrics</CardDescription>
@@ -241,7 +241,7 @@ export default function GbpPage() {
 
         <div className="grid gap-4 lg:grid-cols-3">
           <Card className="lg:col-span-2">
-            <CardHeader className="flex flex-row items-center gap-3">
+            <CardHeader className="flex flex-col items-start gap-3">
               <Clock3 className="h-5 w-5 text-primary" />
               <div>
                 <CardTitle>Scheduled posts</CardTitle>
@@ -296,7 +296,7 @@ export default function GbpPage() {
           </Card>
 
           <Card>
-            <CardHeader className="flex flex-row items-center gap-3">
+            <CardHeader className="flex flex-col items-start gap-3">
               <BarChart3 className="h-5 w-5 text-primary" />
               <div>
                 <CardTitle>Performance mix</CardTitle>

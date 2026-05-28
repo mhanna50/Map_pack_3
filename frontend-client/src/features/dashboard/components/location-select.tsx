@@ -19,21 +19,21 @@ export function LocationSelect() {
   };
 
   return (
-    <div className="relative">
+    <div className="relative min-w-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-3 rounded-xl border border-border bg-white px-4 py-2 text-sm font-semibold shadow-sm transition hover:border-primary"
+        className="flex w-full min-w-0 items-center gap-3 rounded-xl border border-border bg-white px-4 py-2 text-sm font-semibold shadow-sm transition hover:border-primary md:w-auto"
       >
         <MapPin className="h-4 w-4 text-primary" />
-        <div className="text-left">
+        <div className="min-w-0 text-left">
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Location</p>
-          <p className="text-sm">{selected?.name ?? "All locations"}</p>
+          <p className="truncate text-sm">{selected?.name ?? "All locations"}</p>
         </div>
         <ChevronsUpDown className="ml-1 h-4 w-4 text-muted-foreground" />
       </button>
       {open && (
-        <div className="absolute z-30 mt-2 w-64 rounded-xl border border-border bg-white shadow-xl">
+        <div className="absolute z-30 mt-2 w-full min-w-64 max-w-[calc(100vw-1.5rem)] rounded-xl border border-border bg-white shadow-xl md:w-64">
           <div className="max-h-72 divide-y divide-border overflow-y-auto p-1">
             {options.map((loc) => (
               <button

@@ -23,11 +23,11 @@ export function SectionHeader({
       )}
     >
       {eyebrow ? <RetroBadge>{eyebrow}</RetroBadge> : null}
-      <h2 className="text-balance text-3xl font-semibold leading-tight text-[#17202e] md:text-4xl">
+      <h2 className="text-balance text-3xl font-semibold leading-tight text-[#14213D] md:text-4xl">
         {title}
       </h2>
       {description ? (
-        <p className="text-pretty text-base leading-7 text-[#53605a] md:text-lg">{description}</p>
+        <p className="text-pretty text-base leading-7 text-[#5F6673] md:text-lg">{description}</p>
       ) : null}
     </div>
   );

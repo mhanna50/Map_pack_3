@@ -8,13 +8,18 @@ import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/ui/tabs";
 import { Dialog } from "@/components/ui/dialog";
 import { useTenant } from "@/features/tenants/tenant-context";
-import { getBillingSubscription } from "@/lib/db";
+import { fetchBackendJson } from "@/lib/backend-api";
 
 type Subscription = {
-  seats_or_locations?: number;
-  status?: string;
-  plan?: string;
-  current_period_end?: string;
+  status?: string | null;
+  plan?: string | null;
+  current_period_end?: string | null;
+  canceled_at?: string | null;
+  retention_until?: string | null;
+  cancel_at_period_end?: boolean;
+  can_cancel?: boolean;
+  can_reactivate?: boolean;
+  access_active?: boolean;
 };
 
 const tabItems = [
@@ -29,6 +34,8 @@ export default function SettingsPage() {
   const [tab, setTab] = useState("account");
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [loadingSub, setLoadingSub] = useState(false);
+  const [billingBusy, setBillingBusy] = useState(false);
+  const [billingError, setBillingError] = useState<string | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
 
   useEffect(() => {
@@ -36,10 +43,14 @@ export default function SettingsPage() {
     let active = true;
     const load = async () => {
       setLoadingSub(true);
-      const sub = await getBillingSubscription(tenantId);
-      if (active) {
-        setSubscription(sub);
-        setLoadingSub(false);
+      setBillingError(null);
+      try {
+        const sub = await fetchBackendJson<Subscription>("/billing/subscription");
+        if (active) setSubscription(sub);
+      } catch (error) {
+        if (active) setBillingError(error instanceof Error ? error.message : "Unable to load billing");
+      } finally {
+        if (active) setLoadingSub(false);
       }
     };
     load();
@@ -47,6 +58,20 @@ export default function SettingsPage() {
       active = false;
     };
   }, [tenantId]);
+
+  const confirmCancel = async () => {
+    setBillingBusy(true);
+    setBillingError(null);
+    try {
+      const sub = await fetchBackendJson<Subscription>("/billing/subscription/cancel", { method: "POST" });
+      setSubscription(sub);
+      setCancelOpen(false);
+    } catch (error) {
+      setBillingError(error instanceof Error ? error.message : "Unable to cancel subscription");
+    } finally {
+      setBillingBusy(false);
+    }
+  };
 
   return (
     <DashboardShell>
@@ -67,20 +92,23 @@ export default function SettingsPage() {
           <BillingTab
             subscription={subscription}
             loading={loadingSub}
+            error={billingError}
             onCancel={() => setCancelOpen(true)}
           />
         )}
         {tab === "legal" && <LegalTab />}
       </div>
 
-      <Dialog open={cancelOpen} onOpenChange={setCancelOpen} title="Cancel subscription" description="This is a placeholder confirmation.">
-        <p className="text-sm text-muted-foreground">Hook this dialog to your billing provider to cancel safely.</p>
+      <Dialog open={cancelOpen} onOpenChange={setCancelOpen} title="Cancel subscription" description="Your subscription will remain active through the current paid period.">
+        <p className="text-sm text-muted-foreground">
+          We will schedule cancellation in Stripe at the end of your current billing period and keep your account information for at least 3 months so you can reactivate without a new invite.
+        </p>
         <div className="flex items-center justify-end gap-2 border-t border-border px-6 py-3">
-          <Button variant="ghost" onClick={() => setCancelOpen(false)}>
+          <Button variant="ghost" onClick={() => setCancelOpen(false)} disabled={billingBusy}>
             Keep plan
           </Button>
-          <Button variant="destructive" onClick={() => setCancelOpen(false)}>
-            Confirm cancel
+          <Button variant="destructive" onClick={confirmCancel} disabled={billingBusy}>
+            {billingBusy ? "Canceling..." : "Confirm cancel"}
           </Button>
         </div>
       </Dialog>
@@ -164,12 +192,21 @@ function AccessibilityTab() {
 function BillingTab({
   subscription,
   loading,
+  error,
   onCancel,
 }: {
   subscription: Subscription | null;
   loading: boolean;
+  error: string | null;
   onCancel: () => void;
 }) {
+  const cancelsOn = subscription?.current_period_end
+    ? new Date(subscription.current_period_end).toLocaleDateString()
+    : null;
+  const statusLabel = subscription?.cancel_at_period_end && cancelsOn
+    ? `Canceling on ${cancelsOn}`
+    : subscription?.status ?? "Unavailable";
+
   return (
     <div className="grid gap-4">
       <Card>
@@ -180,22 +217,23 @@ function BillingTab({
         <CardContent className="space-y-2 text-sm">
           <div className="flex items-center justify-between">
             <span>Plan</span>
-            <span className="font-semibold">Map Pack 3</span>
+            <span className="font-semibold">{subscription?.plan ?? "Map Pack 3"}</span>
           </div>
           <div className="flex items-center justify-between">
             <span>Status</span>
-            <Badge variant={subscription?.status === "active" ? "success" : "muted"}>
-              {loading ? "Loading..." : subscription?.status ?? "Placeholder"}
+            <Badge variant={subscription?.access_active ? "success" : "muted"}>
+              {loading ? "Loading..." : statusLabel}
             </Badge>
           </div>
           <div className="flex items-center justify-between">
-            <span>Renews</span>
+            <span>{subscription?.cancel_at_period_end ? "Access through" : "Renews"}</span>
             <span className="text-muted-foreground">
               {subscription?.current_period_end ? new Date(subscription.current_period_end).toLocaleDateString() : "—"}
             </span>
           </div>
-          <Button variant="destructive" onClick={onCancel}>
-            Cancel subscription
+          {error && <p className="text-sm text-rose-600">{error}</p>}
+          <Button variant="destructive" onClick={onCancel} disabled={!subscription?.can_cancel || loading}>
+            {subscription?.cancel_at_period_end ? "Cancellation scheduled" : "Cancel subscription"}
           </Button>
         </CardContent>
       </Card>

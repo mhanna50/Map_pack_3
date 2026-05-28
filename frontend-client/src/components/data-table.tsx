@@ -26,11 +26,11 @@ export function DataTable({ title, description, headers, rows, loading, error, e
           </div>
         </div>
       )}
-      <div className="divide-y divide-border">
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3 px-6 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      <div className="divide-y divide-border overflow-x-auto">
+        <div className="grid min-w-max grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:px-6">
           {headers}
         </div>
-        <div className="min-h-[120px] px-6 py-3 text-sm">
+        <div className="min-h-[120px] min-w-max px-4 py-3 text-sm sm:px-6">
           {loading ? (
             <div className="space-y-3">
               <Skeleton className="h-9 w-full" />

@@ -10,6 +10,92 @@ permissions:
   contents: read
 
 jobs:
+  workflow-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lint GitHub Actions workflows
+        run: docker run --rm -v "${PWD}:/repo" -w /repo rhysd/actionlint:latest -color
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Lint shell scripts
+        run: find scripts -name '*.sh' -print0 | xargs -0 -r shellcheck
+
+  semgrep:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep SAST
+        run: |
+          docker run --rm \
+            -v "${PWD}:/src" \
+            -w /src \
+            semgrep/semgrep:latest \
+            semgrep scan \
+              --config p/owasp-top-ten \
+              --config p/secrets \
+              --config p/python \
+              --config p/typescript \
+              --config p/dockerfile \
+              --sarif \
+              --output semgrep.sarif \
+              --error
+
+      - name: Upload Semgrep SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+
+  migration-sanity:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: .
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check Supabase migration ordering and transaction endings
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          migrations = sorted(Path("infra/supabase/migrations").glob("*.sql"))
+          if not migrations:
+              raise SystemExit("No Supabase migrations found")
+
+          names = [path.name for path in migrations]
+          if names != sorted(names):
+              raise SystemExit("Supabase migration filenames are not lexicographically ordered")
+
+          for path in migrations:
+              text = path.read_text(encoding="utf-8").strip()
+              if not text:
+                  raise SystemExit(f"{path} is empty")
+              if text.count("$$") % 2:
+                  raise SystemExit(f"{path} has an unmatched dollar-quoted block delimiter")
+          print(f"Checked {len(migrations)} Supabase migrations")
+          PY
+
   backend-tests:
     runs-on: ubuntu-latest
     defaults:
@@ -304,6 +390,143 @@ jobs:
           ignore-unfixed: true
           cache-dir: .trivycache
 
+  dast-backend:
+    runs-on: ubuntu-latest
+    needs: [backend-tests]
+    defaults:
+      run:
+        shell: bash
+        working-directory: .
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Start backend for DAST
+        env:
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/map_pack
+          SUPABASE_URL: http://127.0.0.1:54321
+          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder
+          SUPABASE_JWT_SECRET: ci-placeholder
+          STRIPE_SECRET_KEY: ''
+          STRIPE_WEBHOOK_SECRET: ''
+        run: |
+          python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 > backend-dast.log 2>&1 &
+          echo "$!" > backend-dast.pid
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:8000/api/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat backend-dast.log
+          exit 1
+
+      - name: OWASP ZAP baseline scan backend
+        run: |
+          mkdir -p zap-results
+          docker run --rm --network host \
+            -v "${PWD}/zap-results:/zap/wrk:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+              -t http://127.0.0.1:8000 \
+              -J zap-backend.json \
+              -r zap-backend.html \
+              -I
+
+      - name: Upload backend DAST reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-backend
+          path: |
+            zap-results/
+            backend-dast.log
+
+  dast-frontend:
+    runs-on: ubuntu-latest
+    needs: [frontend-build]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: frontend-client
+            port: 3000
+            target: http://127.0.0.1:3000/sign-in
+          - app: frontend-admin
+            port: 3002
+            target: http://127.0.0.1:3002/sign-in
+          - app: frontend-marketing
+            port: 3001
+            target: http://127.0.0.1:3001/
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps --no-audit --no-fund
+        working-directory: ${{ matrix.app }}
+
+      - name: Start ${{ matrix.app }} for DAST
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+          NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:8000/api
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder
+          NEXT_PUBLIC_ADMIN_APP_URL: http://127.0.0.1:3002
+        run: |
+          npm run dev -- --hostname 127.0.0.1 --port ${{ matrix.port }} > ../${{ matrix.app }}-dast.log 2>&1 &
+          echo "$!" > ../${{ matrix.app }}-dast.pid
+          for attempt in {1..45}; do
+            if curl -fsS "${{ matrix.target }}" >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat ../${{ matrix.app }}-dast.log
+          exit 1
+        working-directory: ${{ matrix.app }}
+
+      - name: OWASP ZAP baseline scan ${{ matrix.app }}
+        run: |
+          mkdir -p zap-results
+          docker run --rm --network host \
+            -v "${PWD}/zap-results:/zap/wrk:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+              -t "${{ matrix.target }}" \
+              -J "zap-${{ matrix.app }}.json" \
+              -r "zap-${{ matrix.app }}.html" \
+              -I
+
+      - name: Upload frontend DAST reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-${{ matrix.app }}
+          path: |
+            zap-results/
+            ${{ matrix.app }}-dast.log
+
   container-scan:
     runs-on: ubuntu-latest
     strategy:
@@ -350,3 +573,51 @@ jobs:
           vuln-type: 'os,library'
           ignore-unfixed: true
           cache-dir: .trivycache
+
+  pre-deploy-gate:
+    runs-on: ubuntu-latest
+    needs:
+      - workflow-lint
+      - shellcheck
+      - semgrep
+      - migration-sanity
+      - backend-tests
+      - dependency-review
+      - codeql
+      - frontend-lint
+      - frontend-typecheck
+      - frontend-tests
+      - frontend-build
+      - sast-bandit
+      - sca-python
+      - sca-node
+      - secrets-scan
+      - dockerfile-lint
+      - repository-scan
+      - dast-backend
+      - dast-frontend
+      - container-scan
+    if: always()
+    steps:
+      - name: Enforce deploy readiness
+        env:
+          NEEDS_JSON: ${{ toJson(needs) }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          failed = {
+              name: data["result"]
+              for name, data in needs.items()
+              if data["result"] not in {"success", "skipped"}
+          }
+          if failed:
+              print("Pre-deploy gate failed:")
+              for name, result in sorted(failed.items()):
+                  print(f"- {name}: {result}")
+              sys.exit(1)
+          print("Pre-deploy gate passed")
+          PY

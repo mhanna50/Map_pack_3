@@ -15,6 +15,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
     redirect("/sign-in?redirect=/dashboard&error=invalid_role");
   }
   if (!access.completed) {
+    if (access.destination?.startsWith("/account/subscription")) {
+      redirect(access.destination);
+    }
     const onboardingTarget = access.destination && access.destination.startsWith("/onboarding")
       ? access.destination
       : "/onboarding";

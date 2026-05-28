@@ -61,7 +61,7 @@ export default function GbpAdminPage() {
         </div>
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-col items-start justify-between sm:flex-row sm:items-center">
             <div>
               <CardTitle>Connections</CardTitle>
               <CardDescription>Test connection, multi-location support, enable automations</CardDescription>

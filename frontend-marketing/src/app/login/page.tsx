@@ -114,46 +114,51 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="mx-auto flex max-w-5xl flex-col gap-10 px-6 py-10">
-        <header className="flex items-center justify-between text-sm font-semibold text-slate-200">
-          <Link href="/">{brand.name}</Link>
-          <Link href="/" className="text-accent transition hover:text-accent/80">
+        <header className="flex items-center justify-between border-b border-[#D8CFC1] pb-5 text-sm font-semibold text-[#14213D]">
+          <Link href="/" className="rounded-full focus:outline-none focus:ring-2 focus:ring-[#B86B4B]">
+            {brand.name}
+          </Link>
+          <Link
+            href="/"
+            className="rounded-full text-[#B86B4B] transition hover:text-[#A75F43] focus:outline-none focus:ring-2 focus:ring-[#B86B4B]"
+          >
             Back to marketing
           </Link>
         </header>
 
         <div className="grid gap-8 md:grid-cols-[1.1fr_0.9fr]">
-          <section className="rounded-3xl border border-white/10 bg-card p-8 shadow-sm shadow-blue-500/10">
-            <p className="text-sm uppercase tracking-[0.3em] text-accent">Existing clients</p>
-            <h1 className="mt-3 text-3xl font-semibold text-white">Log in to your account</h1>
-            <p className="mt-3 text-sm text-slate-300">
+          <section className="rounded-3xl border border-[#D8CFC1] bg-[#FFFDF8] p-8 shadow-[0_22px_70px_rgba(20,33,61,0.08)]">
+            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#B86B4B]">Existing clients</p>
+            <h1 className="mt-3 text-3xl font-semibold text-[#14213D]">Log in to your account</h1>
+            <p className="mt-3 text-sm leading-6 text-[#5F6673]">
               Use your credentials to access the client or admin dashboard.
             </p>
 
             <form className="mt-8 grid gap-5" onSubmit={handleSubmit}>
-              {error && <p className="rounded-2xl bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</p>}
+              {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>}
               <div className="grid gap-2">
-                <label className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400" htmlFor="email">
+                <label className="text-xs font-semibold uppercase tracking-[0.2em] text-[#5F6673]" htmlFor="email">
                   Email
                 </label>
                 <input
                   id="email"
                   type="email"
                   placeholder="you@company.com"
-                  className="rounded-2xl border border-white/10 bg-background/40 px-4 py-3 text-sm text-white placeholder:text-slate-400 focus:border-accent focus:outline-none"
+                  className="rounded-2xl border border-[#D8CFC1] bg-[#F8F3EA] px-4 py-3 text-sm text-[#14213D] placeholder:text-[#5F6673]/70 focus:border-[#B86B4B] focus:outline-none"
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
                   required
                 />
               </div>
               <div className="grid gap-2">
-                <label className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400" htmlFor="password">
+                <label className="text-xs font-semibold uppercase tracking-[0.2em] text-[#5F6673]" htmlFor="password">
                   Password
                 </label>
                 <input
                   id="password"
                   type="password"
                   placeholder="••••••••"
-                  className="rounded-2xl border border-white/10 bg-background/40 px-4 py-3 text-sm text-white placeholder:text-slate-400 focus:border-accent focus:outline-none"
+                  className="rounded-2xl border border-[#D8CFC1] bg-[#F8F3EA] px-4 py-3 text-sm text-[#14213D] placeholder:text-[#5F6673]/70 focus:border-[#B86B4B] focus:outline-none"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   required
@@ -161,35 +166,35 @@ export default function LoginPage() {
               </div>
               <button
                 type="submit"
-                className="rounded-full bg-secondary px-6 py-3 text-sm font-semibold text-white transition hover:bg-secondary/90 disabled:opacity-60"
+                className="rounded-full bg-[#B86B4B] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#A75F43] focus:outline-none focus:ring-2 focus:ring-[#B86B4B] disabled:opacity-60"
                 disabled={loading}
               >
                 {loading ? "Signing in..." : "Sign in"}
               </button>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-[#5F6673]">
                 Having trouble?{" "}
-                <a href={`mailto:${brand.email}`} className="text-accent underline underline-offset-4">
+                <a href={`mailto:${brand.email}`} className="text-[#B86B4B] underline underline-offset-4">
                   Contact support
                 </a>
               </p>
             </form>
           </section>
 
-          <aside className="rounded-3xl border border-white/10 bg-primary/15 p-8">
+          <aside className="rounded-3xl border border-[#D8CFC1] bg-[#F8F3EA] p-8 shadow-[6px_6px_0_rgba(184,107,75,0.12)]">
             <div className="space-y-4">
-              <p className="text-sm uppercase tracking-[0.3em] text-accent">New here?</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#B86B4B]">New here?</p>
               <div className="flex flex-wrap items-center gap-3">
-                <h2 className="text-2xl font-semibold text-white">Book a call with us</h2>
+                <h2 className="text-2xl font-semibold text-[#14213D]">Book a call with us</h2>
                 <a
                   href={calendlyUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center justify-center rounded-full bg-secondary px-5 py-2 text-sm font-semibold text-white transition hover:bg-secondary/90"
+                  className="inline-flex items-center justify-center rounded-full bg-[#14213D] px-5 py-2 text-sm font-semibold text-[#FFFDF8] transition hover:bg-[#14213D]/90 focus:outline-none focus:ring-2 focus:ring-[#B86B4B]"
                 >
                   Calendly
                 </a>
               </div>
-              <p className="text-sm text-slate-300">
+              <p className="text-sm leading-6 text-[#5F6673]">
                 If you do not have an account yet, we will walk you through automations, pricing, and setup.
               </p>
             </div>

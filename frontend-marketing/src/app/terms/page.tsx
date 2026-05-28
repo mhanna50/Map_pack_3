@@ -2,13 +2,16 @@ import type { Metadata } from "next";
 
 import { MarketingShell } from "@/components/marketing/MarketingShell";
 import { PageHero } from "@/components/marketing/PageHero";
+import { StructuredData } from "@/components/marketing/StructuredData";
 import { brand } from "@/content/marketing";
+import { breadcrumbSchema, createMarketingMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Terms of Service draft",
+export const metadata: Metadata = createMarketingMetadata({
+  title: "Terms of Service | Visora",
   description:
-    "A practical draft terms page for Visora covering platform use, accounts, subscriptions, no ranking guarantees, integrations, acceptable use, data accuracy, cancellation, and liability.",
-};
+    "Visora terms draft covering platform use, accounts, subscriptions, no ranking guarantees, integrations, acceptable use, and cancellation.",
+  path: "/terms",
+});
 
 const sections = [
   {
@@ -60,6 +63,12 @@ const sections = [
 export default function TermsPage() {
   return (
     <MarketingShell>
+      <StructuredData
+        data={breadcrumbSchema([
+          { name: "Home", path: "/" },
+          { name: "Terms of Service", path: "/terms" },
+        ])}
+      />
       <PageHero
         eyebrow="Legal"
         title="Terms of Service draft."
@@ -68,9 +77,9 @@ export default function TermsPage() {
       <section className="px-6 py-16">
         <div className="mx-auto grid max-w-4xl gap-5">
           {sections.map((section) => (
-            <section key={section.title} className="rounded-lg border border-[#dcc6a4] bg-[#fffaf0] p-6">
-              <h2 className="text-xl font-semibold text-[#17202e]">{section.title}</h2>
-              <p className="mt-3 text-sm leading-7 text-[#53605a]">{section.body}</p>
+            <section key={section.title} className="rounded-lg border border-[#D8CFC1] bg-[#FFFDF8] p-6">
+              <h2 className="text-xl font-semibold text-[#14213D]">{section.title}</h2>
+              <p className="mt-3 text-sm leading-7 text-[#5F6673]">{section.body}</p>
             </section>
           ))}
         </div>
@@ -78,4 +87,3 @@ export default function TermsPage() {
     </MarketingShell>
   );
 }
-

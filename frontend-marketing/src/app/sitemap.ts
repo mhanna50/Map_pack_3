@@ -1,9 +1,10 @@
 import type { MetadataRoute } from "next";
 
 import { learnPages, servicePages } from "@/content/marketing";
+import { getSiteUrl } from "@/lib/seo";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = (process.env.NEXT_PUBLIC_MARKETING_SITE_URL ?? "https://www.usevisora.com").replace(/\/+$/, "");
+  const baseUrl = getSiteUrl();
   const staticRoutes = [
     "",
     "/platform",
@@ -18,7 +19,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/security",
     "/cookies",
     "/support",
-    "/login",
   ];
 
   const serviceRoutes = servicePages.map((page) => `/services/${page.slug}`);
@@ -29,4 +29,3 @@ export default function sitemap(): MetadataRoute.Sitemap {
     lastModified: new Date(),
   }));
 }
-

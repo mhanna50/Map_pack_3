@@ -73,7 +73,7 @@ export default function ContentPage() {
 
         <div className="grid gap-4 lg:grid-cols-3">
           <Card className="lg:col-span-2">
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-col items-start justify-between sm:flex-row sm:items-center">
               <div>
                 <CardTitle>Upload photos</CardTitle>
                 <CardDescription>Drag and drop — will push to Supabase Storage</CardDescription>
@@ -148,7 +148,7 @@ export default function ContentPage() {
         </div>
 
         <Card>
-          <CardHeader className="flex flex-row items-center gap-2">
+          <CardHeader className="flex flex-col items-start gap-2">
             <Info className="h-4 w-4 text-primary" />
             <div>
               <CardTitle>Rotation guidance</CardTitle>

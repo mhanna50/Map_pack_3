@@ -239,7 +239,7 @@ export default function KeywordStrategyPage() {
         </header>
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-col items-start justify-between sm:flex-row sm:items-center">
             <div>
               <CardTitle>Campaign cycle</CardTitle>
               <CardDescription>Switch months or inspect historical keyword sets</CardDescription>
@@ -421,7 +421,7 @@ export default function KeywordStrategyPage() {
             </Card>
 
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
+              <CardHeader className="flex flex-col items-start justify-between sm:flex-row sm:items-center">
                 <div>
                   <CardTitle>Before vs after geo grid</CardTitle>
                   <CardDescription>Heatmap comparison by keyword for this campaign cycle</CardDescription>
