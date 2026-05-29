@@ -17,6 +17,7 @@ from backend.app.services.content.content_guardrails import ContentGuardrails
 from backend.app.services.google_business.gbp_sync import GbpSyncService
 from backend.app.services.media.media_selection import MediaSelector
 from backend.app.services.posts.rotation import RotationEngine
+from backend.app.services.integrations.health import IntegrationHealthService, sanitize_error
 from backend.app.services.shared.settings import SettingsService
 
 CTAS = [
@@ -103,6 +104,7 @@ class PostCompositionService:
             )
 
         generated = self._generate_caption_openai(
+            organization_id=candidate.organization_id,
             business_name=candidate.location.name,
             category=category,
             service_name=service_name,
@@ -368,6 +370,7 @@ class PostCompositionService:
     def _generate_caption_openai(
         self,
         *,
+        organization_id: uuid.UUID,
         business_name: str,
         category: str,
         service_name: str,
@@ -432,7 +435,17 @@ class PostCompositionService:
                 data = response.json()
             message = data["choices"][0]["message"]["content"]
             return str(message).strip() if message else None
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            IntegrationHealthService(self.db).record_failure(
+                tenant_id=organization_id,
+                integration="openai",
+                module="gbp_posts",
+                operation="generate_post_caption",
+                error=exc,
+                title="OpenAI content generation failing",
+                message="OpenAI content generation failed for GBP posts.",
+                safe_details={"error": sanitize_error(exc)},
+            )
             return None
 
     def _fallback_caption(

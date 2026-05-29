@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useState, type FocusEvent } from "react";
 import { DotLottieReact } from "@lottiefiles/dotlottie-react";
 import { motion } from "framer-motion";
 import { ChevronDown, Menu, X } from "lucide-react";
@@ -19,21 +19,43 @@ function Dropdown({
   href: string;
   items: { label: string; href: string; description: string }[];
 }) {
+  const [open, setOpen] = useState(false);
+
+  const closeOnBlur = (event: FocusEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setOpen(false);
+    }
+  };
+
   return (
-    <details className="group relative">
-      <summary className="flex cursor-pointer list-none items-center gap-1 rounded-full px-2 py-1 text-sm font-semibold text-[#14213D] outline-none transition hover:text-[#B86B4B] focus-visible:ring-2 focus-visible:ring-[#B86B4B] [&::-webkit-details-marker]:hidden">
-        <Link href={href} className="rounded-full focus:outline-none">
+    <div
+      className="relative"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocusCapture={() => setOpen(true)}
+      onBlur={closeOnBlur}
+    >
+      <Link
+        href={href}
+        className="flex items-center gap-1 rounded-full px-2 py-1 text-sm font-semibold text-[#14213D] outline-none transition hover:text-[#B86B4B] focus-visible:ring-2 focus-visible:ring-[#B86B4B]"
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
           {label}
-        </Link>
-        <ChevronDown className="h-4 w-4 transition group-open:rotate-180" aria-hidden="true" />
-      </summary>
-      <div className="absolute left-0 top-full z-40 mt-3 w-[min(560px,calc(100vw-2rem))] rounded-lg border border-[#D8CFC1] bg-[#FFFDF8] p-3 shadow-[0_24px_60px_rgba(52,45,36,0.18)]">
+        <ChevronDown className={cn("h-4 w-4 transition", open && "rotate-180")} aria-hidden="true" />
+      </Link>
+      {open ? (
+      <div
+        className="absolute left-0 top-full z-40 mt-3 w-[min(560px,calc(100vw-2rem))] rounded-lg border border-[#D8CFC1] bg-[#FFFDF8] p-3 shadow-[0_24px_60px_rgba(52,45,36,0.18)]"
+        role="menu"
+      >
         <div className="grid gap-1 sm:grid-cols-2">
           {items.map((item) => (
             <Link
               key={item.href}
               href={item.href}
               className="rounded-md px-3 py-2 transition hover:bg-[#F8F3EA] focus:outline-none focus:ring-2 focus:ring-[#B86B4B]"
+              role="menuitem"
             >
               <span className="block text-sm font-semibold text-[#14213D]">{item.label}</span>
               <span className="mt-1 block text-xs leading-5 text-[#5F6673]">{item.description}</span>
@@ -41,7 +63,8 @@ function Dropdown({
           ))}
         </div>
       </div>
-    </details>
+      ) : null}
+    </div>
   );
 }
 
@@ -198,4 +221,3 @@ export function SiteHeader() {
     </motion.header>
   );
 }
-

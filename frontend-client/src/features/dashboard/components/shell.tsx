@@ -3,6 +3,7 @@
 import { MobileDashboardNav, Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 import { LocationSelect } from "./location-select";
+import { ClientReconnectBanner } from "@/components/health/client-reconnect-banner";
 
 type DashboardShellProps = {
   children: React.ReactNode;
@@ -20,6 +21,7 @@ export function DashboardShell({ children, onRefresh }: DashboardShellProps) {
           <div className="block md:hidden">
             <LocationSelect />
           </div>
+          <ClientReconnectBanner />
           <main className="min-w-0">{children}</main>
         </div>
       </div>

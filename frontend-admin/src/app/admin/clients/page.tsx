@@ -62,6 +62,7 @@ export default function AdminClientsPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [pauseBusy, setPauseBusy] = useState(false);
   const [terminateId, setTerminateId] = useState<string | null>(null);
+  const [terminateBusy, setTerminateBusy] = useState(false);
   const pageSize = 15;
 
   useEffect(() => {
@@ -104,8 +105,10 @@ export default function AdminClientsPage() {
 
   const handleImpersonate = async (id: string) => {
     try {
-      await adminApi.impersonateStart(id, "Manual support");
-      pushToast({ title: "Impersonation started", tone: "success" });
+      const result = await adminApi.impersonateDeepLink(id, "/dashboard", "clients");
+      const clientBase = (process.env.NEXT_PUBLIC_CLIENT_APP_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+      window.open(`${clientBase}${result.targetPath}`, "_blank", "noopener,noreferrer");
+      pushToast({ title: "Client dashboard opened", description: "Impersonation was audited.", tone: "success" });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to impersonate";
       pushToast({ title: "Failed to impersonate", description: message, tone: "error" });
@@ -144,12 +147,35 @@ export default function AdminClientsPage() {
     }
   };
 
+  const terminateTenant = async () => {
+    if (!terminateId) return;
+    setTerminateBusy(true);
+    try {
+      const result = await adminApi.deleteTenant(terminateId);
+      setTenants((current) => current.filter((tenant) => tenant.tenant_id !== terminateId));
+      setTotal((current) => Math.max(0, current - 1));
+      if (detailId === terminateId) {
+        setDetailId(null);
+        setDetail(null);
+      }
+      pushToast({
+        title: "Tenant terminated",
+        description: `Billing canceled: ${result.stripe?.canceled ?? 0}. Auth users removed: ${result.auth?.deletedUsers ?? 0}.`,
+        tone: "success",
+      });
+      setTerminateId(null);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to terminate tenant";
+      pushToast({ title: "Termination failed", description: message, tone: "error" });
+    } finally {
+      setTerminateBusy(false);
+    }
+  };
+
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total]);
 
   return (
-    <AdminShell
-      onSearch={(term) => setFilters((f) => ({ ...f, q: term }))}
-    >
+    <AdminShell>
       <div className="space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -345,15 +371,15 @@ export default function AdminClientsPage() {
         open={Boolean(terminateId)}
         onOpenChange={(open) => !open && setTerminateId(null)}
         title="Terminate account"
-        description="Placeholder action — implement backend to cancel subscription and disable automations."
+        description="This permanently removes the tenant from admin monitoring and deletes related tenant-scoped records."
       >
-        <p className="text-sm text-muted-foreground">This will be logged to audit and disable client access.</p>
+        <p className="text-sm text-muted-foreground">Use this only for test tenants or clients that should be fully removed from the app.</p>
         <div className="flex items-center justify-end gap-2 border-t border-border px-6 py-3">
-          <Button variant="ghost" onClick={() => setTerminateId(null)}>
+          <Button variant="ghost" onClick={() => setTerminateId(null)} disabled={terminateBusy}>
             Cancel
           </Button>
-          <Button variant="destructive" onClick={() => setTerminateId(null)}>
-            Terminate
+          <Button variant="destructive" onClick={terminateTenant} disabled={terminateBusy}>
+            {terminateBusy ? "Terminating..." : "Terminate"}
           </Button>
         </div>
       </Dialog>

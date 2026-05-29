@@ -14,6 +14,7 @@ from backend.app.models.enums import LocationStatus, ProviderType
 from backend.app.models.identity.user import User
 from backend.app.services.auth.access import AccessDeniedError, AccessService
 from backend.app.services.google_business.connected_accounts import ConnectedAccountService
+from backend.app.services.google_business.gbp_connections import GbpConnectionService
 from backend.app.services.google_business.google import (
     DEFAULT_GBP_SCOPES,
     GoogleBusinessClient,
@@ -123,19 +124,24 @@ def oauth_callback(
 
     connected_accounts: list[ConnectedAccount] = []
     account_service = ConnectedAccountService(db)
+    connection_service = GbpConnectionService(db)
     for account in accounts_payload:
-        connected_accounts.append(
-            account_service.upsert_google_account(
-                organization_id=organization_id,
-                user_id=current_user.id,
-                external_account_id=account.get("name"),
-                display_name=account.get("accountName") or account.get("name"),
-                scopes=scopes,
-                access_token=access_token,
-                refresh_token=refresh_token,
-                expires_in=expires_in,
-                metadata={"raw": account},
-            )
+        connected_account = account_service.upsert_google_account(
+            organization_id=organization_id,
+            user_id=current_user.id,
+            external_account_id=account.get("name"),
+            display_name=account.get("accountName") or account.get("name"),
+            scopes=scopes,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_in=expires_in,
+            metadata={"raw": account},
+        )
+        connected_accounts.append(connected_account)
+        connection_service.upsert_from_connected_account(
+            account=connected_account,
+            google_account_email=account.get("accountName") or token_data.get("email"),
+            metadata={"accounts": accounts_payload},
         )
 
     return OAuthCallbackResponse(connected_accounts=connected_accounts)

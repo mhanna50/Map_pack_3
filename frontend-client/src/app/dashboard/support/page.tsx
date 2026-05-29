@@ -9,16 +9,19 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTenant } from "@/features/tenants/tenant-context";
-import { listSupportTickets } from "@/lib/db";
+import { fetchBackendJson } from "@/lib/backend-api";
 import { format } from "@/lib/date-utils";
 
-type Ticket = { id?: string; tenant_id?: string; subject?: string; status?: string; created_at?: string };
+type Ticket = { id?: string; tenant_id?: string; subject?: string; description?: string | null; status?: string; created_at?: string };
 
 export default function SupportPage() {
-  const { tenantId, refresh: refreshTenant } = useTenant();
+  const { tenantId, supabase, refresh: refreshTenant } = useTenant();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [subject, setSubject] = useState("");
+  const [details, setDetails] = useState("");
+  const [creating, setCreating] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const handleRefresh = async () => {
@@ -36,7 +39,11 @@ export default function SupportPage() {
       setLoading(true);
       setError(null);
       try {
-        const data = await listSupportTickets(tenantId, { limit: 20 });
+        const data = await fetchBackendJson<Ticket[]>(
+          "/support/tickets",
+          { query: { organization_id: tenantId, limit: 20 } },
+          supabase,
+        );
         if (!active) return;
         setTickets((data ?? []) as Ticket[]);
       } catch (err: unknown) {
@@ -51,7 +58,34 @@ export default function SupportPage() {
     return () => {
       active = false;
     };
-  }, [tenantId, refreshKey]);
+  }, [tenantId, refreshKey, supabase]);
+
+  const createTicket = async () => {
+    if (!tenantId || creating) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const ticket = await fetchBackendJson<Ticket>(
+        "/support/tickets",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            organization_id: tenantId,
+            subject: subject.trim(),
+            description: details.trim(),
+          }),
+        },
+        supabase,
+      );
+      setTickets((rows) => [ticket, ...rows]);
+      setSubject("");
+      setDetails("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to create support ticket");
+    } finally {
+      setCreating(false);
+    }
+  };
 
   return (
     <DashboardShell onRefresh={handleRefresh}>
@@ -70,19 +104,31 @@ export default function SupportPage() {
           <Card>
             <CardHeader>
               <CardTitle>Create ticket</CardTitle>
-              <CardDescription>UI only — hook to support backend</CardDescription>
+              <CardDescription>Send a support request to the Map Pack 3 team</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <label className="block">
                 <span className="text-muted-foreground">Subject</span>
-                <input className="mt-1 w-full rounded-lg border border-border px-3 py-2" placeholder="Need help with..." />
+                <input
+                  className="mt-1 w-full rounded-lg border border-border px-3 py-2"
+                  placeholder="Need help with..."
+                  value={subject}
+                  onChange={(event) => setSubject(event.target.value)}
+                />
               </label>
               <label className="block">
                 <span className="text-muted-foreground">Details</span>
-                <textarea className="mt-1 w-full rounded-lg border border-border px-3 py-2" rows={3} placeholder="Describe the issue" />
+                <textarea
+                  className="mt-1 w-full rounded-lg border border-border px-3 py-2"
+                  rows={3}
+                  placeholder="Describe the issue"
+                  value={details}
+                  onChange={(event) => setDetails(event.target.value)}
+                />
               </label>
-              <Button>Create ticket</Button>
-              <p className="text-xs text-muted-foreground">This form is not wired; connect to your support API or Supabase table.</p>
+              <Button onClick={createTicket} disabled={creating || subject.trim().length < 3 || details.trim().length < 3}>
+                {creating ? "Creating..." : "Create ticket"}
+              </Button>
             </CardContent>
           </Card>
 

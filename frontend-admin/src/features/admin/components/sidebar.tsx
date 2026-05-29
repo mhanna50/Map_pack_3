@@ -5,6 +5,9 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import {
+  ChevronDown,
+  ChevronsLeft,
+  ChevronsRight,
   LayoutGrid,
   Users,
   Landmark,
@@ -15,6 +18,7 @@ import {
   FileText,
   LifeBuoy,
   HeartPulse,
+  Siren,
   PhoneCall,
   Send,
   Star,
@@ -23,33 +27,150 @@ import {
   MessageSquare,
   Globe,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 
-const navItems = [
-  { href: "/admin", label: "Overview", icon: LayoutGrid },
-  { href: "/admin/clients", label: "Clients", icon: Users },
-  { href: "/admin/module-health", label: "Module Health", icon: HeartPulse },
-  { href: "/admin/lead-recovery", label: "Lead Recovery", icon: PhoneCall },
-  { href: "/admin/modules/gbp-posting", label: "GBP Posting", icon: Send },
-  { href: "/admin/modules/gbp-audits", label: "GBP Audits", icon: Shield },
-  { href: "/admin/modules/reviews", label: "Reviews", icon: Star },
-  { href: "/admin/modules/citations", label: "Citations", icon: Link2 },
-  { href: "/admin/modules/visibility", label: "Visibility", icon: Map },
-  { href: "/admin/modules/images", label: "Images", icon: Image },
-  { href: "/admin/modules/qa", label: "Q&A", icon: MessageSquare },
-  { href: "/admin/modules/website-audits", label: "Website Audits", icon: Globe },
-  { href: "/admin/onboarding", label: "Onboarding", icon: Landmark },
-  { href: "/admin/billing", label: "Billing", icon: Receipt },
-  { href: "/admin/gbp", label: "GBP", icon: Link2 },
-  { href: "/admin/usage", label: "Usage", icon: Activity },
-  { href: "/admin/roles", label: "Roles", icon: Shield },
-  { href: "/admin/audit", label: "Audit", icon: FileText },
-  { href: "/admin/support", label: "Support", icon: LifeBuoy },
+type NavItem = {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+};
+
+type NavSection = {
+  id: string;
+  label: string;
+  items: NavItem[];
+};
+
+const navSections: NavSection[] = [
+  {
+    id: "command",
+    label: "Command Center",
+    items: [
+      { href: "/admin", label: "Overview", icon: LayoutGrid },
+      { href: "/admin/clients", label: "Clients", icon: Users },
+      { href: "/admin/onboarding", label: "Client Invites", icon: Landmark },
+    ],
+  },
+  {
+    id: "health",
+    label: "Health & Monitoring",
+    items: [
+      { href: "/admin/module-health", label: "Module Health", icon: HeartPulse },
+      { href: "/admin/integration-health", label: "Integration Health", icon: Siren },
+      { href: "/admin/usage", label: "Usage", icon: Activity },
+      { href: "/admin/audit", label: "Audit", icon: FileText },
+    ],
+  },
+  {
+    id: "local-seo",
+    label: "Local SEO Services",
+    items: [
+      { href: "/admin/gbp", label: "GBP Connections", icon: Link2 },
+      { href: "/admin/modules/gbp-posting", label: "GBP Posting", icon: Send },
+      { href: "/admin/modules/gbp-audits", label: "GBP Audits", icon: Shield },
+      { href: "/admin/modules/reviews", label: "Reviews", icon: Star },
+      { href: "/admin/modules/citations", label: "Citations", icon: Link2 },
+      { href: "/admin/modules/visibility", label: "Rank Tracking", icon: Map },
+      { href: "/admin/modules/images", label: "Images", icon: Image },
+      { href: "/admin/modules/qa", label: "Q&A", icon: MessageSquare },
+      { href: "/admin/modules/website-audits", label: "Website Audits", icon: Globe },
+    ],
+  },
+  {
+    id: "revenue-support",
+    label: "Revenue & Support",
+    items: [
+      { href: "/admin/lead-recovery", label: "Lead Recovery", icon: PhoneCall },
+      { href: "/admin/billing", label: "Billing", icon: Receipt },
+      { href: "/admin/support", label: "Support", icon: LifeBuoy },
+    ],
+  },
+  {
+    id: "access",
+    label: "Access Control",
+    items: [{ href: "/admin/roles", label: "Roles", icon: Shield }],
+  },
 ];
+
+const defaultOpenSections = Object.fromEntries(navSections.map((section) => [section.id, true]));
+const sidebarSectionsStorageKey = "admin-sidebar-sections";
+const sidebarSectionsChangedEvent = "admin-sidebar-sections-changed";
+let cachedOpenSectionsJson = "";
+let cachedOpenSections = defaultOpenSections;
+
+const readStoredOpenSections = () => {
+  if (typeof window === "undefined") return defaultOpenSections;
+  const saved = window.localStorage.getItem(sidebarSectionsStorageKey);
+  if (!saved) return defaultOpenSections;
+  if (saved === cachedOpenSectionsJson) return cachedOpenSections;
+  try {
+    const parsed = JSON.parse(saved) as Record<string, boolean>;
+    cachedOpenSectionsJson = saved;
+    cachedOpenSections = { ...defaultOpenSections, ...parsed };
+    return cachedOpenSections;
+  } catch {
+    window.localStorage.removeItem(sidebarSectionsStorageKey);
+    return defaultOpenSections;
+  }
+};
+
+const subscribeToStoredOpenSections = (callback: () => void) => {
+  window.addEventListener("storage", callback);
+  window.addEventListener(sidebarSectionsChangedEvent, callback);
+  return () => {
+    window.removeEventListener("storage", callback);
+    window.removeEventListener(sidebarSectionsChangedEvent, callback);
+  };
+};
+
+const writeStoredOpenSections = (sections: Record<string, boolean>) => {
+  const next = { ...defaultOpenSections, ...sections };
+  const serialized = JSON.stringify(next);
+  cachedOpenSectionsJson = serialized;
+  cachedOpenSections = next;
+  window.localStorage.setItem(sidebarSectionsStorageKey, serialized);
+  window.dispatchEvent(new Event(sidebarSectionsChangedEvent));
+};
+
+const isActiveNavItem = (pathname: string, href: string) =>
+  pathname === href || (href !== "/admin" && pathname.startsWith(`${href}/`));
 
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const openSections = useSyncExternalStore(
+    subscribeToStoredOpenSections,
+    readStoredOpenSections,
+    () => defaultOpenSections,
+  );
+  const activeSection = navSections.find((section) =>
+    section.items.some((item) => isActiveNavItem(pathname, item.href)),
+  );
+  const flatNavItems = navSections.flatMap((section) => section.items);
+
+  const toggleSection = (sectionId: string) => {
+    writeStoredOpenSections({ ...openSections, [sectionId]: !openSections[sectionId] });
+  };
+
+  const navLink = (item: NavItem) => {
+    const Icon = item.icon;
+    const active = isActiveNavItem(pathname, item.href);
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        title={collapsed ? item.label : undefined}
+        className={cn(
+          "flex shrink-0 items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition",
+          active ? "bg-primary/10 text-primary shadow-inner" : "text-muted-foreground hover:bg-muted/60",
+          collapsed && "justify-center",
+        )}
+      >
+        <Icon className="h-4 w-4 shrink-0" />
+        {!collapsed && <span className="truncate">{item.label}</span>}
+      </Link>
+    );
+  };
 
   return (
     <aside
@@ -65,29 +186,38 @@ export function Sidebar() {
           className="hidden rounded-lg p-1 text-muted-foreground hover:bg-muted/50 lg:inline-flex"
           onClick={() => setCollapsed((v) => !v)}
         >
-          {collapsed ? "»" : "«"}
+          {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
         </button>
       </div>
 
-      <nav className="mt-4 flex gap-1 overflow-x-auto pb-1 lg:mt-6 lg:block lg:space-y-1 lg:overflow-y-auto lg:overflow-x-visible lg:pb-0">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "flex shrink-0 items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition",
-                active ? "bg-primary/10 text-primary shadow-inner" : "text-muted-foreground hover:bg-muted/60",
-                collapsed && "justify-center",
-              )}
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              {!collapsed && <span>{item.label}</span>}
-            </Link>
-          );
-        })}
+      <nav className={cn("mt-4 overflow-y-auto pb-1 lg:mt-6 lg:pb-0", collapsed ? "space-y-1" : "space-y-3")}>
+        {collapsed
+          ? flatNavItems.map((item) => navLink(item))
+          : navSections.map((section) => {
+              const sectionActive = activeSection?.id === section.id;
+              const sectionOpen = openSections[section.id] ?? true;
+              return (
+                <section key={section.id} className="space-y-1">
+                  <button
+                    aria-controls={`admin-nav-${section.id}`}
+                    aria-expanded={sectionOpen}
+                    className={cn(
+                      "flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-xs font-semibold uppercase text-muted-foreground transition hover:bg-muted/60 hover:text-foreground",
+                      sectionActive && "text-foreground",
+                    )}
+                    onClick={() => toggleSection(section.id)}
+                  >
+                    <span className="truncate">{section.label}</span>
+                    <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 transition-transform", !sectionOpen && "-rotate-90")} />
+                  </button>
+                  {sectionOpen && (
+                    <div id={`admin-nav-${section.id}`} className="space-y-1">
+                      {section.items.map((item) => navLink(item))}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
       </nav>
 
       <div className={cn("mt-auto hidden space-y-3 rounded-xl border border-dashed border-border bg-muted/30 p-4 text-sm text-muted-foreground lg:block", collapsed && "lg:hidden")}>

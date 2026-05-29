@@ -49,7 +49,7 @@ def test_create_subscription_intent_blocks_existing_active_subscription(monkeypa
     with pytest.raises(ValueError, match="already exists"):
         service.create_subscription_intent(
             email="Owner@Example.com",
-            company_name="Acme Corp",
+            company_name="Demo Corp",
             plan="standard_249",
         )
 
@@ -82,7 +82,7 @@ def test_create_checkout_session_blocks_existing_active_subscription(monkeypatch
     with pytest.raises(ValueError, match="already exists"):
         service.create_checkout_session(
             email="Owner@Example.com",
-            company_name="Acme Corp",
+            company_name="Demo Corp",
             plan="standard_249",
         )
 
@@ -117,7 +117,7 @@ def test_create_checkout_session_maps_metadata_and_relative_redirects(monkeypatc
     service = BillingService()
     session = service.create_checkout_session(
         email="Owner@Example.com",
-        company_name="Acme Corp",
+        company_name="Demo Corp",
         plan="standard_249",
         tenant_id="tenant-123",
         user_id="user-123",
@@ -140,7 +140,7 @@ def test_create_checkout_session_rejects_retired_addons(monkeypatch):
     with pytest.raises(ValueError, match="add-ons are no longer supported"):
         service.create_checkout_session(
             email="Owner@Example.com",
-            company_name="Acme Corp",
+            company_name="Demo Corp",
             plan="standard_249",
             addons=["Growth Add-On"],
         )
@@ -173,7 +173,7 @@ def test_create_checkout_session_supports_invite_selected_pricing(monkeypatch):
     service = BillingService()
     service.create_checkout_session(
         email="Owner@Example.com",
-        company_name="Acme Corp",
+        company_name="Demo Corp",
         plan="standard_249",
     )
 
@@ -189,7 +189,7 @@ def test_create_checkout_session_rejects_retired_starter_pro_agency_plans(monkey
         with pytest.raises(ValueError, match="Unknown Stripe billing plan"):
             service.create_checkout_session(
                 email="Owner@Example.com",
-                company_name="Acme Corp",
+                company_name="Demo Corp",
                 plan=retired_plan,
             )
 
@@ -222,7 +222,7 @@ def test_create_subscription_intent_allows_new_when_previous_subscription_cancel
     service = BillingService()
     result = service.create_subscription_intent(
         email="Owner@Example.com",
-        company_name="Acme Corp",
+        company_name="Demo Corp",
         plan="friends_family",
     )
 

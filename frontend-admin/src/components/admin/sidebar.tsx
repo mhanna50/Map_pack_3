@@ -29,6 +29,9 @@ const navItems = [
   { href: "/admin/support", label: "Support", icon: LifeBuoy },
 ];
 
+const isActiveNavItem = (pathname: string, href: string) =>
+  pathname === href || (href !== "/admin" && pathname.startsWith(`${href}/`));
+
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
@@ -54,7 +57,7 @@ export function Sidebar() {
       <nav className="mt-6 space-y-1">
         {navItems.map((item) => {
           const Icon = item.icon;
-          const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+          const active = isActiveNavItem(pathname, item.href);
           return (
             <Link
               key={item.href}

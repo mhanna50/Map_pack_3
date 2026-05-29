@@ -1,6 +1,7 @@
 import "../globals.css";
 import { redirect } from "next/navigation";
 
+import { AdminSessionGuard } from "@/features/admin/components/session-guard";
 import { requireAdminUser } from "@/features/admin/adminDb";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -13,5 +14,5 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     }
     redirect("/sign-in?redirect=/admin&error=invalid_role");
   }
-  return children;
+  return <AdminSessionGuard>{children}</AdminSessionGuard>;
 }

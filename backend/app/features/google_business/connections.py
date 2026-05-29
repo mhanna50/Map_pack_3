@@ -11,6 +11,7 @@ from backend.app.models.google_business.gbp_connection import GbpConnection
 from backend.app.models.google_business.location import Location
 from backend.app.services.shared.encryption import get_encryption_service
 from backend.app.services.google_business.google import GoogleBusinessClient, GoogleOAuthService
+from backend.app.services.integrations.health import CLIENT_GBP_RECONNECT_MESSAGE, IntegrationHealthService, sanitize_error
 
 
 class GbpConnectionService:
@@ -69,6 +70,16 @@ class GbpConnectionService:
             self.db.add(connection)
         self.db.commit()
         self.db.refresh(connection)
+        health = IntegrationHealthService(self.db)
+        health.resolve_client_reconnect_prompt(tenant_id=organization_id)
+        health.resume_tenant_module_automation(tenant_id=organization_id, module="gbp")
+        health.mark_integration_recovered(
+            tenant_id=organization_id,
+            integration="google_business_profile",
+            module="gbp",
+            message="Google Business Profile reconnected successfully",
+            safe_details={"connection_id": str(connection.id), "scopes": scopes or []},
+        )
         from backend.app.services.google_business.readiness import GbpReadinessService
 
         GbpReadinessService(self.db).schedule_audit_if_lifecycle_ready(
@@ -112,6 +123,16 @@ class GbpConnectionService:
             self.db.add(connection)
         self.db.commit()
         self.db.refresh(connection)
+        health = IntegrationHealthService(self.db)
+        health.resolve_client_reconnect_prompt(tenant_id=account.organization_id)
+        health.resume_tenant_module_automation(tenant_id=account.organization_id, module="gbp")
+        health.mark_integration_recovered(
+            tenant_id=account.organization_id,
+            integration="google_business_profile",
+            module="gbp",
+            message="Google Business Profile reconnected successfully",
+            safe_details={"connection_id": str(connection.id), "connected_account_id": str(account.id)},
+        )
         return connection
 
     def ensure_access_token(
@@ -121,6 +142,7 @@ class GbpConnectionService:
         refresh_callback: Callable[[str], dict[str, Any]],
     ) -> str:
         if not connection.encrypted_access_token:
+            self._require_reconnect(connection, "Google account is disconnected; reconnect Google Business Profile", category="auth_revoked")
             raise ValueError("Google account is disconnected; reconnect Google Business Profile")
         decrypt = self.encryptor.decrypt
         access_token = decrypt(connection.encrypted_access_token)
@@ -132,11 +154,43 @@ class GbpConnectionService:
             return access_token
         if not connection.encrypted_refresh_token:
             self._mark_expired(connection)
+            self._require_reconnect(connection, "Google authorization expired; reconnect Google Business Profile", category="auth_expired")
             raise ValueError("Google authorization expired; reconnect Google Business Profile")
         try:
+            IntegrationHealthService(self.db).record_recovery_attempt(
+                tenant_id=connection.organization_id,
+                integration="google_business_profile",
+                module="gbp",
+                action="refresh_access_token",
+                status="attempted",
+                message="Expired access token detected; attempting refresh.",
+            )
             payload = refresh_callback(decrypt(connection.encrypted_refresh_token))
         except Exception as exc:  # noqa: BLE001
             self._mark_expired(connection)
+            health = IntegrationHealthService(self.db)
+            incident = health.record_failure(
+                tenant_id=connection.organization_id,
+                integration="google_business_profile",
+                module="gbp",
+                operation="refresh_access_token",
+                error=exc,
+                title="Google Business Profile connection needs reauthorization",
+                message="Google Business Profile connection needs reauthorization. Token refresh failed.",
+                safe_details={"connection_id": str(connection.id), "error": sanitize_error(exc)},
+                force_category="token_refresh_failed",
+                force_severity="critical",
+            )
+            health.record_recovery_attempt(
+                tenant_id=connection.organization_id,
+                incident_id=incident.id,
+                integration="google_business_profile",
+                module="gbp",
+                action="refresh_access_token",
+                status="failed",
+                message="Token refresh failed; client reconnect is required.",
+            )
+            self._require_reconnect(connection, CLIENT_GBP_RECONNECT_MESSAGE, category="token_refresh_failed")
             raise ValueError("Google authorization expired; reconnect Google Business Profile") from exc
         access_token = payload["access_token"]
         expires_in = payload.get("expires_in", 3600)
@@ -148,6 +202,23 @@ class GbpConnectionService:
         self.db.add(connection)
         self.db.commit()
         self.db.refresh(connection)
+        health = IntegrationHealthService(self.db)
+        health.record_recovery_attempt(
+            tenant_id=connection.organization_id,
+            integration="google_business_profile",
+            module="gbp",
+            action="refresh_access_token",
+            status="succeeded",
+            message="Expired Google access token refreshed successfully.",
+            safe_details={"connection_id": str(connection.id)},
+        )
+        health.mark_integration_recovered(
+            tenant_id=connection.organization_id,
+            integration="google_business_profile",
+            module="gbp",
+            message="Google Business Profile token refresh succeeded",
+            safe_details={"connection_id": str(connection.id), "expires_at": connection.access_token_expires_at.isoformat() if connection.access_token_expires_at else None},
+        )
         return access_token
 
     def disconnect(self, organization_id: uuid.UUID) -> GbpConnection | None:
@@ -164,6 +235,7 @@ class GbpConnectionService:
         self.db.add(connection)
         self.db.commit()
         self.db.refresh(connection)
+        self._require_reconnect(connection, CLIENT_GBP_RECONNECT_MESSAGE, category="auth_revoked")
         return connection
 
     def _mark_expired(self, connection: GbpConnection) -> None:
@@ -171,6 +243,23 @@ class GbpConnectionService:
         self.db.add(connection)
         self.db.commit()
         self.db.refresh(connection)
+
+    def _require_reconnect(self, connection: GbpConnection, message: str, *, category: str) -> None:
+        health = IntegrationHealthService(self.db)
+        health.create_client_reconnect_prompt(tenant_id=connection.organization_id, reason=CLIENT_GBP_RECONNECT_MESSAGE)
+        health.pause_tenant_module_automation(tenant_id=connection.organization_id, module="gbp", reason=CLIENT_GBP_RECONNECT_MESSAGE)
+        health.record_health(
+            tenant_id=connection.organization_id,
+            integration="google_business_profile",
+            module="gbp",
+            status="needs_reauth",
+            severity="critical",
+            category=category,
+            message=message,
+            safe_details={"connection_id": str(connection.id)},
+            is_user_action_required=True,
+            user_action_type="google_reconnect",
+        )
 
 
 class GbpLocationSyncService:

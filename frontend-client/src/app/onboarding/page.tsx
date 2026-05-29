@@ -14,7 +14,7 @@ const toneSentenceSamples: Record<string, string> = {
   Bold: "Stop settling for weak airflow - our technicians fix root causes fast and keep your home comfortable.",
   Concise: "Fast HVAC repair, clear pricing, and reliable results.",
 };
-const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000").trim().replace(/\/+$/, "");
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api").trim().replace(/\/+$/, "");
 const ONBOARDING_DRAFT_KEY = "onboarding:draft:v1";
 const ONBOARDING_ORG_ID_KEY = "onboarding:orgId:v1";
 const ONBOARDING_GOOGLE_CONNECTED_KEY = "onboarding:googleConnected:v1";
@@ -2386,7 +2386,7 @@ function OnboardingContent() {
                   </span>
                   <input
                     className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2"
-                    placeholder="Acme HVAC"
+                    placeholder="Demo Business"
                     value={orgInfo.name}
                     onChange={(event) => setOrgInfo((prev) => ({ ...prev, name: event.target.value }))}
                   />

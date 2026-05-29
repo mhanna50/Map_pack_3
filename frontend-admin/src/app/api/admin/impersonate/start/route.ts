@@ -15,6 +15,14 @@ function normalizeClientPath(value: unknown) {
   return path;
 }
 
+function withImpersonationTenant(path: string, tenantId: string) {
+  const [pathname, search = ""] = path.split("?");
+  const params = new URLSearchParams(search);
+  params.set("impersonate_tenant", tenantId);
+  const query = params.toString();
+  return query ? `${pathname}?${query}` : pathname;
+}
+
 export async function POST(request: NextRequest) {
   try {
     if (!impersonationEnabled) {
@@ -27,7 +35,7 @@ export async function POST(request: NextRequest) {
     if (!uuidPattern.test(String(tenantId ?? ""))) {
       return NextResponse.json({ error: "Valid tenantId is required" }, { status: 400 });
     }
-    const safeTargetPath = normalizeClientPath(targetPath);
+    const safeTargetPath = withImpersonationTenant(normalizeClientPath(targetPath), tenantId);
     await recordAdminImpersonationAudit({
       adminUserId: admin.id,
       tenantId,

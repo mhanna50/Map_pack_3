@@ -4,7 +4,8 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getAccessToken } from "@/lib/supabase/session";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api").replace(/\/+$/, "");
+const GOOGLE_RECONNECT_RETURN_KEY = "dashboard:googleReconnectReturnTo";
 
 export default function GoogleCallbackPage() {
   return (
@@ -48,7 +49,14 @@ function GoogleCallbackContent() {
         }
         await response.json();
         setStatus("Connected! Redirecting you back…");
-        setTimeout(() => router.push("/onboarding?oauth=google_connected"), 1200);
+        const returnTo = window.sessionStorage.getItem(GOOGLE_RECONNECT_RETURN_KEY);
+        if (returnTo) {
+          window.sessionStorage.removeItem(GOOGLE_RECONNECT_RETURN_KEY);
+        }
+        const nextPath = returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//")
+          ? returnTo
+          : "/onboarding?oauth=google_connected";
+        setTimeout(() => router.push(nextPath), 1200);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unable to complete Google connection");
       }

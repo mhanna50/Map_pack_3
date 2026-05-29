@@ -22,6 +22,20 @@ type TenantContextValue = {
 
 const TenantContext = createContext<TenantContextValue | undefined>(undefined);
 const STORAGE_KEY = "dashboard:selectedLocationId";
+const IMPERSONATION_STORAGE_KEY = "dashboard:impersonationTenantId";
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function readImpersonationTenantId() {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
+  const requested = params.get("impersonate_tenant");
+  if (requested && uuidPattern.test(requested)) {
+    window.sessionStorage.setItem(IMPERSONATION_STORAGE_KEY, requested);
+    return requested;
+  }
+  const stored = window.sessionStorage.getItem(IMPERSONATION_STORAGE_KEY);
+  return stored && uuidPattern.test(stored) ? stored : null;
+}
 
 export function TenantProvider({ children }: { children: React.ReactNode }) {
   const supabase = useMemo(() => createClient(), []);
@@ -73,6 +87,46 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
         setTenantId(null);
         setLoading(false);
         return;
+      }
+
+      const requestedImpersonationTenantId = readImpersonationTenantId();
+      if (requestedImpersonationTenantId) {
+        const { data: routeData } = await supabase.rpc("resolve_post_login_destination");
+        const route = Array.isArray(routeData) ? routeData[0] : routeData;
+        const isOwnerAdmin =
+          route && typeof route === "object" && String((route as { role?: unknown }).role ?? "").toLowerCase() === "owner_admin";
+        if (isOwnerAdmin) {
+          const { data: tenantData, error: tenantError } = await supabase
+            .from("tenants")
+            .select()
+            .eq("tenant_id", requestedImpersonationTenantId)
+            .maybeSingle();
+          if (tenantError) throw tenantError;
+          setProfile({ user_id: userId, tenant_id: requestedImpersonationTenantId, role: "owner_admin" });
+          setTenantId(requestedImpersonationTenantId);
+          setTenant(tenantData ?? undefined);
+          const { data: locationsData, error: locationError } = await supabase
+            .from("locations")
+            .select()
+            .eq("tenant_id", requestedImpersonationTenantId)
+            .order("name", { ascending: true });
+          if (locationError) throw locationError;
+          setLocations(locationsData ?? []);
+          if (locationsData && locationsData.length > 0) {
+            const hasSelected = locationsData.some((loc) => loc.id === selectedLocationId);
+            if (!hasSelected) {
+              const firstId = locationsData[0].id;
+              setSelectedLocationId(firstId);
+              persistLocation(firstId);
+            }
+          } else {
+            setSelectedLocationId(null);
+            persistLocation(null);
+          }
+          setLoading(false);
+          return;
+        }
+        window.sessionStorage.removeItem(IMPERSONATION_STORAGE_KEY);
       }
 
       const { data: profileData, error: profileError } = await supabase.from("profiles").select().eq("user_id", userId).maybeSingle();

@@ -9,7 +9,9 @@ class OnboardingTokenSigner:
     """Generates signed onboarding tokens embedded in invite links."""
 
     def __init__(self) -> None:
-        secret = settings.ENCRYPTION_KEY or "temporary-key"
+        secret = settings.ENCRYPTION_KEY
+        if not secret:
+            raise ValueError("ENCRYPTION_KEY is required for onboarding token signing.")
         self._serializer = URLSafeSerializer(secret, salt="onboarding-link")
 
     def create_token(self, *, org_id: str, email: str, org_name: str | None = None) -> str:

@@ -47,7 +47,7 @@ type MockConfig = {
 
 const defaultClaim = (): Record<string, unknown> => ({
   tenant_id: "tenant_1",
-  business_name: "Acme HVAC",
+  business_name: "Demo Business",
   first_name: "",
   last_name: "",
   status: "in_progress",
@@ -96,7 +96,7 @@ const makeFetchMock = (configOverrides?: Partial<MockConfig>) => {
           Promise.resolve([
             {
               id: "acc_1",
-              display_name: "Acme GBP",
+              display_name: "Demo GBP",
               external_account_id: "accounts/12345",
             },
           ]),
@@ -117,10 +117,10 @@ const makeFetchMock = (configOverrides?: Partial<MockConfig>) => {
           Promise.resolve([
             {
               name: "accounts/12345/locations/abc",
-              title: "Acme HVAC - Austin",
+              title: "Demo Business - Austin",
               store_code: "AUS-01",
               metadata: {
-                title: "Acme HVAC",
+                title: "Demo Business",
                 websiteUri: "https://acmehvac.example",
                 storefrontAddress: {
                   locality: "Austin",
@@ -134,10 +134,10 @@ const makeFetchMock = (configOverrides?: Partial<MockConfig>) => {
             },
             {
               name: "accounts/12345/locations/xyz",
-              title: "Acme HVAC - Round Rock",
+              title: "Demo Business - Round Rock",
               store_code: "RR-02",
               metadata: {
-                title: "Acme HVAC",
+                title: "Demo Business",
               },
             },
           ]),
@@ -255,7 +255,7 @@ describe("Onboarding flow", () => {
         status: "business_setup",
         onboarding_draft: {
           orgInfo: {
-            name: "Acme HVAC",
+            name: "Demo Business",
             phone: "",
             addressOrServiceArea: "",
             contactName: "",
@@ -323,7 +323,7 @@ describe("Onboarding flow", () => {
         status: "business_setup",
         onboarding_draft: {
           orgInfo: {
-            name: "Acme HVAC",
+            name: "Demo Business",
             phone: "(555) 123-4567",
             addressOrServiceArea: "Austin metro",
             contactName: "Alex Reyes",
@@ -389,7 +389,7 @@ describe("Onboarding flow", () => {
         status: "google_pending",
         onboarding_draft: {
           orgInfo: {
-            name: "Acme HVAC",
+            name: "Demo Business",
             firstName: "Alex",
             lastName: "Reyes",
             phone: "(555) 123-4567",
@@ -458,7 +458,7 @@ describe("Onboarding flow", () => {
           status: scenario.status,
           onboarding_draft: {
             orgInfo: {
-              name: "Acme HVAC",
+              name: "Demo Business",
               phone: "(555) 123-4567",
               addressOrServiceArea: "Austin metro",
               contactName: "Alex Reyes",

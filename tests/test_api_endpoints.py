@@ -73,6 +73,56 @@ def test_non_staff_can_create_org_and_is_owner(api_client, db_session):
     assert loc_response.status_code == 201
 
 
+def test_client_can_create_and_list_own_support_tickets(api_client, db_session):
+    org = Organization(name="Support Org", org_type=OrganizationType.BUSINESS)
+    user = User(email="support-client@example.com", is_staff=False)
+    db_session.add_all([org, user])
+    db_session.flush()
+    db_session.add(Membership(user_id=user.id, organization_id=org.id, role=MembershipRole.OWNER))
+    db_session.commit()
+
+    create_response = api_client.post(
+        "/api/support/tickets",
+        params={"user_id": str(user.id)},
+        json={
+            "organization_id": str(org.id),
+            "subject": "Need help with reviews",
+            "description": "The review request screen is not updating.",
+        },
+    )
+    assert create_response.status_code == 201
+    ticket = create_response.json()
+    assert ticket["tenant_id"] == str(org.id)
+    assert ticket["status"] == "open"
+
+    list_response = api_client.get(
+        f"/api/support/tickets?organization_id={org.id}&user_id={user.id}",
+    )
+    assert list_response.status_code == 200
+    assert [row["id"] for row in list_response.json()] == [ticket["id"]]
+
+
+def test_client_cannot_create_support_ticket_for_other_tenant(api_client, db_session):
+    org_a = Organization(name="Support Org A", org_type=OrganizationType.BUSINESS)
+    org_b = Organization(name="Support Org B", org_type=OrganizationType.BUSINESS)
+    user = User(email="support-client-b@example.com", is_staff=False)
+    db_session.add_all([org_a, org_b, user])
+    db_session.flush()
+    db_session.add(Membership(user_id=user.id, organization_id=org_a.id, role=MembershipRole.OWNER))
+    db_session.commit()
+
+    response = api_client.post(
+        "/api/support/tickets",
+        params={"user_id": str(user.id)},
+        json={
+            "organization_id": str(org_b.id),
+            "subject": "Wrong tenant",
+            "description": "Should not be allowed.",
+        },
+    )
+    assert response.status_code == 403
+
+
 def test_action_schedule_and_list(api_client, db_session):
     org = Organization(name="Scheduler Org", org_type=OrganizationType.AGENCY)
     db_session.add(org)

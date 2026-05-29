@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTenant } from "@/features/tenants/tenant-context";
 import { listContentAssets } from "@/lib/db";
+import { fetchBackendJson } from "@/lib/backend-api";
 import { format } from "@/lib/date-utils";
 
 type ContentAsset = {
@@ -20,10 +21,16 @@ type ContentAsset = {
 };
 
 export default function ContentPage() {
-  const { tenantId, selectedLocationId, refresh: refreshTenant } = useTenant();
+  const { tenantId, selectedLocationId, refresh: refreshTenant, supabase } = useTenant();
   const [assets, setAssets] = useState<ContentAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [working, setWorking] = useState(false);
+  const [services, setServices] = useState("");
+  const [highlights, setHighlights] = useState("");
+  const [seasonalNotes, setSeasonalNotes] = useState("");
+  const [qnaSeeds, setQnaSeeds] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
 
   const handleRefresh = async () => {
@@ -58,6 +65,63 @@ export default function ContentPage() {
     };
   }, [tenantId, selectedLocationId, refreshKey]);
 
+  const requestPhotos = async () => {
+    if (!tenantId || !selectedLocationId) {
+      setError("Select a location before requesting photos.");
+      return;
+    }
+    setWorking(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await fetchBackendJson<{ created: boolean }>(
+        "/media/requests",
+        {
+          method: "POST",
+          body: JSON.stringify({ organization_id: tenantId, location_id: selectedLocationId, days_without_upload: 0 }),
+        },
+        supabase,
+      );
+      setMessage(result.created ? "Photo request created." : "A photo request is already active for this location.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to request photos");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const saveBusinessInfo = async () => {
+    if (!selectedLocationId) {
+      setError("Select a location before saving business info.");
+      return;
+    }
+    setWorking(true);
+    setError(null);
+    setMessage(null);
+    try {
+      await fetchBackendJson(
+        `/orgs/locations/${selectedLocationId}/settings`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            services: services.split(/\n|,/).map((item) => item.trim()).filter(Boolean),
+            voice_profile: {
+              highlights,
+              seasonal_notes: seasonalNotes,
+              qna_seeds: qnaSeeds,
+            },
+          }),
+        },
+        supabase,
+      );
+      setMessage("Business info saved.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to save business info");
+    } finally {
+      setWorking(false);
+    }
+  };
+
   return (
     <DashboardShell onRefresh={handleRefresh}>
       <div className="space-y-5">
@@ -78,16 +142,16 @@ export default function ContentPage() {
                 <CardTitle>Upload photos</CardTitle>
                 <CardDescription>Drag and drop — will push to Supabase Storage</CardDescription>
               </div>
-              <Button size="sm">
+              <Button size="sm" onClick={requestPhotos} disabled={working || !selectedLocationId}>
                 <UploadCloud className="mr-2 h-4 w-4" />
-                Upload
+                Request photos
               </Button>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
                 <ImagePlus className="mb-2 h-6 w-6 text-primary" />
-                <p className="font-semibold text-foreground">Drop files or browse</p>
-                <p className="text-xs text-muted-foreground">UI only; wire to Supabase Storage or existing uploader</p>
+                <p className="font-semibold text-foreground">Photo requests and uploaded assets</p>
+                <p className="text-xs text-muted-foreground">Request fresh photos for the selected location, then review uploaded assets here.</p>
               </div>
               <p className="text-xs text-muted-foreground">
                 Prioritize if photo not uploaded in a while — we highlight assets older than 14 days.
@@ -126,22 +190,22 @@ export default function ContentPage() {
             <CardContent className="space-y-3 text-sm">
               <label className="block">
                 <span className="text-muted-foreground">Services list</span>
-                <textarea className="mt-1 w-full rounded-lg border border-border px-3 py-2" rows={3} placeholder="Installation, Maintenance, Emergency repairs" />
+                <textarea className="mt-1 w-full rounded-lg border border-border px-3 py-2" rows={3} placeholder="Installation, Maintenance, Emergency repairs" value={services} onChange={(event) => setServices(event.target.value)} />
               </label>
               <label className="block">
                 <span className="text-muted-foreground">Service highlights</span>
-                <textarea className="mt-1 w-full rounded-lg border border-border px-3 py-2" rows={2} placeholder="Same-day dispatch, 24/7 hotline, financing available" />
+                <textarea className="mt-1 w-full rounded-lg border border-border px-3 py-2" rows={2} placeholder="Same-day dispatch, 24/7 hotline, financing available" value={highlights} onChange={(event) => setHighlights(event.target.value)} />
               </label>
               <label className="block">
                 <span className="text-muted-foreground">Seasonal notes</span>
-                <textarea className="mt-1 w-full rounded-lg border border-border px-3 py-2" rows={2} placeholder="Winter furnace tune-ups, summer AC prep" />
+                <textarea className="mt-1 w-full rounded-lg border border-border px-3 py-2" rows={2} placeholder="Winter furnace tune-ups, summer AC prep" value={seasonalNotes} onChange={(event) => setSeasonalNotes(event.target.value)} />
               </label>
               <label className="block">
                 <span className="text-muted-foreground">Q&A seeds</span>
-                <textarea className="mt-1 w-full rounded-lg border border-border px-3 py-2" rows={2} placeholder="Do you offer after-hours service? Yes, 24/7." />
+                <textarea className="mt-1 w-full rounded-lg border border-border px-3 py-2" rows={2} placeholder="Do you offer after-hours service? Yes, 24/7." value={qnaSeeds} onChange={(event) => setQnaSeeds(event.target.value)} />
               </label>
-              <Button className="w-full" variant="primary">
-                Save info (UI only)
+              <Button className="w-full" variant="primary" onClick={saveBusinessInfo} disabled={working || !selectedLocationId}>
+                {working ? "Saving..." : "Save info"}
               </Button>
             </CardContent>
           </Card>
@@ -156,11 +220,11 @@ export default function ContentPage() {
             </div>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
-            We prioritize newer photos first. If nothing new was uploaded in the last 14 days, you&apos;ll see a reminder here. Connect this UI to your storage bucket and mark assets as
-            &quot;last_used_at&quot; when attached to a post.
+            We prioritize newer photos first. If nothing new was uploaded in the last 14 days, you&apos;ll see a reminder here.
           </CardContent>
         </Card>
 
+        {message && <p className="text-sm text-emerald-700">{message}</p>}
         {error && <p className="text-sm text-rose-600">Error: {error}</p>}
       </div>
     </DashboardShell>

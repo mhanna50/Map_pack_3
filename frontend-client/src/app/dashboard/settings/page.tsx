@@ -39,6 +39,13 @@ export default function SettingsPage() {
   const [cancelOpen, setCancelOpen] = useState(false);
 
   useEffect(() => {
+    const requestedTab = new URLSearchParams(window.location.search).get("tab");
+    if (requestedTab && tabItems.some((item) => item.value === requestedTab)) {
+      setTab(requestedTab);
+    }
+  }, []);
+
+  useEffect(() => {
     if (!tenantId) return;
     let active = true;
     const load = async () => {

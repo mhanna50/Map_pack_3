@@ -13,6 +13,7 @@ from backend.app.models.enums import ActionStatus, ActionType
 from backend.app.models.identity.organization import Organization
 from backend.app.services.google_business.gbp_connections import GbpConnectionService
 from backend.app.services.automation.actions import ActionExecutor, ActionService
+from backend.app.services.integrations.health import IntegrationHealthCheckRunner
 from backend.app.services.rank_tracking.keyword_strategy import KeywordCampaignSchedulerService
 from backend.app.services.google_business.listing_optimization import ListingOptimizationService
 
@@ -130,6 +131,18 @@ def _connection_health() -> Dict[str, int]:
         db.close()
 
 
+def _integration_health_check() -> Dict[str, Any]:
+    db = SessionLocal()
+    try:
+        runner = IntegrationHealthCheckRunner(db)
+        return {
+            "platform": runner.run_platform_health_check(),
+            "tenants": runner.run_all_tenant_health_checks(limit=250),
+        }
+    finally:
+        db.close()
+
+
 def _schedule_keyword_campaigns_monthly() -> Dict[str, int]:
     db = SessionLocal()
     try:
@@ -186,6 +199,9 @@ plan_content = cast(
 )
 connection_health = cast(
     Task, celery_app.task(name="actions.connection_health")(_connection_health)
+)
+integration_health_check = cast(
+    Task, celery_app.task(name="integrations.health_check")(_integration_health_check)
 )
 schedule_keyword_campaigns_monthly = cast(
     Task,

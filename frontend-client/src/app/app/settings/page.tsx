@@ -47,7 +47,7 @@ export default function SettingsPage() {
             <li>Tone: Friendly & confident</li>
             <li>Do say: local, fast, trusted</li>
             <li>Don’t say: cheapest, discount</li>
-            <li>Signature: “- The Acme HVAC team”</li>
+            <li>Signature: “- The Demo Business team”</li>
           </ul>
         </div>
       </section>

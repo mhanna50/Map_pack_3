@@ -26,10 +26,17 @@ type FilterBarProps = {
   modules?: Array<{ id: string; label: string }>;
   showModule?: boolean;
   showStatus?: boolean;
+  searchPlaceholder?: string;
+  showReset?: boolean;
 };
 
-export function AdminFilterBar({ filters, onChange, clients = [], modules = [], showModule, showStatus }: FilterBarProps) {
+export function AdminFilterBar({ filters, onChange, clients = [], modules = [], showModule, showStatus, searchPlaceholder = "Business, email, tenant id, location", showReset }: FilterBarProps) {
   const [query, setQuery] = useState(filters.q ?? "");
+  const resetFilters = () => {
+    setQuery("");
+    onChange({ range: filters.range ?? "30d" });
+  };
+
   return (
     <Card>
       <CardContent className="grid gap-3 p-4 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-end">
@@ -93,7 +100,7 @@ export function AdminFilterBar({ filters, onChange, clients = [], modules = [], 
             <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               className="pl-9"
-              placeholder="Business, email, tenant id, location"
+              placeholder={searchPlaceholder}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => {
@@ -103,22 +110,37 @@ export function AdminFilterBar({ filters, onChange, clients = [], modules = [], 
           </div>
         </label>
         <Button variant="outline" className="w-full lg:w-auto" onClick={() => onChange({ ...filters, q: query || undefined })}>Apply</Button>
+        {showReset && <Button variant="ghost" className="w-full lg:w-auto" onClick={resetFilters}>Clear</Button>}
       </CardContent>
     </Card>
   );
 }
 
-export function AdminStatCard({ label, value, description, tone = "default" }: { label: string; value: unknown; description?: string; tone?: "default" | "success" | "warning" | "danger" }) {
+export function AdminStatCard({
+  label,
+  value,
+  description,
+  tone = "default",
+  density = "default",
+}: {
+  label: string;
+  value: unknown;
+  description?: string;
+  tone?: "default" | "success" | "warning" | "danger";
+  density?: "default" | "compact";
+}) {
+  const toneClass = tone === "success" ? "border-emerald-200" : tone === "warning" ? "border-amber-200" : tone === "danger" ? "border-red-200" : "";
+  const compact = density === "compact";
+
   return (
-    <Card>
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-3">
+    <Card className={`h-full ${toneClass}`}>
+      <CardContent className={`flex items-center px-5 ${compact ? "min-h-16 py-3 sm:py-3" : "min-h-24 py-4 sm:py-4"}`}>
+        <div className="flex w-full items-center justify-between gap-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
-            <p className="mt-2 text-2xl font-semibold">{String(value ?? "0")}</p>
+            <p className={`${compact ? "mt-1 text-xl" : "mt-2 text-2xl"} font-semibold`}>{String(value ?? "0")}</p>
             {description && <p className="mt-1 text-xs text-muted-foreground">{description}</p>}
           </div>
-          <Badge variant={tone === "default" ? "muted" : tone}>{tone}</Badge>
         </div>
       </CardContent>
     </Card>

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Home, Image, Settings, Star, Gauge, LifeBuoy, PhoneCall } from "lucide-react";
 
@@ -58,9 +58,9 @@ export function Sidebar() {
         <div className="h-2 w-full overflow-hidden rounded-full bg-border">
           <div className="h-full w-2/3 rounded-full bg-primary" />
         </div>
-        <Button variant="outline" size="sm" className="w-full">
+        <Link href="/dashboard/settings?tab=billing" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-full")}>
           Open billing
-        </Button>
+        </Link>
       </div>
     </aside>
   );

@@ -1,4 +1,4 @@
-type FetchOptions = { method?: "GET" | "POST" | "PATCH"; body?: unknown; searchParams?: Record<string, string | number | undefined> };
+type FetchOptions = { method?: "GET" | "POST" | "PATCH" | "DELETE"; body?: unknown; searchParams?: Record<string, string | number | undefined> };
 type MonitoringParams = {
   tenant_id?: string;
   tenant_ids?: string;
@@ -58,6 +58,7 @@ export const adminApi = {
   tenants: (params?: { page?: number; pageSize?: number; status?: string; q?: string }) =>
     apiFetch<{ rows: unknown[]; total: number }>("/api/admin/tenants", { searchParams: params }),
   tenant: (id: string) => apiFetch<unknown>(`/api/admin/tenants/${id}`),
+  deleteTenant: (id: string) => apiFetch<{ terminated: boolean; tenant_id: string; stripe?: { canceled?: number }; auth?: { deletedUsers?: number } }>(`/api/admin/tenants/${id}`, { method: "DELETE" }),
   setTenantAutomationPaused: (id: string, paused: boolean) =>
     apiFetch<{ tenant_id: string; paused: boolean }>(`/api/admin/tenants/${id}`, { method: "PATCH", body: { paused } }),
   invite: (payload: unknown) => apiFetch<{ link: string | null; emailed: boolean }>("/api/admin/onboarding/invite", { method: "POST", body: payload }),
@@ -79,11 +80,13 @@ export const adminApi = {
   impersonateDeepLink: (tenantId: string, targetPath: string, module?: string) =>
     apiFetch<{ started: boolean; targetPath: string }>("/api/admin/impersonate/deep-link", { method: "POST", body: { tenantId, targetPath, module } }),
   audit: (params?: { page?: number; pageSize?: number }) => apiFetch<{ rows: unknown[]; total: number }>("/api/admin/audit", { searchParams: params }),
-  billing: () => apiFetch<{ rows: unknown[] }>("/api/admin/billing"),
+  billing: () => apiFetch<Record<string, unknown>>("/api/admin/billing"),
+  billingAction: (payload: unknown) => apiFetch<Record<string, unknown>>("/api/admin/billing", { method: "POST", body: payload }),
   gbp: () => apiFetch<{ rows: unknown[] }>("/api/admin/gbp"),
   usage: (params?: { from?: string; to?: string; plan?: string }) =>
     apiFetch<{ aggregates: Record<string, unknown>; rankings: unknown[] }>("/api/admin/usage", { searchParams: params }),
   support: (params?: { status?: string }) => apiFetch<{ rows: unknown[] }>("/api/admin/support", { searchParams: params }),
+  roles: () => apiFetch<Record<string, unknown>>("/api/admin/roles"),
   monitoringOverview: (params?: MonitoringParams) =>
     apiFetch<Record<string, unknown>>("/api/admin/monitoring/overview", { searchParams: params }),
   monitoringClients: (params?: MonitoringParams) =>
@@ -100,4 +103,8 @@ export const adminApi = {
     apiFetch<Record<string, unknown>>(`/api/admin/monitoring/modules/lead-recovery/leads/${leadId}`),
   addClientNote: (tenantId: string, note: string, pinned?: boolean) =>
     apiFetch<{ note: unknown }>(`/api/admin/monitoring/clients/${tenantId}/notes`, { method: "POST", body: { note, pinned } }),
+  integrationHealth: (params?: MonitoringParams) =>
+    apiFetch<Record<string, unknown>>("/api/admin/health", { searchParams: params }),
+  integrationIncident: (incidentId: string) =>
+    apiFetch<Record<string, unknown>>(`/api/admin/health/incidents/${incidentId}`),
 };

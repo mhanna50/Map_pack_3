@@ -26,6 +26,6 @@ export const TH = ({ children, className }: { children: React.ReactNode; classNa
   <th className={cn("whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide", className)}>{children}</th>
 );
 
-export const TD = ({ children, className }: { children: React.ReactNode; className?: string }) => (
-  <td className={cn("whitespace-nowrap px-4 py-3 align-middle text-sm", className)}>{children}</td>
+export const TD = ({ children, className, ...props }: React.TdHTMLAttributes<HTMLTableCellElement>) => (
+  <td className={cn("whitespace-nowrap px-4 py-3 align-middle text-sm", className)} {...props}>{children}</td>
 );

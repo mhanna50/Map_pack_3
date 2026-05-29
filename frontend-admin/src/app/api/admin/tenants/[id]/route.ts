@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchTenantDetail, requireAdminUser, setTenantAutomationPaused } from "@/features/admin/adminDb";
+import { fetchTenantDetail, requireAdminUser, setTenantAutomationPaused, terminateTenantAccount } from "@/features/admin/adminDb";
 
 export async function GET(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
@@ -26,6 +26,17 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     return NextResponse.json(data);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "failed to update tenant automation state";
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
+}
+
+export async function DELETE(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  try {
+    const admin = await requireAdminUser();
+    const { id } = await context.params;
+    return NextResponse.json(await terminateTenantAccount(id, { currentAdminId: admin.id }));
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "failed to terminate tenant";
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

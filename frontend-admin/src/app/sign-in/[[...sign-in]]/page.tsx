@@ -7,6 +7,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 const INVALID_ROLE_MESSAGE = "Invalid role. This account does not have admin access.";
+const SESSION_REASON_MESSAGES: Record<string, string> = {
+  inactive: "You were signed out after a period of inactivity.",
+  expired: "Your admin session expired. Sign in again to continue.",
+  signed_out: "Sign in to continue.",
+};
 const safeLocalRedirect = (value: string | null | undefined): string =>
   value && value.startsWith("/") && !value.startsWith("//") ? value : "/";
 
@@ -18,6 +23,19 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const hasInvalidRole = searchParams?.get("error") === "invalid_role";
+  const reason = searchParams?.get("reason");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const hasAuthCallback =
+      params.has("code") ||
+      params.has("token_hash") ||
+      window.location.hash.includes("access_token");
+    if (hasAuthCallback) {
+      window.location.replace(`/initialize-account${window.location.search}${window.location.hash}`);
+    }
+  }, []);
 
   useEffect(() => {
     if (!hasInvalidRole) return;
@@ -25,6 +43,11 @@ export default function Page() {
     const supabase = createClient();
     void supabase.auth.signOut();
   }, [hasInvalidRole]);
+
+  useEffect(() => {
+    if (!reason || hasInvalidRole) return;
+    setError(SESSION_REASON_MESSAGES[reason] ?? SESSION_REASON_MESSAGES.signed_out);
+  }, [hasInvalidRole, reason]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

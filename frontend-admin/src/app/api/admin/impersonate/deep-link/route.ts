@@ -15,6 +15,14 @@ function normalizeClientPath(value: unknown) {
   return path;
 }
 
+function withImpersonationTenant(path: string, tenantId: string) {
+  const [pathname, search = ""] = path.split("?");
+  const params = new URLSearchParams(search);
+  params.set("impersonate_tenant", tenantId);
+  const query = params.toString();
+  return query ? `${pathname}?${query}` : pathname;
+}
+
 export async function POST(request: NextRequest) {
   try {
     if (!impersonationEnabled) {
@@ -25,13 +33,14 @@ export async function POST(request: NextRequest) {
     const tenantId = String(body?.tenantId ?? "");
     const targetPath = normalizeClientPath(body?.targetPath);
     if (!uuidPattern.test(tenantId)) return NextResponse.json({ error: "Valid tenantId is required" }, { status: 400 });
+    const impersonationPath = withImpersonationTenant(targetPath, tenantId);
     await recordAdminImpersonationAudit({
       adminUserId: admin.id,
       tenantId,
       action: "deep_link",
-      metadata: { targetPath, module: typeof body?.module === "string" ? body.module.slice(0, 80) : null },
+      metadata: { targetPath: impersonationPath, module: typeof body?.module === "string" ? body.module.slice(0, 80) : null },
     });
-    return NextResponse.json({ started: true, tenantId, targetPath });
+    return NextResponse.json({ started: true, tenantId, targetPath: impersonationPath });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "failed to create impersonation deep link";
     return NextResponse.json({ error: message }, { status: 400 });

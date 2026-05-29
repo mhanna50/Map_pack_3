@@ -16,6 +16,7 @@ from backend.app.db.session import get_db
 from backend.app.features.lead_recovery.service import LeadRecoveryService
 from backend.app.models.lead_recovery import Lead, LeadMessage, LeadNote, LeadRecoverySettings
 from backend.app.services.auth.access import AccessDeniedError, AccessService
+from backend.app.services.integrations.health import IntegrationHealthService
 
 try:
     from twilio.request_validator import RequestValidator
@@ -291,7 +292,7 @@ def mark_completed(lead_id: uuid.UUID, organization_id: uuid.UUID | None = Query
 
 @twilio_router.post("/voice")
 async def twilio_voice(request: Request, db: Session = Depends(get_db)) -> Response:
-    form = await _validated_twilio_form(request)
+    form = await _validated_twilio_form(request, db)
     lead, result = LeadRecoveryService(db).handle_missed_call(
         called_number=_first(form, "To", "Called"),
         caller_number=_first(form, "From", "Caller"),
@@ -306,7 +307,7 @@ async def twilio_voice(request: Request, db: Session = Depends(get_db)) -> Respo
 
 @twilio_router.post("/sms/inbound")
 async def twilio_sms_inbound(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
-    form = await _validated_twilio_form(request)
+    form = await _validated_twilio_form(request, db)
     lead, result, response = LeadRecoveryService(db).handle_inbound_sms(
         to_number=_first(form, "To"),
         from_number=_first(form, "From"),
@@ -318,7 +319,7 @@ async def twilio_sms_inbound(request: Request, db: Session = Depends(get_db)) ->
 
 @twilio_router.post("/sms/status")
 async def twilio_sms_status(request: Request, db: Session = Depends(get_db)) -> dict[str, str]:
-    await _validated_twilio_form(request)
+    await _validated_twilio_form(request, db)
     return {"status": "received"}
 
 
@@ -392,7 +393,7 @@ def _suggested_next_action(lead: Lead) -> str:
     return "Review the conversation and update the status."
 
 
-async def _validated_twilio_form(request: Request) -> dict[str, str]:
+async def _validated_twilio_form(request: Request, db: Session) -> dict[str, str]:
     raw_body = await request.body()
     form = {key: values[-1] for key, values in parse_qs(raw_body.decode(), keep_blank_values=True).items()}
     token = settings.TWILIO_AUTH_TOKEN
@@ -400,13 +401,49 @@ async def _validated_twilio_form(request: Request) -> dict[str, str]:
     if not token:
         if settings.ALLOW_UNSIGNED_TWILIO_WEBHOOKS:
             return form
+        IntegrationHealthService(db).record_failure(
+            tenant_id=None,
+            integration="twilio",
+            module="lead_recovery_webhooks",
+            operation="validate_twilio_webhook_signature",
+            error=RuntimeError("Twilio webhook signing is not configured"),
+            title="Twilio webhook signing is not configured",
+            message="Twilio webhook signing is not configured. Set TWILIO_AUTH_TOKEN or disable the module in non-production only.",
+            safe_details={"path": request.url.path},
+            force_category="secret_missing",
+            force_severity="critical",
+        )
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Twilio webhook signing is not configured")
     if RequestValidator is not None:
         validator = RequestValidator(token)
         url = str(request.url)
         if not signature or not validator.validate(url, form, signature):
+            IntegrationHealthService(db).record_failure(
+                tenant_id=None,
+                integration="twilio",
+                module="lead_recovery_webhooks",
+                operation="validate_twilio_webhook_signature",
+                error=RuntimeError("Twilio webhook signature invalid"),
+                title="Twilio webhook signature invalid",
+                message="Twilio webhook signature invalid. Check TWILIO_AUTH_TOKEN and webhook URL configuration.",
+                safe_details={"path": request.url.path, "has_signature": bool(signature), "form_keys": sorted(form.keys())},
+                force_category="webhook_signature_invalid",
+                force_severity="critical",
+            )
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid Twilio signature")
     else:
+        IntegrationHealthService(db).record_failure(
+            tenant_id=None,
+            integration="twilio",
+            module="lead_recovery_webhooks",
+            operation="validate_twilio_webhook_signature",
+            error=RuntimeError("Twilio validator unavailable"),
+            title="Twilio webhook validator unavailable",
+            message="Twilio webhook validator dependency is unavailable.",
+            safe_details={"path": request.url.path},
+            force_category="secret_invalid",
+            force_severity="critical",
+        )
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Twilio validator unavailable")
     return form
 

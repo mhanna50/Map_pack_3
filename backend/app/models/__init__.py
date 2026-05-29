@@ -29,6 +29,7 @@ from .identity.invite import OrganizationInvite
 from .identity.membership import Membership
 from .identity.organization import Organization
 from .identity.user import User
+from .integrations.integration_health import ClientReconnectPrompt, IntegrationHealthCheck, IntegrationIncident, IntegrationRecoveryAttempt
 from .lead_recovery import Lead, LeadEvent, LeadMessage, LeadNote, LeadRecoverySettings
 from .media.client_upload import ClientUpload
 from .media.media_album import MediaAlbum
@@ -69,6 +70,7 @@ from .reviews.contact import Contact
 from .reviews.review import Review
 from .reviews.review_reply import ReviewReply
 from .reviews.review_request import ReviewRequest
+from .support.ticket import SupportTicket
 
 __all__ = [
     "Action",
@@ -76,6 +78,7 @@ __all__ = [
     "Alert",
     "BillingSubscription",
     "StripeWebhookEvent",
+    "SupportTicket",
     "ConnectedAccount",
     "Location",
     "LocationSettings",
@@ -118,6 +121,10 @@ __all__ = [
     "DashboardSnapshot",
     "OrganizationInvite",
     "GbpConnection",
+    "IntegrationHealthCheck",
+    "IntegrationIncident",
+    "IntegrationRecoveryAttempt",
+    "ClientReconnectPrompt",
     "OrgAutomationSettings",
     "LocationAutomationSettings",
     "ImpersonationSession",

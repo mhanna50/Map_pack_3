@@ -11,6 +11,7 @@ from backend.app.core.config import settings
 from backend.app.models.enums import OrganizationType
 from backend.app.models.google_business.gbp_connection import GbpConnection
 from backend.app.models.identity.organization import Organization
+from backend.app.services.integrations.health import IntegrationHealthService
 from backend.app.services.google_business.google import GoogleBusinessClient, GoogleOAuthService
 from pydantic import AnyHttpUrl
 
@@ -84,12 +85,10 @@ def test_google_oauth_start_and_callback(api_client, db_session, monkeypatch):
     assert "access-token" not in callback_response.text
     assert "refresh-token" not in callback_response.text
     account_id = callback_data["connected_accounts"][0]["id"]
-    assert (
-        db_session.query(GbpConnection)
-        .filter(GbpConnection.organization_id == org.id)
-        .one_or_none()
-        is None
-    )
+    reconnected = db_session.query(GbpConnection).filter(GbpConnection.organization_id == org.id).one()
+    assert reconnected.account_resource_name == "accounts/123"
+    assert reconnected.encrypted_access_token is not None
+    assert reconnected.encrypted_refresh_token is not None
 
     def fake_get_location(self, location_name):
         assert location_name == "accounts/123/locations/456"
@@ -120,6 +119,60 @@ def test_google_oauth_start_and_callback(api_client, db_session, monkeypatch):
     assert connection.encrypted_refresh_token is not None
     assert "access-token" not in connect_response.text
     assert "refresh-token" not in connect_response.text
+
+
+def test_google_oauth_callback_resolves_reconnect_prompt(api_client, db_session, monkeypatch):
+    org = Organization(name="Reconnect Org", org_type=OrganizationType.AGENCY, posting_paused=True)
+    db_session.add(org)
+    db_session.commit()
+    IntegrationHealthService(db_session).create_client_reconnect_prompt(tenant_id=org.id)
+
+    settings.GOOGLE_CLIENT_ID = "client-id.apps.googleusercontent.com"
+    settings.GOOGLE_CLIENT_SECRET = "secret"
+    settings.GOOGLE_OAUTH_REDIRECT_URI = cast(AnyHttpUrl, "https://example.com/callback")
+    settings.CLIENT_APP_URL = cast(AnyHttpUrl, "https://client.example.test")
+
+    start_response = api_client.post(
+        "/api/google/oauth/start",
+        json={
+            "organization_id": str(org.id),
+            "redirect_uri": "https://client.example.test/onboarding/google/callback",
+        },
+    )
+    state = start_response.json()["state"]
+    monkeypatch.setattr(
+        GoogleOAuthService,
+        "exchange_code_for_tokens",
+        lambda self, **kwargs: {
+            "access_token": "new-access-token",
+            "refresh_token": "new-refresh-token",
+            "expires_in": 3600,
+            "scope": "https://www.googleapis.com/auth/business.manage",
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        GoogleBusinessClient,
+        "list_accounts",
+        lambda self: [{"name": "accounts/999", "accountName": "Reconnect Account"}],
+        raising=False,
+    )
+
+    callback_response = api_client.post(
+        "/api/google/oauth/callback",
+        json={
+            "code": "auth-code",
+            "state": state,
+            "redirect_uri": "https://client.example.test/onboarding/google/callback",
+        },
+    )
+
+    assert callback_response.status_code == 200
+    db_session.refresh(org)
+    assert org.posting_paused is False
+    assert IntegrationHealthService(db_session).list_client_prompts(org.id) == []
+    connection = db_session.query(GbpConnection).filter(GbpConnection.organization_id == org.id).one()
+    assert connection.account_resource_name == "accounts/999"
 
 
 def test_google_oauth_start_rejects_unsupported_scope(api_client, db_session):

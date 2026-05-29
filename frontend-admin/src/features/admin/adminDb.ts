@@ -20,7 +20,29 @@ const logOnboardingOps = (event: string, payload: Record<string, unknown>) => {
   console.info(`[onboarding-admin] ${event}`, payload);
 };
 
+const logAdminMonitoringError = (source: string, error: unknown) => {
+  console.error(`[admin-monitoring] ${source} failed`, serializeUnknownError(error));
+};
+
 export type AdminUser = { id: string; email?: string | null; role?: string | null; tenant_id?: string | null };
+type AdminRolesUser = {
+  user_id: string;
+  email: string | null;
+  full_name: string | null;
+  role: string;
+  role_sources: string[];
+  tenants: Array<{
+    tenant_id: string;
+    business_name: string;
+    status: string | null;
+    role: string;
+    is_primary: boolean;
+  }>;
+  default_tenant_id: string | null;
+  created_at: string | null;
+  last_sign_in_at: string | null;
+  is_current_admin: boolean;
+};
 type PostgrestErrorLike = {
   message?: string;
   details?: string | null;
@@ -125,6 +147,24 @@ export async function requireAdminUser(): Promise<AdminUser> {
   } = await supabase.auth.getUser();
   if (error || !user) {
     throw new Error("Not authenticated");
+  }
+
+  const metadataRoles = authMetadataRoles(user as unknown as Record<string, unknown>);
+  if (metadataRoles.some(isAdminLikeRole)) {
+    const role = metadataRoles.includes("owner_admin")
+      ? "owner_admin"
+      : metadataRoles.includes("super_admin") || metadataRoles.includes("superadmin")
+        ? "super_admin"
+        : metadataRoles.includes("staff")
+          ? "staff"
+          : "admin";
+    logAuthRouting("admin_guard.auth_metadata_resolution", {
+      userId: user.id,
+      email: user.email,
+      role,
+      source: "auth_metadata",
+    });
+    return { id: user.id, email: user.email, role, tenant_id: null };
   }
 
   const { data: routeData, error: routeErr } = await supabase.rpc("resolve_post_login_destination");
@@ -239,6 +279,191 @@ function requireService(): SupabaseClient {
     throw new Error("Supabase service key not configured");
   }
   return svc;
+}
+
+async function safeSelectAll(table: string, limit = 10000): Promise<Record<string, unknown>[]> {
+  try {
+    const svc = requireService();
+    const { data, error } = await svc.from(table).select("*").limit(limit);
+    if (error && isSchemaCompatibilityError(error)) return [];
+    if (error) throw error;
+    return (data ?? []) as Record<string, unknown>[];
+  } catch (error) {
+    if (isSchemaCompatibilityError(error)) return [];
+    throw error;
+  }
+}
+
+async function listAuthUsersForRoles(): Promise<Record<string, unknown>[]> {
+  const svc = requireService();
+  const users: Record<string, unknown>[] = [];
+  for (let page = 1; page <= 10; page += 1) {
+    const { data, error } = await svc.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) {
+      logAdminMonitoringError("auth.admin.listUsers", error);
+      break;
+    }
+    const pageUsers = (data?.users ?? []) as unknown as Record<string, unknown>[];
+    users.push(...pageUsers);
+    if (pageUsers.length < 1000) break;
+  }
+  return users;
+}
+
+function stringField(row: Record<string, unknown> | undefined, key: string): string | null {
+  const value = row?.[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function boolField(row: Record<string, unknown> | undefined, key: string): boolean {
+  return row?.[key] === true;
+}
+
+function normalizeRole(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : null;
+}
+
+function authMetadataRoles(row: Record<string, unknown> | undefined) {
+  const metadata = row?.app_metadata;
+  if (!metadata || typeof metadata !== "object") return [];
+  const record = metadata as Record<string, unknown>;
+  const roles = new Set<string>();
+  const singleRole = normalizeRole(record.role ?? record.app_role);
+  if (singleRole) roles.add(singleRole);
+  if (Array.isArray(record.roles)) {
+    record.roles.forEach((role) => {
+      const normalized = normalizeRole(role);
+      if (normalized) roles.add(normalized);
+    });
+  }
+  return [...roles];
+}
+
+function isAdminLikeRole(role: string | null) {
+  return Boolean(role && ["owner_admin", "owner", "admin", "super_admin", "superadmin", "staff"].includes(role));
+}
+
+export async function getAdminRolesOverview(currentAdmin?: AdminUser) {
+  const admin = currentAdmin ?? (await requireAdminUser());
+  const [authUsers, profiles, memberships, tenants, publicUsers] = await Promise.all([
+    listAuthUsersForRoles(),
+    safeSelectAll("profiles"),
+    safeSelectAll("memberships"),
+    safeSelectAll("tenants"),
+    safeSelectAll("users"),
+  ]);
+
+  const profileByUser = new Map(profiles.map((row) => [String(row.user_id), row]));
+  const publicUserById = new Map(publicUsers.map((row) => [String(row.id), row]));
+  const tenantById = new Map(tenants.map((row) => [String(row.tenant_id), row]));
+  const membershipsByUser = new Map<string, Record<string, unknown>[]>();
+  memberships.forEach((membership) => {
+    const userId = String(membership.user_id ?? "");
+    if (!userId) return;
+    const current = membershipsByUser.get(userId) ?? [];
+    current.push(membership);
+    membershipsByUser.set(userId, current);
+  });
+
+  const authUserIds = new Set(authUsers.map((row) => String(row.id ?? "")).filter(Boolean));
+  const orphanedProfileRows = profiles.filter((row) => {
+    const userId = String(row.user_id ?? "");
+    return userId && !authUserIds.has(userId);
+  }).length;
+  const orphanedMembershipRows = memberships.filter((row) => {
+    const userId = String(row.user_id ?? "");
+    return userId && !authUserIds.has(userId);
+  }).length;
+  const orphanedPublicUserRows = publicUsers.filter((row) => {
+    const userId = String(row.id ?? "");
+    return userId && !authUserIds.has(userId);
+  }).length;
+  const userIds = new Set<string>([
+    ...authUserIds,
+    ...(authUserIds.has(admin.id) ? [admin.id] : []),
+  ]);
+
+  const rows: AdminRolesUser[] = [...userIds].map((userId) => {
+    const authUser = authUsers.find((row) => String(row.id ?? "") === userId);
+    const profile = profileByUser.get(userId);
+    const publicUser = publicUserById.get(userId);
+    const userMemberships = membershipsByUser.get(userId) ?? [];
+    const sourceRoles = [
+      ...authMetadataRoles(authUser),
+      normalizeRole(profile?.role),
+      normalizeRole(publicUser?.role),
+      ...userMemberships.map((membership) => normalizeRole(membership.app_role ?? membership.role)),
+      boolField(publicUser, "is_staff") ? "staff" : null,
+      userId === admin.id ? normalizeRole(admin.role ?? "owner_admin") : null,
+    ].filter(Boolean) as string[];
+    const isAdmin = sourceRoles.some(isAdminLikeRole);
+    const primaryRole = isAdmin
+      ? sourceRoles.includes("owner_admin")
+        ? "owner_admin"
+        : sourceRoles.includes("super_admin") || sourceRoles.includes("superadmin")
+          ? "super_admin"
+          : sourceRoles.includes("staff")
+            ? "staff"
+            : "admin"
+      : userMemberships.length
+        ? "client"
+        : "unassigned";
+    const roleSources = [
+      authMetadataRoles(authUser).length ? "auth metadata" : null,
+      profile ? "profile" : null,
+      publicUser ? "public users" : null,
+      userMemberships.length ? "memberships" : null,
+      userId === admin.id ? "current session" : null,
+    ].filter(Boolean) as string[];
+    const tenantRows = userMemberships.map((membership) => {
+      const tenantId = String(membership.tenant_id ?? "");
+      const tenant = tenantById.get(tenantId);
+      return {
+        tenant_id: tenantId,
+        business_name: String(tenant?.business_name ?? tenantId),
+        status: stringField(tenant, "status"),
+        role: normalizeRole(membership.app_role ?? membership.role) ?? "client",
+        is_primary: membership.is_primary === true,
+      };
+    });
+    const defaultTenantId = stringField(profile, "default_tenant_id") ?? stringField(profile, "tenant_id");
+
+    return {
+      user_id: userId,
+      email: stringField(authUser, "email") ?? stringField(profile, "email") ?? stringField(publicUser, "email") ?? (userId === admin.id ? (admin.email ?? null) : null),
+      full_name: stringField(profile, "full_name") ?? stringField(publicUser, "full_name"),
+      role: primaryRole,
+      role_sources: roleSources.length ? roleSources : ["current session"],
+      tenants: tenantRows,
+      default_tenant_id: defaultTenantId,
+      created_at: stringField(authUser, "created_at") ?? stringField(profile, "created_at") ?? stringField(publicUser, "created_at"),
+      last_sign_in_at: stringField(authUser, "last_sign_in_at"),
+      is_current_admin: userId === admin.id,
+    };
+  });
+
+  rows.sort((a, b) => {
+    if (a.is_current_admin) return -1;
+    if (b.is_current_admin) return 1;
+    const roleRank = (role: string) => (isAdminLikeRole(role) ? 0 : role === "client" ? 1 : 2);
+    return roleRank(a.role) - roleRank(b.role) || String(a.email ?? a.user_id).localeCompare(String(b.email ?? b.user_id));
+  });
+
+  return {
+    current_admin: { id: admin.id, email: admin.email ?? null, role: admin.role ?? "owner_admin" },
+    stats: {
+      total_users: rows.length,
+      admins: rows.filter((row) => isAdminLikeRole(row.role)).length,
+      clients: rows.filter((row) => row.role === "client").length,
+      unassigned: rows.filter((row) => row.role === "unassigned").length,
+      tenant_memberships: rows.reduce((sum, row) => sum + (row.tenants?.length ?? 0), 0),
+      orphaned_app_rows: orphanedProfileRows + orphanedMembershipRows + orphanedPublicUserRows,
+      orphaned_profile_rows: orphanedProfileRows,
+      orphaned_membership_rows: orphanedMembershipRows,
+      orphaned_public_user_rows: orphanedPublicUserRows,
+    },
+    rows,
+  };
 }
 
 function isSchemaCompatibilityError(error: unknown): boolean {
@@ -630,11 +855,598 @@ export async function setTenantAutomationPaused(id: string, paused: boolean) {
   };
 }
 
+const ORG_SCOPED_DELETE_TABLES = [
+  "post_attempts",
+  "post_jobs",
+  "gbp_post_keyword_mappings",
+  "media_assets",
+  "content_items",
+  "posts",
+  "content_plans",
+  "geo_grid_scan_points",
+  "geo_grid_scans",
+  "keyword_scores",
+  "keyword_candidates",
+  "keyword_campaign_cycles",
+  "keyword_dashboard_aggregates",
+  "selected_keywords",
+  "business_services",
+  "actions",
+  "alerts",
+  "audit_logs",
+  "campaign_job_runs",
+  "client_uploads",
+  "connected_accounts",
+  "gbp_optimization_actions",
+  "locations",
+  "org_settings",
+  "organization_invites",
+  "photo_requests",
+  "rate_limit_state",
+] as const;
+
+type StripeCancelResult = { subscriptionId: string; canceled: boolean; skipped?: boolean; reason?: string };
+
+async function deleteWhere(table: string, column: string, value: string) {
+  const svc = requireService();
+  const { error } = await svc.from(table).delete().eq(column, value);
+  if (error && !isSchemaCompatibilityError(error)) throw error;
+}
+
+async function cancelStripeSubscriptionsForTenant(tenantId: string): Promise<StripeCancelResult[]> {
+  const svc = requireService();
+  const { data, error } = await svc
+    .from("billing_subscriptions")
+    .select("id,stripe_subscription_id,status,metadata_json")
+    .eq("tenant_id", tenantId);
+  if (error && !isSchemaCompatibilityError(error)) throw error;
+  const rows = (data ?? []) as Record<string, unknown>[];
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+  const results: StripeCancelResult[] = [];
+
+  for (const row of rows) {
+    const subscriptionId = String(row.stripe_subscription_id ?? "").trim();
+    const status = String(row.status ?? "").toLowerCase();
+    if (!subscriptionId) {
+      results.push({ subscriptionId: "", canceled: false, skipped: true, reason: "missing_subscription_id" });
+      continue;
+    }
+    if (["canceled", "incomplete_expired"].includes(status)) {
+      results.push({ subscriptionId, canceled: false, skipped: true, reason: "already_inactive" });
+      continue;
+    }
+    if (!secretKey) {
+      results.push({ subscriptionId, canceled: false, reason: "stripe_secret_missing" });
+      continue;
+    }
+
+    const response = await fetch(`https://api.stripe.com/v1/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${secretKey}`,
+      },
+    });
+    if (!response.ok) {
+      let reason = `stripe_cancel_failed_${response.status}`;
+      try {
+        const body = (await response.json()) as { error?: { code?: string; type?: string } };
+        reason = body.error?.code || body.error?.type || reason;
+      } catch {
+        // Keep sanitized status-only reason if Stripe does not return JSON.
+      }
+      results.push({ subscriptionId, canceled: false, reason });
+      continue;
+    }
+    results.push({ subscriptionId, canceled: true });
+  }
+
+  const updateResults = await Promise.all(rows.map((row) => {
+    const metadata = row.metadata_json && typeof row.metadata_json === "object" ? row.metadata_json as Record<string, unknown> : {};
+    return svc
+      .from("billing_subscriptions")
+      .update({
+        status: "canceled",
+        canceled_at: new Date().toISOString(),
+        metadata_json: {
+          ...metadata,
+          admin_terminated: true,
+        },
+      })
+      .eq("id", row.id);
+  }));
+  updateResults.forEach((result) => {
+    if (result.error && !isSchemaCompatibilityError(result.error)) throw result.error;
+  });
+
+  return results;
+}
+
+async function collectTenantAuthUsersForTermination(tenantId: string, currentAdminId?: string) {
+  const [memberships, profiles, publicUsers, pendingOnboarding, allMemberships, authUsers] = await Promise.all([
+    safeSelectAll("memberships"),
+    safeSelectAll("profiles"),
+    safeSelectAll("users"),
+    safeSelectAll("pending_onboarding"),
+    safeSelectAll("memberships"),
+    listAuthUsersForRoles(),
+  ]);
+  const tenantMemberships = memberships.filter((row) => String(row.tenant_id ?? "") === tenantId);
+  const tenantProfiles = profiles.filter((row) => String(row.tenant_id ?? row.default_tenant_id ?? "") === tenantId);
+  const tenantPending = pendingOnboarding.filter((row) => String(row.tenant_id ?? "") === tenantId);
+  const candidateIds = new Set<string>();
+  const candidateEmails = new Set<string>();
+
+  tenantMemberships.forEach((row) => {
+    const userId = String(row.user_id ?? "");
+    if (userId) candidateIds.add(userId);
+  });
+  tenantProfiles.forEach((row) => {
+    const userId = String(row.user_id ?? "");
+    const email = String(row.email ?? "").toLowerCase();
+    if (userId) candidateIds.add(userId);
+    if (email) candidateEmails.add(email);
+  });
+  tenantPending.forEach((row) => {
+    const email = String(row.email ?? "").toLowerCase();
+    if (email) candidateEmails.add(email);
+  });
+  publicUsers.forEach((row) => {
+    const userId = String(row.id ?? "");
+    const email = String(row.email ?? "").toLowerCase();
+    if (candidateIds.has(userId) || (email && candidateEmails.has(email))) {
+      if (userId) candidateIds.add(userId);
+      if (email) candidateEmails.add(email);
+    }
+  });
+  authUsers.forEach((row) => {
+    const userId = String(row.id ?? "");
+    const email = String(row.email ?? "").toLowerCase();
+    if (candidateIds.has(userId) || (email && candidateEmails.has(email))) {
+      if (userId) candidateIds.add(userId);
+      if (email) candidateEmails.add(email);
+    }
+  });
+
+  const allMembershipsByUser = new Map<string, Record<string, unknown>[]>();
+  allMemberships.forEach((row) => {
+    const userId = String(row.user_id ?? "");
+    if (!userId) return;
+    allMembershipsByUser.set(userId, [...(allMembershipsByUser.get(userId) ?? []), row]);
+  });
+  const profileByUser = new Map(profiles.map((row) => [String(row.user_id ?? ""), row]));
+  const publicUserById = new Map(publicUsers.map((row) => [String(row.id ?? ""), row]));
+  const authUserById = new Map(authUsers.map((row) => [String(row.id ?? ""), row]));
+
+  const deletableUserIds: string[] = [];
+  const skippedUserIds: Array<{ userId: string; reason: string }> = [];
+  candidateIds.forEach((userId) => {
+    if (!userId) return;
+    if (currentAdminId && userId === currentAdminId) {
+      skippedUserIds.push({ userId, reason: "current_admin" });
+      return;
+    }
+    const profile = profileByUser.get(userId);
+    const publicUser = publicUserById.get(userId);
+    const authUser = authUserById.get(userId);
+    const roles = [
+      normalizeRole(profile?.role),
+      normalizeRole(publicUser?.role),
+      ...authMetadataRoles(authUser),
+    ].filter(Boolean) as string[];
+    if (roles.some(isAdminLikeRole) || publicUser?.is_staff === true) {
+      skippedUserIds.push({ userId, reason: "admin_or_staff" });
+      return;
+    }
+    const otherMemberships = (allMembershipsByUser.get(userId) ?? []).filter((row) => String(row.tenant_id ?? "") !== tenantId);
+    if (otherMemberships.length > 0) {
+      skippedUserIds.push({ userId, reason: "other_tenant_memberships" });
+      return;
+    }
+    deletableUserIds.push(userId);
+  });
+
+  return { deletableUserIds, skippedUserIds };
+}
+
+async function deleteAuthUsers(userIds: string[]) {
+  const svc = requireService();
+  let deleted = 0;
+  const failed: Array<{ userId: string; reason: string }> = [];
+  for (const userId of userIds) {
+    const { error } = await svc.auth.admin.deleteUser(userId);
+    if (error) {
+      failed.push({ userId, reason: error.message || "auth_delete_failed" });
+      continue;
+    }
+    deleted += 1;
+  }
+  return { deleted, failed };
+}
+
+export async function terminateTenantAccount(id: string, options: { currentAdminId?: string } = {}) {
+  const tenantId = String(id ?? "").trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(tenantId)) {
+    throw new Error("Invalid tenant id");
+  }
+
+  const svc = requireService();
+  const [{ data: tenant, error: tenantError }, { data: organization, error: orgError }] = await Promise.all([
+    svc.from("tenants").select("tenant_id,business_name,status").eq("tenant_id", tenantId).maybeSingle(),
+    svc.from("organizations").select("id,name").eq("id", tenantId).maybeSingle(),
+  ]);
+  if (tenantError && !isSchemaCompatibilityError(tenantError)) throw tenantError;
+  if (orgError && !isSchemaCompatibilityError(orgError)) throw orgError;
+  if (!tenant && !organization) throw new Error("Tenant not found");
+
+  const [stripeResults, authUsers] = await Promise.all([
+    cancelStripeSubscriptionsForTenant(tenantId),
+    collectTenantAuthUsersForTermination(tenantId, options.currentAdminId),
+  ]);
+  const stripeFailures = stripeResults.filter((result) => !result.canceled && !result.skipped);
+  if (stripeFailures.length > 0) {
+    throw new Error(`Unable to cancel Stripe billing: ${stripeFailures.map((result) => result.reason ?? "unknown").join(", ")}`);
+  }
+
+  const authDeleteResult = await deleteAuthUsers(authUsers.deletableUserIds);
+
+  for (const table of ORG_SCOPED_DELETE_TABLES) {
+    await deleteWhere(table, "organization_id", tenantId);
+  }
+
+  await deleteWhere("pending_onboarding", "tenant_id", tenantId);
+  await deleteWhere("memberships", "tenant_id", tenantId);
+  await deleteWhere("admin_impersonation_audit", "tenant_id", tenantId);
+  await deleteWhere("profiles", "tenant_id", tenantId);
+  await deleteWhere("profiles", "default_tenant_id", tenantId);
+  await deleteWhere("users", "tenant_id", tenantId);
+
+  const tenantDelete = await svc.from("tenants").delete().eq("tenant_id", tenantId);
+  if (tenantDelete.error && !isSchemaCompatibilityError(tenantDelete.error)) throw tenantDelete.error;
+
+  const orgDelete = await svc.from("organizations").delete().eq("id", tenantId);
+  if (orgDelete.error && !isSchemaCompatibilityError(orgDelete.error)) throw orgDelete.error;
+
+  return {
+    terminated: true,
+    tenant_id: tenantId,
+    stripe: {
+      canceled: stripeResults.filter((result) => result.canceled).length,
+      skipped: stripeResults.filter((result) => result.skipped).length,
+      failed: stripeResults.filter((result) => !result.canceled && !result.skipped).map((result) => result.reason),
+    },
+    auth: {
+      deletedUsers: authDeleteResult.deleted,
+      skippedUsers: authUsers.skippedUserIds.length,
+      failedUsers: authDeleteResult.failed.length,
+    },
+  };
+}
+
 export async function fetchBilling() {
   const svc = requireService();
   const { data, error } = await svc.from("billing_subscriptions").select().order("current_period_end", { ascending: false });
   if (error) throw error;
-  return { rows: data ?? [] };
+  const rows = (data ?? []) as Record<string, unknown>[];
+  const tenants = await safeSelectAll("tenants");
+  const tenantById = new Map(tenants.map((tenant) => [String(tenant.tenant_id), tenant]));
+  await ensureCurrentRevenueLedger(rows, tenantById);
+  const [expenses, settings, ledger] = await Promise.all([
+    loadAdminBusinessExpenses(),
+    loadAdminFinanceSettings(),
+    loadClientRevenueLedger(),
+  ]);
+  const paymentIssues = rows
+    .filter((row) => isBillingIssueStatus(String(row.status ?? "")))
+    .map((row) => {
+      const tenant = tenantById.get(String(row.tenant_id ?? ""));
+      return {
+        ...row,
+        client_name: tenant?.business_name ?? row.tenant_id,
+        account_paused: Boolean(tenant?.posting_paused ?? tenant?.is_active === false),
+      };
+    });
+  return {
+    rows,
+    payment_issues: paymentIssues,
+    expenses,
+    finance_settings: settings,
+    monthly_summary: buildBillingMonthlySummary({ subscriptions: rows, ledger, expenses, settings, tenantById }),
+    lifetime_client_revenue: buildLifetimeClientRevenue(ledger),
+  };
+}
+
+function startOfMonth(date = new Date()) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1)).toISOString().slice(0, 10);
+}
+
+function asNumber(value: unknown, fallback = 0) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function dollarsToCents(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed * 100)) : 0;
+}
+
+function centsToDollars(cents: number) {
+  return Math.round(cents) / 100;
+}
+
+function normalizePlanKey(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function priceCentsForPlan(plan: unknown, row?: Record<string, unknown>) {
+  const metadata = row?.metadata_json && typeof row.metadata_json === "object" ? (row.metadata_json as Record<string, unknown>) : {};
+  const metadataAmount = metadata.amount_cents ?? metadata.unit_amount ?? metadata.price_amount;
+  const rowAmount = row?.amount_cents ?? row?.unit_amount ?? row?.price_amount ?? row?.amount;
+  const direct = asNumber(metadataAmount ?? rowAmount, NaN);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+
+  const key = normalizePlanKey(plan);
+  const byPlan = key ? asNumber(process.env[`STRIPE_PRICE_AMOUNT_${key}`], NaN) : NaN;
+  if (Number.isFinite(byPlan) && byPlan >= 0) return byPlan;
+  const fallback = asNumber(process.env.STRIPE_PRICE_AMOUNT, NaN);
+  return Number.isFinite(fallback) && fallback >= 0 ? fallback : 0;
+}
+
+function isRevenueStatus(status: string) {
+  return ["active", "trialing"].includes(status.toLowerCase());
+}
+
+function isBillingIssueStatus(status: string) {
+  return ["past_due", "unpaid", "incomplete", "incomplete_expired", "paused", "canceled", "churned"].includes(status.toLowerCase());
+}
+
+async function ensureCurrentRevenueLedger(rows: Record<string, unknown>[], tenantById: Map<string, Record<string, unknown>>) {
+  const svc = requireService();
+  const periodMonth = startOfMonth();
+  const ledgerRows = rows
+    .filter((row) => isRevenueStatus(String(row.status ?? "")))
+    .map((row) => {
+      const tenantId = String(row.tenant_id ?? "");
+      const tenant = tenantById.get(tenantId);
+      const subscriptionId = row.stripe_subscription_id ? String(row.stripe_subscription_id) : "";
+      return {
+        tenant_id: tenantId || null,
+        client_name: String(tenant?.business_name ?? (tenantId || "Client")),
+        stripe_subscription_id: subscriptionId || null,
+        plan: row.plan ? String(row.plan) : null,
+        status: row.status ? String(row.status) : null,
+        amount_cents: Math.round(priceCentsForPlan(row.plan, row)),
+        currency: "usd",
+        period_month: periodMonth,
+        source: "subscription_snapshot",
+        ledger_key: `subscription_snapshot:${periodMonth}:${subscriptionId || tenantId}`,
+        occurred_at: new Date().toISOString(),
+        metadata_json: { captured_by: "admin_billing_dashboard" },
+      };
+    })
+    .filter((row) => row.amount_cents > 0);
+  if (!ledgerRows.length) return;
+  const { error } = await svc
+    .from("client_revenue_ledger")
+    .upsert(ledgerRows, { onConflict: "ledger_key" });
+  if (error && !isSchemaCompatibilityError(error)) {
+    logAdminMonitoringError("client_revenue_ledger.upsert", error);
+  }
+}
+
+async function loadAdminBusinessExpenses() {
+  try {
+    const svc = requireService();
+    const { data, error } = await svc.from("admin_business_expenses").select("*").order("occurred_on", { ascending: false });
+    if (error && isSchemaCompatibilityError(error)) return [];
+    if (error) throw error;
+    return (data ?? []) as Record<string, unknown>[];
+  } catch (error) {
+    if (isSchemaCompatibilityError(error)) return [];
+    throw error;
+  }
+}
+
+async function loadAdminFinanceSettings() {
+  const defaults = {
+    id: true,
+    pa_income_tax_rate: 0.0307,
+    federal_income_tax_rate: 0,
+    self_employment_tax_rate: 0.153,
+    self_employment_taxable_ratio: 0.9235,
+    local_tax_rate: 0,
+    additional_tax_rate: 0,
+  };
+  try {
+    const svc = requireService();
+    const { data, error } = await svc.from("admin_finance_settings").select("*").eq("id", true).maybeSingle();
+    if (error && isSchemaCompatibilityError(error)) return defaults;
+    if (error) throw error;
+    return { ...defaults, ...(data ?? {}) } as Record<string, unknown>;
+  } catch (error) {
+    if (isSchemaCompatibilityError(error)) return defaults;
+    throw error;
+  }
+}
+
+async function loadClientRevenueLedger() {
+  try {
+    const svc = requireService();
+    const { data, error } = await svc.from("client_revenue_ledger").select("*").order("period_month", { ascending: false }).limit(5000);
+    if (error && isSchemaCompatibilityError(error)) return [];
+    if (error) throw error;
+    return (data ?? []) as Record<string, unknown>[];
+  } catch (error) {
+    if (isSchemaCompatibilityError(error)) return [];
+    throw error;
+  }
+}
+
+function monthKey(value: unknown) {
+  const date = new Date(String(value ?? ""));
+  if (Number.isNaN(date.getTime())) return startOfMonth();
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1)).toISOString().slice(0, 10);
+}
+
+function expenseAppliesToMonth(expense: Record<string, unknown>, month: string) {
+  const type = String(expense.expense_type ?? "one_time");
+  if (type !== "recurring") return monthKey(expense.occurred_on) === month;
+  const monthDate = new Date(`${month}T00:00:00.000Z`);
+  const starts = expense.starts_on ? new Date(`${expense.starts_on}T00:00:00.000Z`) : new Date(`${monthKey(expense.occurred_on)}T00:00:00.000Z`);
+  const ends = expense.ends_on ? new Date(`${expense.ends_on}T00:00:00.000Z`) : null;
+  return monthDate >= starts && (!ends || monthDate <= ends);
+}
+
+function expenseMonthlyCents(expense: Record<string, unknown>) {
+  const amount = asNumber(expense.amount_cents);
+  const interval = String(expense.recurrence_interval ?? "monthly");
+  if (String(expense.expense_type ?? "one_time") !== "recurring") return amount;
+  if (interval === "quarterly") return amount / 3;
+  if (interval === "yearly") return amount / 12;
+  return amount;
+}
+
+function calculateTaxCents(profitBeforeTaxCents: number, settings: Record<string, unknown>) {
+  const taxable = Math.max(0, profitBeforeTaxCents);
+  const pa = taxable * asNumber(settings.pa_income_tax_rate, 0.0307);
+  const federal = taxable * asNumber(settings.federal_income_tax_rate);
+  const local = taxable * asNumber(settings.local_tax_rate);
+  const additional = taxable * asNumber(settings.additional_tax_rate);
+  const selfEmployment =
+    taxable *
+    asNumber(settings.self_employment_taxable_ratio, 0.9235) *
+    asNumber(settings.self_employment_tax_rate, 0.153);
+  return Math.round(pa + federal + local + additional + selfEmployment);
+}
+
+function buildBillingMonthlySummary(input: {
+  subscriptions: Record<string, unknown>[];
+  ledger: Record<string, unknown>[];
+  expenses: Record<string, unknown>[];
+  settings: Record<string, unknown>;
+  tenantById: Map<string, Record<string, unknown>>;
+}) {
+  const months = new Set<string>([startOfMonth()]);
+  input.ledger.forEach((row) => months.add(monthKey(row.period_month)));
+  input.expenses.forEach((row) => {
+    months.add(monthKey(row.occurred_on));
+    if (row.starts_on) months.add(monthKey(row.starts_on));
+  });
+  const sortedMonths = [...months].sort().reverse().slice(0, 24);
+  return sortedMonths.map((month) => {
+    const revenueRows = input.ledger.filter((row) => monthKey(row.period_month) === month);
+    const grossRevenueCents = revenueRows.reduce((sum, row) => sum + asNumber(row.amount_cents), 0);
+    const monthExpenses = input.expenses.filter((expense) => expenseAppliesToMonth(expense, month));
+    const recurringExpenseCents = monthExpenses
+      .filter((expense) => String(expense.expense_type) === "recurring")
+      .reduce((sum, expense) => sum + expenseMonthlyCents(expense), 0);
+    const oneTimeExpenseCents = monthExpenses
+      .filter((expense) => String(expense.expense_type) !== "recurring")
+      .reduce((sum, expense) => sum + expenseMonthlyCents(expense), 0);
+    const profitBeforeTaxCents = Math.round(grossRevenueCents - recurringExpenseCents - oneTimeExpenseCents);
+    const taxSetAsideCents = calculateTaxCents(profitBeforeTaxCents, input.settings);
+    const netAfterTaxAndExpensesCents = profitBeforeTaxCents - taxSetAsideCents;
+    return {
+      month,
+      gross_revenue: centsToDollars(grossRevenueCents),
+      recurring_expenses: centsToDollars(recurringExpenseCents),
+      one_time_expenses: centsToDollars(oneTimeExpenseCents),
+      profit_before_tax: centsToDollars(profitBeforeTaxCents),
+      tax_set_aside: centsToDollars(taxSetAsideCents),
+      net_after_tax_and_expenses: centsToDollars(netAfterTaxAndExpensesCents),
+      paying_clients: new Set(revenueRows.map((row) => row.tenant_id ?? row.client_name).filter(Boolean)).size,
+      revenue_lines: revenueRows.map((row) => ({
+        source: row.source ?? "subscription_snapshot",
+        client_name: row.client_name ?? row.tenant_id ?? "Client",
+        plan: row.plan ?? null,
+        status: row.status ?? null,
+        stripe_subscription_id: row.stripe_subscription_id ?? null,
+        amount: centsToDollars(asNumber(row.amount_cents)),
+        occurred_at: row.occurred_at ?? row.created_at ?? null,
+      })),
+      expense_lines: monthExpenses.map((expense) => ({
+        id: expense.id,
+        name: expense.name,
+        category: expense.category,
+        expense_type: expense.expense_type,
+        recurrence_interval: expense.recurrence_interval,
+        amount: centsToDollars(expenseMonthlyCents(expense)),
+        original_amount: centsToDollars(asNumber(expense.amount_cents)),
+        occurred_on: expense.occurred_on,
+        starts_on: expense.starts_on,
+        ends_on: expense.ends_on,
+      })),
+    };
+  });
+}
+
+function buildLifetimeClientRevenue(ledger: Record<string, unknown>[]) {
+  const byClient = new Map<string, { tenant_id: string | null; client_name: string; total_cents: number; months: number }>();
+  ledger.forEach((row) => {
+    const key = String(row.tenant_id ?? row.client_name ?? row.stripe_subscription_id ?? row.id);
+    const current = byClient.get(key) ?? {
+      tenant_id: row.tenant_id ? String(row.tenant_id) : null,
+      client_name: String(row.client_name ?? row.tenant_id ?? "Client"),
+      total_cents: 0,
+      months: 0,
+    };
+    current.total_cents += asNumber(row.amount_cents);
+    current.months += 1;
+    byClient.set(key, current);
+  });
+  return [...byClient.values()]
+    .map((row) => ({ ...row, total_revenue: centsToDollars(row.total_cents) }))
+    .sort((a, b) => b.total_cents - a.total_cents);
+}
+
+export async function saveAdminFinanceSettings(input: Record<string, unknown>) {
+  const svc = requireService();
+  const payload = {
+    id: true,
+    pa_income_tax_rate: asNumber(input.pa_income_tax_rate, 0.0307),
+    federal_income_tax_rate: asNumber(input.federal_income_tax_rate),
+    self_employment_tax_rate: asNumber(input.self_employment_tax_rate, 0.153),
+    self_employment_taxable_ratio: asNumber(input.self_employment_taxable_ratio, 0.9235),
+    local_tax_rate: asNumber(input.local_tax_rate),
+    additional_tax_rate: asNumber(input.additional_tax_rate),
+    notes: typeof input.notes === "string" ? input.notes.slice(0, 1000) : null,
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await svc.from("admin_finance_settings").upsert(payload).select().maybeSingle();
+  if (error) throw error;
+  return data ?? payload;
+}
+
+export async function addAdminBusinessExpense(input: Record<string, unknown>) {
+  const svc = requireService();
+  const name = typeof input.name === "string" ? input.name.trim() : "";
+  if (!name) throw new Error("Expense name is required");
+  const expenseType = input.expense_type === "recurring" ? "recurring" : "one_time";
+  const payload = {
+    id: crypto.randomUUID(),
+    name: name.slice(0, 200),
+    category: typeof input.category === "string" ? input.category.slice(0, 100) : null,
+    amount_cents: dollarsToCents(input.amount),
+    expense_type: expenseType,
+    recurrence_interval: expenseType === "recurring" ? String(input.recurrence_interval ?? "monthly") : null,
+    occurred_on: typeof input.occurred_on === "string" && input.occurred_on ? input.occurred_on : new Date().toISOString().slice(0, 10),
+    starts_on: typeof input.starts_on === "string" && input.starts_on ? input.starts_on : null,
+    ends_on: typeof input.ends_on === "string" && input.ends_on ? input.ends_on : null,
+    notes: typeof input.notes === "string" ? input.notes.slice(0, 1000) : null,
+  };
+  const { data, error } = await svc.from("admin_business_expenses").insert(payload).select().maybeSingle();
+  if (error) throw error;
+  return data ?? payload;
+}
+
+export async function deleteAdminBusinessExpense(id: string) {
+  const svc = requireService();
+  const { error } = await svc.from("admin_business_expenses").delete().eq("id", id);
+  if (error) throw error;
+  return { deleted: true };
 }
 
 export async function fetchGbp() {
@@ -706,7 +1518,7 @@ const ADMIN_MODULES = [
   { id: "gbp_audits", label: "GBP Audits", clientPath: "/dashboard/gbp-audit" },
   { id: "reviews", label: "Reviews", clientPath: "/dashboard/reviews" },
   { id: "citations", label: "Citations", clientPath: "/dashboard/gbp" },
-  { id: "visibility", label: "Visibility", clientPath: "/dashboard/keywords" },
+  { id: "visibility", label: "Rank Tracking", clientPath: "/dashboard/keywords" },
   { id: "images", label: "Images", clientPath: "/dashboard/content" },
   { id: "qa", label: "Q&A", clientPath: "/dashboard/gbp" },
   { id: "website_audits", label: "Website Audits", clientPath: "/dashboard/gbp-audit" },
@@ -846,9 +1658,11 @@ async function loadRows(table: string, filters: AdminMonitoringFilters = {}, opt
   try {
     const svc = requireService();
     const { from, to } = dateRange(filters);
-    let query = svc.from(table).select("*").order(options.dateColumn ?? "created_at", { ascending: false }).limit(options.limit ?? 500);
+    const dateColumn = options.dateColumn ?? "created_at";
+    let query = svc.from(table).select("*").limit(options.limit ?? 500);
+    if (dateColumn) query = query.order(dateColumn, { ascending: false });
     if (filters.tenantIds?.length) query = query.in("tenant_id", filters.tenantIds);
-    if (options.dateColumn !== "") query = query.gte(options.dateColumn ?? "created_at", from).lte(options.dateColumn ?? "created_at", to);
+    if (dateColumn) query = query.gte(dateColumn, from).lte(dateColumn, to);
     const { data, error } = await query;
     if (error && isSchemaCompatibilityError(error)) return [];
     if (error) throw error;
@@ -887,7 +1701,7 @@ async function buildModuleHealth(tenants: TenantRow[], filters: AdminMonitoringF
     moduleHealth("gbp_audits", "GBP Audits", hasLocations.size, tenantCount, audits.count, 0),
     moduleHealth("reviews", "Reviews", gbpActive.size || hasLocations.size, tenantCount, reviews.count + reviewRequests.count, 0),
     moduleHealth("citations", "Citations", 0, tenantCount, 0, 0),
-    moduleHealth("visibility", "Visibility", hasLocations.size, tenantCount, ranks.count, 0),
+    moduleHealth("visibility", "Rank Tracking", hasLocations.size, tenantCount, ranks.count, 0),
     moduleHealth("images", "Images", hasLocations.size, tenantCount, mediaRequests.count, 0),
     moduleHealth("qa", "Q&A", hasLocations.size, tenantCount, qnaRows.count, 0),
     moduleHealth("website_audits", "Website Audits", 0, tenantCount, 0, 0),
@@ -915,7 +1729,8 @@ export async function getAdminOverviewStats(filters: AdminMonitoringFilters = {}
   const tenants = await loadTenantsForMonitoring(filters);
   const tenantIds = tenants.map((tenant) => String(tenant.tenant_id)).filter(Boolean);
   const scopedFilters = { ...filters, tenantIds: filters.tenantIds ?? tenantIds };
-  const [billing, pending, leadSettings, leads, ownerNotifications, posts, reviewRequests, reviews, activity, jobs, alerts] =
+  const integrationFilters = { ...filters, tenantIds: filters.tenantIds };
+  const [billing, pending, leadSettings, leads, ownerNotifications, posts, reviewRequests, reviews, activity, jobs, alerts, integrationHealth, integrationIncidents, reconnectPrompts] =
     await Promise.all([
       loadBillingByTenant(scopedFilters.tenantIds),
       safeCount("pending_onboarding", filters, "created_at"),
@@ -928,6 +1743,9 @@ export async function getAdminOverviewStats(filters: AdminMonitoringFilters = {}
       loadRows("client_activity_events", scopedFilters, { limit: 100 }),
       loadRows("jobs", scopedFilters, { limit: 100 }),
       loadRows("alerts", scopedFilters, { limit: 100 }),
+      loadRows("integration_health_checks", integrationFilters, { dateColumn: "last_checked_at", limit: 1000 }),
+      loadRows("integration_incidents", integrationFilters, { dateColumn: "last_seen_at", limit: 1000 }),
+      loadRows("client_reconnect_prompts", integrationFilters, { dateColumn: "created_at", limit: 500 }),
     ]);
   const moduleHealth = await buildModuleHealth(tenants, scopedFilters);
   const activeClients = tenants.filter((tenant) => String(tenant.status ?? "").toLowerCase() === "active").length;
@@ -935,7 +1753,22 @@ export async function getAdminOverviewStats(filters: AdminMonitoringFilters = {}
   const leadSetupIssues = leadSettings.filter((row) => row.enabled === true && (!row.twilio_phone_number || !leadRecoveryIsActive(row))).length;
   const failedJobs = jobs.filter((job) => ["failed", "dead_lettered"].includes(String(job.status ?? "").toLowerCase())).length;
   const openAlerts = alerts.filter((alert) => String(alert.status ?? "").toLowerCase() !== "resolved").length;
-  const attention = buildAttentionList({ tenants, billing, leadSettings, failedJobs, openAlerts });
+  const openIntegrationIncidents = integrationIncidents.filter((row) => ["open", "investigating"].includes(String(row.status ?? "").toLowerCase()));
+  const activeCriticalIncidents = openIntegrationIncidents.filter((row) => row.severity === "critical").length;
+  const activeWarningIncidents = openIntegrationIncidents.filter((row) => row.severity === "warning").length;
+  const failingIntegrations = integrationHealth.filter((row) => ["failing", "misconfigured", "needs_reauth", "disconnected"].includes(String(row.status ?? "").toLowerCase())).length;
+  const degradedIntegrations = integrationHealth.filter((row) => row.status === "degraded").length;
+  const clientsNeedingReconnect = reconnectPrompts.filter((row) => row.status === "active").length;
+  const platformHealthStatus = activeCriticalIncidents ? "critical" : activeWarningIncidents || failingIntegrations || degradedIntegrations ? "warning" : "healthy";
+  const attention = buildAttentionList({
+    tenants,
+    billing,
+    leadSettings,
+    failedJobs,
+    openAlerts,
+    integrationIncidents: openIntegrationIncidents,
+    reconnectPrompts,
+  });
 
   return {
     filters: scopedFilters,
@@ -954,6 +1787,12 @@ export async function getAdminOverviewStats(filters: AdminMonitoringFilters = {}
       recent_owner_notifications: ownerNotifications.count,
       failed_jobs: failedJobs,
       open_alerts: openAlerts,
+      platform_health_status: platformHealthStatus,
+      active_critical_incidents: activeCriticalIncidents,
+      active_warning_incidents: activeWarningIncidents,
+      failing_integrations: failingIntegrations,
+      degraded_integrations: degradedIntegrations,
+      clients_needing_reconnect: clientsNeedingReconnect,
     },
     module_health: moduleHealth,
     recent_activity: normalizeActivityRows(activity, tenants).slice(0, 50),
@@ -967,6 +1806,8 @@ function buildAttentionList(input: {
   leadSettings: Record<string, unknown>[];
   failedJobs: number;
   openAlerts: number;
+  integrationIncidents?: Record<string, unknown>[];
+  reconnectPrompts?: Record<string, unknown>[];
 }) {
   const tenantName = new Map(input.tenants.map((tenant) => [String(tenant.tenant_id), String(tenant.business_name ?? "Client")]));
   const issues: Record<string, unknown>[] = [];
@@ -989,6 +1830,24 @@ function buildAttentionList(input: {
   });
   if (input.failedJobs > 0) issues.push({ severity: "critical", title: `${input.failedJobs} failed background jobs`, module: "automation" });
   if (input.openAlerts > 0) issues.push({ severity: "warning", title: `${input.openAlerts} open alerts`, module: "alerts" });
+  (input.integrationIncidents ?? []).slice(0, 25).forEach((incident) => {
+    const tenantId = String(incident.tenant_id ?? "");
+    issues.push({
+      severity: incident.severity ?? "warning",
+      tenant_id: tenantId || undefined,
+      client: tenantId ? tenantName.get(tenantId) : "Platform-wide",
+      title: incident.title ?? incident.message ?? "Integration incident",
+      module: incident.module ?? incident.integration ?? "integration_health",
+    });
+  });
+  const activeReconnects = (input.reconnectPrompts ?? []).filter((prompt) => prompt.status === "active");
+  if (activeReconnects.length > 0) {
+    issues.push({
+      severity: "warning",
+      title: `${activeReconnects.length} clients need Google reconnect`,
+      module: "google_business_profile",
+    });
+  }
   return issues.slice(0, 100);
 }
 
@@ -1010,12 +1869,33 @@ function normalizeActivityRows(rows: Record<string, unknown>[], tenants: TenantR
 export async function getAdminClientsMonitor(filters: AdminMonitoringFilters = {}) {
   const tenants = await loadTenantsForMonitoring(filters);
   const tenantIds = tenants.map((tenant) => String(tenant.tenant_id)).filter(Boolean);
-  const [billing, moduleHealth, leadSettings, activity] = await Promise.all([
+  const [billingResult, moduleHealthResult, leadSettingsResult, activityResult, prospectsResult] = await Promise.allSettled([
     loadBillingByTenant(tenantIds),
     buildModuleHealth(tenants, { ...filters, tenantIds }),
     loadRows("lead_recovery_settings", { ...filters, tenantIds }, { dateColumn: "", limit: 10000 }),
     loadRows("client_activity_events", { ...filters, tenantIds }, { limit: 500 }),
+    loadProspectiveClientsForMonitoring(filters),
   ]);
+  const billing =
+    billingResult.status === "fulfilled"
+      ? billingResult.value
+      : (logAdminMonitoringError("loadBillingByTenant", billingResult.reason), new Map<string, Record<string, unknown>>());
+  const moduleHealthRows =
+    moduleHealthResult.status === "fulfilled"
+      ? moduleHealthResult.value
+      : (logAdminMonitoringError("buildModuleHealth", moduleHealthResult.reason), ADMIN_MODULES.map((module) => moduleHealth(module.id, module.label, 0, tenants.length, 0, 0)));
+  const leadSettings =
+    leadSettingsResult.status === "fulfilled"
+      ? leadSettingsResult.value
+      : (logAdminMonitoringError("lead_recovery_settings", leadSettingsResult.reason), []);
+  const activity =
+    activityResult.status === "fulfilled"
+      ? activityResult.value
+      : (logAdminMonitoringError("client_activity_events", activityResult.reason), []);
+  const prospects =
+    prospectsResult.status === "fulfilled"
+      ? prospectsResult.value
+      : (logAdminMonitoringError("loadProspectiveClientsForMonitoring", prospectsResult.reason), []);
   const leadByTenant = new Map(leadSettings.map((row) => [String(row.tenant_id), row]));
   const activityByTenant = new Map<string, string>();
   activity.forEach((row) => {
@@ -1024,7 +1904,7 @@ export async function getAdminClientsMonitor(filters: AdminMonitoringFilters = {
   });
   const tenantRows = tenants.map((tenant) => {
     const tenantId = String(tenant.tenant_id);
-    const activeModules = moduleHealth.filter((module) => module.active_clients > 0).map((module) => module.label);
+    const activeModules = moduleHealthRows.filter((module) => module.active_clients > 0).map((module) => module.label);
     const billingRow = billing.get(tenantId);
     const leadSetting = leadByTenant.get(tenantId);
     const subscriptionStatus = String(billingRow?.status ?? tenant.status ?? "unknown").toLowerCase();
@@ -1045,7 +1925,6 @@ export async function getAdminClientsMonitor(filters: AdminMonitoringFilters = {
       mrr: billingRow?.amount ?? billingRow?.price_amount ?? null,
     };
   });
-  const prospects = await loadProspectiveClientsForMonitoring(filters);
   const rows = [...tenantRows, ...prospects].filter((row) => {
     const requested = String(filters.status ?? "").toLowerCase();
     if (!requested) return true;
@@ -1054,12 +1933,103 @@ export async function getAdminClientsMonitor(filters: AdminMonitoringFilters = {
     if (requested === "active") return row.client_stage === "active";
     return String(row.subscription_status ?? row.status ?? "").toLowerCase() === requested;
   });
-  return { rows, total: rows.length, module_health: moduleHealth };
+  return { rows, total: rows.length, module_health: moduleHealthRows };
 }
 
 export async function getAdminModuleHealth(filters: AdminMonitoringFilters = {}) {
   const tenants = await loadTenantsForMonitoring(filters);
   return { rows: await buildModuleHealth(tenants, filters), modules: ADMIN_MODULES };
+}
+
+export async function getAdminIntegrationHealth(filters: AdminMonitoringFilters = {}) {
+  const tenants = await loadTenantsForMonitoring(filters);
+  const tenantName = new Map(tenants.map((tenant) => [String(tenant.tenant_id), String(tenant.business_name ?? "Client")]));
+  const scoped = { ...filters, tenantIds: filters.tenantIds };
+  const [healthRows, incidents, attempts, prompts] = await Promise.all([
+    loadRows("integration_health_checks", scoped, { dateColumn: "last_checked_at", limit: 1000 }),
+    loadRows("integration_incidents", scoped, { dateColumn: "last_seen_at", limit: 1000 }),
+    loadRows("integration_recovery_attempts", scoped, { dateColumn: "created_at", limit: 200 }),
+    loadRows("client_reconnect_prompts", scoped, { dateColumn: "created_at", limit: 500 }),
+  ]);
+  const filteredHealth = healthRows.filter((row) => {
+    if (filters.module && String(row.module ?? "") !== filters.module) return false;
+    if (filters.status && String(row.status ?? "") !== filters.status && String(row.severity ?? "") !== filters.status) return false;
+    return true;
+  });
+  const filteredIncidents = incidents.filter((row) => {
+    if (filters.module && String(row.module ?? "") !== filters.module) return false;
+    if (filters.status && String(row.status ?? "") !== filters.status && String(row.severity ?? "") !== filters.status) return false;
+    return true;
+  });
+  const openIncidents = filteredIncidents.filter((row) => ["open", "investigating"].includes(String(row.status ?? "").toLowerCase()));
+  const critical = openIncidents.filter((row) => row.severity === "critical").length;
+  const warning = openIncidents.filter((row) => row.severity === "warning").length;
+  const recovered = filteredIncidents.filter((row) => row.status === "recovered").length;
+  const healthCounts = filteredHealth.reduce<Record<string, number>>((acc, row) => {
+    const status = String(row.status ?? "unknown");
+    acc[status] = (acc[status] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  return {
+    stats: {
+      overall_status: critical ? "critical" : warning ? "warning" : "healthy",
+      active_critical_incidents: critical,
+      active_warning_incidents: warning,
+      recovered_incidents: recovered,
+      health_checks: filteredHealth.length,
+      failing_integrations: filteredHealth.filter((row) => ["failing", "misconfigured", "needs_reauth", "disconnected"].includes(String(row.status ?? ""))).length,
+      degraded_integrations: filteredHealth.filter((row) => row.status === "degraded").length,
+      clients_needing_reconnect: prompts.filter((row) => row.status === "active").length,
+    },
+    health: filteredHealth.map((row) => ({
+      ...row,
+      client: tenantName.get(String(row.tenant_id)) ?? (row.tenant_id ? "Client" : "Platform-wide"),
+    })),
+    incidents: filteredIncidents.map((row) => ({
+      ...row,
+      client: tenantName.get(String(row.tenant_id)) ?? (row.tenant_id ? "Client" : "Platform-wide"),
+    })),
+    recovery_attempts: attempts.map((row) => ({
+      ...row,
+      client: tenantName.get(String(row.tenant_id)) ?? (row.tenant_id ? "Client" : "Platform-wide"),
+    })),
+    prompts: prompts.map((row) => ({
+      ...row,
+      client: tenantName.get(String(row.tenant_id)) ?? "Client",
+    })),
+    health_counts: healthCounts,
+  };
+}
+
+export async function getAdminIntegrationIncidentDetail(incidentId: string) {
+  const svc = requireService();
+  const { data: incident, error } = await svc.from("integration_incidents").select("*").eq("id", incidentId).maybeSingle();
+  if (error) throw error;
+  if (!incident) throw new Error("Incident not found");
+  let healthQuery = svc
+    .from("integration_health_checks")
+    .select("*")
+    .eq("integration", incident.integration)
+    .limit(10);
+  healthQuery = incident.module ? healthQuery.eq("module", incident.module) : healthQuery.is("module", null);
+  const [{ data: attempts, error: attemptsErr }, { data: healthRows, error: healthErr }] = await Promise.all([
+    svc.from("integration_recovery_attempts").select("*").eq("incident_id", incidentId).order("created_at", { ascending: false }),
+    healthQuery,
+  ]);
+  if (attemptsErr) throw attemptsErr;
+  if (healthErr && !isSchemaCompatibilityError(healthErr)) throw healthErr;
+  let client: Record<string, unknown> | null = null;
+  if (incident.tenant_id) {
+    const { data } = await svc.from("tenants").select("tenant_id,business_name,status").eq("tenant_id", incident.tenant_id).maybeSingle();
+    client = data ?? null;
+  }
+  return {
+    incident,
+    client,
+    recovery_attempts: attempts ?? [],
+    related_health_checks: healthRows ?? [],
+  };
 }
 
 export async function getAdminClientStats(tenantId: string, filters: AdminMonitoringFilters = {}) {
@@ -1084,13 +2054,17 @@ export async function getAdminLeadRecoveryStats(filters: AdminMonitoringFilters 
   const tenants = await loadTenantsForMonitoring(filters);
   const tenantIds = tenants.map((tenant) => String(tenant.tenant_id)).filter(Boolean);
   const scoped = { ...filters, tenantIds: filters.tenantIds ?? tenantIds };
-  const [settingsRows, leads, messages, events] = await Promise.all([
+  const integrationFilters = { ...filters, tenantIds: filters.tenantIds };
+  const [settingsRows, leads, messages, events, integrationHealth, integrationIncidents] = await Promise.all([
     loadRows("lead_recovery_settings", scoped, { dateColumn: "", limit: 10000 }),
     loadRows("leads", scoped, { limit: 10000 }),
     loadRows("lead_messages", scoped, { limit: 10000 }),
     loadRows("lead_events", scoped, { limit: 10000 }),
+    loadRows("integration_health_checks", integrationFilters, { dateColumn: "last_checked_at", limit: 500 }),
+    loadRows("integration_incidents", integrationFilters, { dateColumn: "last_seen_at", limit: 500 }),
   ]);
   const tenantName = new Map(tenants.map((tenant) => [String(tenant.tenant_id), String(tenant.business_name ?? "Client")]));
+  const settingsByTenant = new Map(settingsRows.map((setting) => [String(setting.tenant_id), setting]));
   const missedCalls = events.filter((event) => event.event_type === "missed_call_received").length;
   const textbacks = messages.filter((message) => message.direction === "outbound" && message.channel === "sms").length;
   const customerResponses = messages.filter((message) => message.direction === "inbound" && message.channel === "sms").length;
@@ -1099,6 +2073,40 @@ export async function getAdminLeadRecoveryStats(filters: AdminMonitoringFilters 
   const lost = leads.filter((lead) => lead.status === "lost").length;
   const completed = leads.filter((lead) => lead.status === "completed").length;
   const ownerNotifications = events.filter((event) => event.event_type === "owner_notified").length;
+  const needsFollowUp = leads.filter((lead) => ["new", "auto_contacted", "responded", "qualified"].includes(String(lead.status))).length;
+  const noOwnerAction = leads.filter((lead) => !events.some((event) => event.lead_id === lead.id && event.event_type === "owner_notified")).length;
+  const deliveryFailures = events.filter((event) => String(event.status ?? event.event_type ?? "").toLowerCase().includes("fail")).length;
+  const forwardingNotConfigured = settingsRows.filter((setting) => setting.enabled === true && !leadRecoveryIsActive(setting)).length;
+  const waitingForVerification = settingsRows.filter((setting) => ["waiting_for_verification", "pending"].includes(String(setting.forwarding_status ?? setting.verification_status ?? "").toLowerCase())).length;
+  const verificationFailed = settingsRows.filter((setting) => ["failed", "error"].includes(String(setting.forwarding_status ?? setting.verification_status ?? "").toLowerCase())).length;
+  const twilioNumberMissing = settingsRows.filter((setting) => setting.enabled === true && !setting.twilio_phone_number).length;
+  const activeClients = settingsRows.filter(leadRecoveryIsActive).length;
+  const enabledClients = settingsRows.filter((setting) => setting.enabled === true).length;
+  const leadRecoveryHealth = integrationHealth.filter((row) => ["lead_recovery_sms", "lead_recovery_webhooks"].includes(String(row.module ?? "")) || String(row.integration ?? "").toLowerCase() === "twilio");
+  const leadRecoveryIncidents = integrationIncidents.filter((row) => ["lead_recovery_sms", "lead_recovery_webhooks"].includes(String(row.module ?? "")) || String(row.integration ?? "").toLowerCase() === "twilio");
+  const twilioFailures = leadRecoveryIncidents.filter((row) => ["open", "investigating"].includes(String(row.status ?? "open")) && String(row.integration ?? "").toLowerCase() === "twilio").length;
+  const webhookFailures = leadRecoveryIncidents.filter((row) => ["open", "investigating"].includes(String(row.status ?? "open")) && String(row.module ?? "").includes("webhook")).length;
+  const noActivityClients = settingsRows.filter((setting) => leadRecoveryIsActive(setting) && !leads.some((lead) => String(lead.tenant_id) === String(setting.tenant_id)) && !events.some((event) => String(event.tenant_id) === String(setting.tenant_id))).length;
+  const totalActivity = missedCalls + textbacks + customerResponses + qualified + booked + lost + completed + ownerNotifications;
+  const attentionCount = needsFollowUp + forwardingNotConfigured + waitingForVerification + verificationFailed + twilioNumberMissing + twilioFailures + webhookFailures;
+  const moduleHealth =
+    totalActivity === 0 && activeClients === 0
+      ? "no_activity"
+      : twilioFailures > 0 || webhookFailures > 0 || verificationFailed > 0 || twilioNumberMissing > 0
+        ? "critical"
+        : forwardingNotConfigured > 0 || waitingForVerification > 0 || needsFollowUp > 0 || noActivityClients > 0
+          ? "warning"
+          : activeClients > 0
+            ? "healthy"
+            : "no_activity";
+  const healthDescription =
+    moduleHealth === "critical"
+      ? `${twilioFailures + webhookFailures + verificationFailed + twilioNumberMissing} critical issue${twilioFailures + webhookFailures + verificationFailed + twilioNumberMissing === 1 ? "" : "s"}`
+      : moduleHealth === "warning"
+        ? `${attentionCount} item${attentionCount === 1 ? "" : "s"} need attention`
+        : moduleHealth === "healthy"
+          ? "No open issues"
+          : "No lead recovery activity yet";
   const rows = leads.map((lead) => ({
     ...lead,
     client: tenantName.get(String(lead.tenant_id)) ?? "Client",
@@ -1106,6 +2114,15 @@ export async function getAdminLeadRecoveryStats(filters: AdminMonitoringFilters 
     booked: lead.status === "booked" || lead.status === "completed",
   }));
   return {
+    summary: {
+      moduleHealth,
+      moduleHealthLabel: moduleHealth === "no_activity" ? "No activity yet" : String(moduleHealth).replaceAll("_", " "),
+      moduleHealthDescription: healthDescription,
+      activeClients,
+      recoveredLeads: qualified,
+      bookedLeads: booked,
+      needsAttention: attentionCount,
+    },
     stats: {
       missed_calls: missedCalls,
       textbacks,
@@ -1118,17 +2135,242 @@ export async function getAdminLeadRecoveryStats(filters: AdminMonitoringFilters 
       response_rate: missedCalls ? Math.round((customerResponses / missedCalls) * 100) : 0,
       booking_rate: qualified ? Math.round(((booked + completed) / qualified) * 100) : 0,
       average_response_minutes: null,
-      needs_follow_up: leads.filter((lead) => ["new", "auto_contacted", "responded", "qualified"].includes(String(lead.status))).length,
-      no_owner_action: leads.filter((lead) => !events.some((event) => event.lead_id === lead.id && event.event_type === "owner_notified")).length,
-      delivery_failures: events.filter((event) => String(event.status ?? "").toLowerCase() === "failed").length,
-      forwarding_not_configured: settingsRows.filter((setting) => setting.enabled === true && !leadRecoveryIsActive(setting)).length,
-      waiting_for_verification: settingsRows.filter((setting) => setting.forwarding_status === "waiting_for_verification").length,
-      verification_failed: settingsRows.filter((setting) => ["failed", "error"].includes(String(setting.forwarding_status))).length,
+      needs_follow_up: needsFollowUp,
+      no_owner_action: noOwnerAction,
+      delivery_failures: deliveryFailures,
+      forwarding_not_configured: forwardingNotConfigured,
+      waiting_for_verification: waitingForVerification,
+      verification_failed: verificationFailed,
+      twilio_failures: twilioFailures,
+      webhook_failures: webhookFailures,
+      twilio_number_missing: twilioNumberMissing,
       skipped_clients: settingsRows.filter((setting) => setting.forwarding_status === "skipped").length,
       disabled_clients: settingsRows.filter((setting) => setting.enabled !== true).length,
     },
+    attentionItems: buildLeadRecoveryAttentionItems({
+      forwardingNotConfigured,
+      waitingForVerification,
+      needsFollowUp,
+      noOwnerAction,
+      deliveryFailures,
+      twilioFailures,
+      webhookFailures,
+      twilioNumberMissing,
+      verificationFailed,
+      noActivityClients,
+      enabledClients,
+      activeClients,
+    }),
+    clientRows: buildLeadRecoveryClientRows({ tenants, settingsByTenant, leads, events, tenantName }).filter((row) => {
+      if (!filters.status) return true;
+      return [row.health, row.setupStatus].includes(filters.status);
+    }),
+    recentActivity: buildLeadRecoveryRecentActivity({ leads, messages, events, tenantName }).slice(0, 25),
+    logsPreview: [...leadRecoveryIncidents, ...leadRecoveryHealth]
+      .filter((row) => ["critical", "warning"].includes(String(row.severity ?? "")) || ["failing", "misconfigured", "degraded"].includes(String(row.status ?? "")))
+      .slice(0, 10)
+      .map((row) => ({
+        id: row.id,
+        severity: row.severity ?? (row.status === "failing" ? "critical" : "warning"),
+        integration: row.integration ?? "twilio",
+        module: row.module ?? "lead_recovery",
+        message: row.message ?? row.title ?? "Lead Recovery integration issue",
+        created_at: row.last_seen_at ?? row.last_checked_at ?? row.created_at,
+        tenant_id: row.tenant_id ?? null,
+        client: row.tenant_id ? tenantName.get(String(row.tenant_id)) ?? "Client" : "Platform-wide",
+      })),
+    noClientsEnabled: enabledClients === 0,
     rows,
   };
+}
+
+function buildLeadRecoveryAttentionItems(input: {
+  forwardingNotConfigured: number;
+  waitingForVerification: number;
+  needsFollowUp: number;
+  noOwnerAction: number;
+  deliveryFailures: number;
+  twilioFailures: number;
+  webhookFailures: number;
+  twilioNumberMissing: number;
+  verificationFailed: number;
+  noActivityClients: number;
+  enabledClients: number;
+  activeClients: number;
+}) {
+  const items: Record<string, unknown>[] = [];
+  const push = (count: number, severity: string, type: string, title: string, description: string, actionType: string) => {
+    if (count > 0) items.push({ id: type, severity, type, title, description, count, actionType });
+  };
+  push(input.twilioFailures, "critical", "twilio_failures", "Twilio delivery failures", "Lead Recovery SMS or voice operations are failing and need investigation.", "View logs");
+  push(input.webhookFailures, "critical", "webhook_failures", "Webhook failures", "Twilio webhook processing is failing or rejecting requests.", "View logs");
+  push(input.twilioNumberMissing, "critical", "twilio_number_missing", "Twilio number missing", "Lead Recovery is enabled for clients that do not have a Twilio number assigned.", "View clients");
+  push(input.verificationFailed, "critical", "verification_failed", "Setup verification failed", "One or more clients failed forwarding verification.", "View clients");
+  push(input.forwardingNotConfigured, "warning", "forwarding_not_configured", "Forwarding not configured", "Clients have Lead Recovery enabled but forwarding is not verified.", "View clients");
+  push(input.waitingForVerification, "warning", "waiting_for_verification", "Verification pending", "Clients started setup but have not completed verification.", "View clients");
+  push(input.needsFollowUp, "warning", "needs_follow_up", "Leads needing follow-up", "Leads are waiting for an owner decision or next step.", "View leads");
+  push(input.noOwnerAction, "warning", "no_owner_action", "Owner not notified", "Some leads do not have an owner notification event recorded.", "View leads");
+  push(input.deliveryFailures, "warning", "delivery_failures", "SMS delivery issues", "Some Lead Recovery SMS events failed in the selected range.", "View logs");
+  push(input.noActivityClients, "info", "no_activity_after_setup", "No activity after setup", "Verified clients have no missed-call or lead activity in the selected range.", "View clients");
+  if (input.enabledClients === 0) {
+    items.push({
+      id: "no_clients_enabled",
+      severity: "info",
+      type: "no_clients_enabled",
+      title: "No clients have Lead Recovery active yet",
+      description: "Clients will appear here after setup is enabled or verified.",
+      count: 0,
+      actionType: "View clients",
+    });
+  }
+  return items;
+}
+
+function buildLeadRecoveryClientRows(input: {
+  tenants: TenantRow[];
+  settingsByTenant: Map<string, Record<string, unknown>>;
+  leads: Record<string, unknown>[];
+  events: Record<string, unknown>[];
+  tenantName: Map<string, string>;
+}) {
+  return input.tenants.map((tenant) => {
+    const tenantId = String(tenant.tenant_id ?? "");
+    const setting = input.settingsByTenant.get(tenantId);
+    const tenantLeads = input.leads.filter((lead) => String(lead.tenant_id) === tenantId);
+    const tenantEvents = input.events.filter((event) => String(event.tenant_id) === tenantId);
+    const setupStatus = leadRecoverySetupStatus(setting);
+    const needsFollowUp = tenantLeads.filter((lead) => ["new", "auto_contacted", "responded", "qualified"].includes(String(lead.status))).length;
+    const setupBroken = Boolean(setting?.enabled === true && (!setting.twilio_phone_number || ["failed", "error"].includes(String(setting.forwarding_status ?? setting.verification_status ?? "").toLowerCase())));
+    const active = setting ? leadRecoveryIsActive(setting) : false;
+    const lastActivityAt = [...tenantLeads, ...tenantEvents]
+      .map((row) => String(row.last_message_at ?? row.created_at ?? ""))
+      .filter(Boolean)
+      .sort()
+      .at(-1);
+    const health = setupBroken
+      ? "critical"
+      : setting?.enabled === true && (!active || needsFollowUp > 0 || !lastActivityAt)
+        ? "warning"
+        : active
+          ? "healthy"
+          : "inactive";
+    return {
+      tenantId,
+      tenant_id: tenantId,
+      businessName: input.tenantName.get(tenantId) ?? String(tenant.business_name ?? "Client"),
+      ownerEmail: tenant.email ?? tenant.owner_email ?? null,
+      health,
+      setupStatus,
+      missedCalls: tenantEvents.filter((event) => event.event_type === "missed_call_received").length,
+      leadsQualified: tenantLeads.filter((lead) => lead.status === "qualified").length,
+      bookedLeads: tenantLeads.filter((lead) => lead.status === "booked").length,
+      needsFollowUp,
+      lastActivityAt: lastActivityAt ?? null,
+      openIssuesCount: [setupBroken, setting?.enabled === true && !active, needsFollowUp > 0].filter(Boolean).length,
+    };
+  });
+}
+
+function leadRecoverySetupStatus(setting?: Record<string, unknown>) {
+  if (!setting) return "disabled";
+  if (setting.enabled !== true) return "disabled";
+  if (!setting.twilio_phone_number) return "twilio number missing";
+  const status = String(setting.forwarding_status ?? setting.verification_status ?? "not_configured").toLowerCase();
+  if (["active", "verified"].includes(status)) return "verified";
+  if (["waiting_for_verification", "pending"].includes(status)) return "waiting for verification";
+  if (["failed", "error"].includes(status)) return "error";
+  if (status === "skipped") return "disabled";
+  return "forwarding not configured";
+}
+
+function buildLeadRecoveryRecentActivity(input: {
+  leads: Record<string, unknown>[];
+  messages: Record<string, unknown>[];
+  events: Record<string, unknown>[];
+  tenantName: Map<string, string>;
+}) {
+  const leadById = new Map(input.leads.map((lead) => [String(lead.id), lead]));
+  const eventRows = input.events.map((event) => ({
+    id: event.id,
+    tenantId: event.tenant_id,
+    tenant_id: event.tenant_id,
+    businessName: input.tenantName.get(String(event.tenant_id)) ?? "Client",
+    eventType: event.event_type,
+    title: leadRecoveryEventTitle(String(event.event_type ?? "lead_event")),
+    description: "",
+    status: String(event.status ?? event.event_type ?? "event").toLowerCase().includes("fail") ? "failed" : "completed",
+    createdAt: event.created_at,
+    created_at: event.created_at,
+    leadId: event.lead_id ?? null,
+    leadLabel: safeLeadLabel(leadById.get(String(event.lead_id ?? ""))),
+  }));
+  const messageRows = input.messages.map((message) => ({
+    id: message.id,
+    tenantId: message.tenant_id,
+    tenant_id: message.tenant_id,
+    businessName: input.tenantName.get(String(message.tenant_id)) ?? "Client",
+    eventType: message.direction === "outbound" ? "textback_sent" : "caller_replied",
+    title: message.direction === "outbound" ? "Text-back sent" : "Caller replied",
+    description: "",
+    status: "completed",
+    createdAt: message.created_at,
+    created_at: message.created_at,
+    leadId: message.lead_id ?? null,
+    leadLabel: safeLeadLabel(leadById.get(String(message.lead_id ?? ""))),
+  }));
+  const leadRows = input.leads.map((lead) => ({
+    id: `lead-${lead.id}`,
+    tenantId: lead.tenant_id,
+    tenant_id: lead.tenant_id,
+    businessName: input.tenantName.get(String(lead.tenant_id)) ?? "Client",
+    eventType: `lead_${lead.status ?? "created"}`,
+    title: leadRecoveryLeadTitle(String(lead.status ?? "created")),
+    description: String(lead.service_requested ?? ""),
+    status: lead.status ?? "new",
+    createdAt: lead.last_message_at ?? lead.updated_at ?? lead.created_at,
+    created_at: lead.last_message_at ?? lead.updated_at ?? lead.created_at,
+    leadId: lead.id,
+    leadLabel: safeLeadLabel(lead),
+  }));
+  return [...eventRows, ...messageRows, ...leadRows].sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")));
+}
+
+function leadRecoveryEventTitle(eventType: string) {
+  const labels: Record<string, string> = {
+    missed_call_received: "Missed call received",
+    owner_notified: "Owner alerted",
+    lead_recovery_verification_verified: "Setup verified",
+    lead_recovery_verification_started: "Setup verification started",
+    lead_recovery_verification_call_received: "Verification call received",
+    lead_recovery_setup_skipped: "Setup skipped",
+  };
+  return labels[eventType] ?? eventType.replaceAll("_", " ");
+}
+
+function leadRecoveryLeadTitle(status: string) {
+  const labels: Record<string, string> = {
+    qualified: "Lead qualified",
+    booked: "Lead booked",
+    lost: "Lead lost",
+    completed: "Lead completed",
+    new: "Follow-up needed",
+    auto_contacted: "Text-back intake active",
+    responded: "Caller replied",
+  };
+  return labels[status] ?? "Lead updated";
+}
+
+function safeLeadLabel(lead?: Record<string, unknown>) {
+  if (!lead) return null;
+  const name = String(lead.customer_name ?? "").trim();
+  if (name) return name;
+  return maskPhone(String(lead.customer_phone ?? ""));
+}
+
+function maskPhone(phone: string) {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length < 4) return phone ? "Masked phone" : null;
+  return `•••-•••-${digits.slice(-4)}`;
 }
 
 export async function getAdminLeadDetail(leadId: string) {
@@ -1149,6 +2391,39 @@ export async function getAdminLeadDetail(leadId: string) {
 
 export async function getAdminModuleStats(moduleId: string, filters: AdminMonitoringFilters = {}) {
   if (moduleId === "lead-recovery" || moduleId === "lead_recovery") return getAdminLeadRecoveryStats(filters);
+  if (moduleId === "reviews") {
+    const [gatheredReviews, reviewRequests] = await Promise.all([
+      loadRows("reviews", filters, { limit: 500 }),
+      loadRows("review_requests", filters, { limit: 500 }),
+    ]);
+    const gatheredRows: Record<string, unknown>[] = gatheredReviews.map((row) => ({
+      ...row,
+      record_type: "Gathered review",
+      source_display: String(row.source ?? row.provider ?? row.platform ?? "Review source"),
+    }));
+    const requestRows: Record<string, unknown>[] = reviewRequests.map((row) => ({
+      ...row,
+      record_type: "Review request",
+      source_display: String(row.channel ?? row.delivery_channel ?? "Request workflow"),
+      title: row.customer_name ?? row.customer_email ?? row.customer_phone ?? row.id,
+    }));
+    const rows: Record<string, unknown>[] = [...requestRows, ...gatheredRows].sort((a, b) => {
+      const aTime = Date.parse(String(a.created_at ?? a.updated_at ?? ""));
+      const bTime = Date.parse(String(b.created_at ?? b.updated_at ?? ""));
+      return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+    });
+    return {
+      stats: {
+        total: rows.length,
+        review_requests: reviewRequests.length,
+        gathered_reviews: gatheredReviews.length,
+        failed: rows.filter((row) => ["failed", "error"].includes(String(row.status ?? "").toLowerCase())).length,
+        active_clients: new Set(rows.map((row) => row.tenant_id).filter(Boolean)).size,
+      },
+      rows,
+      title: "Reviews",
+    };
+  }
   const tableByModule: Record<string, { table: string; dateColumn?: string; title: string }> = {
     "gbp-posting": { table: "post_history", dateColumn: "published_at", title: "GBP Posting" },
     gbp_posting: { table: "post_history", dateColumn: "published_at", title: "GBP Posting" },
@@ -1156,7 +2431,7 @@ export async function getAdminModuleStats(moduleId: string, filters: AdminMonito
     gbp_audits: { table: "listing_audits", dateColumn: "audited_at", title: "GBP Audits" },
     reviews: { table: "reviews", title: "Reviews" },
     citations: { table: "client_activity_events", title: "Citations" },
-    visibility: { table: "rank_snapshots", title: "Visibility" },
+    visibility: { table: "rank_snapshots", title: "Rank Tracking" },
     images: { table: "media_upload_requests", title: "Images" },
     qa: { table: "qna_entries", title: "Q&A" },
     "website-audits": { table: "client_activity_events", title: "Website Audits" },

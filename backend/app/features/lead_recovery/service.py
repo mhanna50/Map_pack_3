@@ -14,6 +14,7 @@ from backend.app.models.identity.organization import Organization
 from backend.app.models.lead_recovery import Lead, LeadEvent, LeadMessage, LeadNote, LeadRecoverySettings
 from backend.app.services.operations.notifications import NotificationService
 from backend.app.services.reviews.review_requests import ReviewRequestService
+from backend.app.services.integrations.health import IntegrationHealthService, sanitize_error
 
 try:
     from twilio.rest import Client as TwilioClient
@@ -537,6 +538,18 @@ class LeadRecoveryService:
         from_number = settings.TWILIO_DEFAULT_FROM_NUMBER or settings.TWILIO_FROM_NUMBER or setting.twilio_phone_number
         if not (account_sid and auth_token and TwilioClient is not None):
             logger.info("Twilio credentials are not configured; lead recovery SMS skipped")
+            IntegrationHealthService(self.db).record_failure(
+                tenant_id=setting.tenant_id,
+                integration="twilio",
+                module="lead_recovery_sms",
+                operation="send_sms",
+                error=RuntimeError("Twilio SMS credentials are not configured"),
+                title="Lead Recovery cannot send SMS",
+                message="Twilio SMS credentials are not configured. Lead Recovery text-backs are unavailable.",
+                safe_details={"tenant_id": str(setting.tenant_id), "has_from_number": bool(from_number)},
+                force_category="secret_missing",
+                force_severity="critical",
+            )
             return None
         client = TwilioClient(account_sid, auth_token)
         payload: dict[str, str] = {"to": to_number, "body": body}
@@ -546,8 +559,40 @@ class LeadRecoveryService:
             payload["from_"] = from_number
         else:
             logger.warning("No Twilio sender configured; lead recovery SMS skipped")
+            IntegrationHealthService(self.db).record_failure(
+                tenant_id=setting.tenant_id,
+                integration="twilio",
+                module="lead_recovery_sms",
+                operation="send_sms",
+                error=RuntimeError("No Twilio sender configured"),
+                title="Lead Recovery sender missing",
+                message="Lead Recovery is active but no Twilio sender is configured.",
+                safe_details={"tenant_id": str(setting.tenant_id)},
+                force_category="tenant_config_missing",
+                force_severity="critical",
+            )
             return None
-        message = client.messages.create(**payload)
+        try:
+            message = client.messages.create(**payload)
+        except Exception as exc:  # noqa: BLE001
+            IntegrationHealthService(self.db).record_failure(
+                tenant_id=setting.tenant_id,
+                integration="twilio",
+                module="lead_recovery_sms",
+                operation="send_sms",
+                error=exc,
+                title="Twilio SMS send failed",
+                message="Twilio SMS send failed. Check credentials, sender ownership, and messaging configuration.",
+                safe_details={"tenant_id": str(setting.tenant_id), "error": sanitize_error(exc)},
+                force_severity="critical",
+            )
+            raise
+        IntegrationHealthService(self.db).mark_integration_recovered(
+            tenant_id=setting.tenant_id,
+            integration="twilio",
+            module="lead_recovery_sms",
+            message="Twilio SMS send succeeded",
+        )
         return getattr(message, "sid", None)
 
     def _maybe_queue_review_request(self, lead: Lead) -> None:

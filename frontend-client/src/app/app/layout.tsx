@@ -54,7 +54,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <Link href="/" className="text-lg font-semibold">
               Map Pack 3
             </Link>
-            <LocationSwitcher orgName="Acme HVAC" locations={mockLocations} />
+            <LocationSwitcher orgName="Demo Business" locations={mockLocations} />
           </div>
           <div className="flex flex-wrap items-center gap-3 text-sm md:justify-end">
             <button className="rounded-full bg-primary px-4 py-2 font-semibold text-white">Create</button>

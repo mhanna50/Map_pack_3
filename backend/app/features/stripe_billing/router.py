@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 
@@ -20,6 +19,7 @@ from backend.app.models.identity.membership import Membership
 from backend.app.models.identity.user import User
 from backend.app.models.billing.billing_subscription import BillingSubscription
 from backend.app.models.billing.stripe_webhook_event import StripeWebhookEvent
+from backend.app.services.integrations.health import IntegrationHealthService
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,19 @@ def _normalize_billing_status(raw_status: str | None) -> str | None:
     if normalized in CANONICAL_BILLING_STATUSES:
         return normalized
     return "canceled"
+
+
+def _safe_stripe_object_summary(obj: dict) -> dict[str, object]:
+    metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
+    return {
+        "id": obj.get("id"),
+        "object": obj.get("object"),
+        "mode": obj.get("mode"),
+        "customer": obj.get("customer") if isinstance(obj.get("customer"), str) else None,
+        "subscription": obj.get("subscription") if isinstance(obj.get("subscription"), str) else None,
+        "client_reference_id": obj.get("client_reference_id"),
+        "metadata_keys": sorted(str(key) for key in metadata.keys()),
+    }
 
 
 class CheckoutRequest(BaseModel):
@@ -396,9 +409,28 @@ async def stripe_webhook(
         event = billing.verify_webhook(body, stripe_signature)
     except ValueError as exc:
         logger.error("Stripe webhook verification failed: %s", exc)
+        IntegrationHealthService(db).record_failure(
+            tenant_id=None,
+            integration="stripe",
+            module="billing_webhooks",
+            operation="verify_webhook",
+            error=exc,
+            title="Stripe webhook signature invalid",
+            message="Stripe webhook signature invalid. Check STRIPE_WEBHOOK_SECRET and endpoint configuration.",
+            safe_details={"has_signature": bool(stripe_signature), "body_size": len(body)},
+            force_category="webhook_signature_invalid",
+            force_severity="critical",
+        )
         raise HTTPException(status_code=400, detail="Invalid webhook signature") from exc
     event_type = event["type"]
     event_id = str(event.get("id") or "")
+    IntegrationHealthService(db).mark_integration_recovered(
+        tenant_id=None,
+        integration="stripe",
+        module="billing_webhooks",
+        message="Stripe webhook signature verified",
+        safe_details={"event_type": event_type, "event_id": event_id},
+    )
     logger.info("Stripe webhook received: %s", event_type)
     if event_id and not _record_stripe_webhook_event_once(db, event_id=event_id, event_type=event_type, event=event):
         logger.info("Skipping duplicate Stripe webhook event %s (%s)", event_id, event_type)
@@ -423,7 +455,7 @@ async def stripe_webhook(
         # provision by email, but onboarding Checkout must map to an existing tenant.
         email = checkout_data.get("email")
         if not email:
-            logger.warning("Stripe session missing customer email: %s", json.dumps(session_data))
+            logger.warning("Stripe session missing customer email: %s", _safe_stripe_object_summary(session_data))
             return {"received": True}
         provisioner = ClientProvisioningService(db)
         provisioner.provision_paid_customer(
