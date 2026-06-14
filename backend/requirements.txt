@@ -23,7 +23,7 @@ PyYAML==6.0.3
 PyJWT[crypto]==2.12.1
 pyasn1==0.6.3
 SQLAlchemy==2.0.45
-starlette==1.0.1
+starlette==1.1.0
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 stripe==10.10.0
